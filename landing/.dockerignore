@@ -1,0 +1,42 @@
+# Build output / dependencies — rebuilt inside the image.
+node_modules
+.next
+out
+build
+dist
+coverage
+
+# Local env files — Dokploy injects env at container start, we never
+# want developer `.env.local` leaking into a prod image.
+.env
+.env.*
+!.env.example
+
+# VCS + IDE.
+.git
+.gitignore
+.gitattributes
+.github
+.idea
+.vscode
+*.swp
+*.swo
+
+# Docs / misc — not needed at runtime.
+README.md
+Dockerfile
+.dockerignore
+
+# Vercel residue from the previous deploy target.
+.vercel
+
+# OS junk.
+.DS_Store
+Thumbs.db
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# TS build info — regenerated.
+*.tsbuildinfo
+next-env.d.ts

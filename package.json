@@ -1,0 +1,12 @@
+{
+  "name": "empleo-automatico-mx",
+  "version": "0.1.0",
+  "description": "Chrome extension: AI copilot for applying to jobs in Mexico (OCC Mundial first).",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint": "echo 'No linter configured yet'",
+    "fetch-pdfjs": "node scripts/fetch-pdfjs.mjs"
+  },
+  "devDependencies": {}
+}

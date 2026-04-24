@@ -1,0 +1,10 @@
+node_modules/
+.DS_Store
+*.log
+.env
+.env.local
+dist/
+build/
+# Don't commit user CVs by accident
+test-cvs/
+*.cv.pdf

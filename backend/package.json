@@ -1,0 +1,35 @@
+{
+  "name": "@skybrandmx/empleo-backend",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Backend API for Empleo Automatico MX - auth, Gemini proxy, Conekta subscriptions (Node + SQLite + Dokploy)",
+  "type": "module",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "migrate": "node dist/scripts/migrate.js",
+    "migrate:dev": "tsx src/scripts/migrate.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.13.7",
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^11.7.0",
+    "hono": "^4.6.14",
+    "jsonwebtoken": "^9.0.2",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/jsonwebtoken": "^9.0.7",
+    "@types/node": "^20.17.10",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

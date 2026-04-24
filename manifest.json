@@ -1,0 +1,48 @@
+{
+  "manifest_version": 3,
+  "name": "Empleo Automático MX",
+  "version": "0.1.0",
+  "description": "Copiloto IA para postularte a empleos en México con CV + carta personalizada por vacante.",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://www.occ.com.mx/*",
+    "https://occ.com.mx/*",
+    "https://api.empleo.skybrandmx.com/*",
+    "http://localhost:8787/*"
+  ],
+  "background": {
+    "service_worker": "background/service-worker.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.occ.com.mx/*",
+        "https://occ.com.mx/*"
+      ],
+      "js": ["content/occ.js"],
+      "css": ["content/occ.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "Empleo Automático"
+  },
+  "options_page": "options/options.html",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["lib/schemas.js", "vendor/pdf.min.js", "vendor/pdf.worker.min.js"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

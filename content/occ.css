@@ -1,0 +1,170 @@
+/* content/occ.css — Empleo Automático MX
+ * All injected classes prefixed `eamx-` to avoid collision with OCC styles.
+ * Respects prefers-reduced-motion and prefers-color-scheme.
+ */
+
+/* --- FAB ----------------------------------------------------------------- */
+.eamx-fab {
+  position: fixed; right: 24px; bottom: 24px; z-index: 2147483600;
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 14px 20px; min-height: 56px;
+  border: 0; border-radius: 9999px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff; cursor: pointer;
+  font: 600 15px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  letter-spacing: 0.01em;
+  box-shadow: 0 14px 32px rgba(102, 126, 234, 0.4), 0 4px 10px rgba(0, 0, 0, 0.15);
+  transition: transform 150ms ease, box-shadow 150ms ease, opacity 150ms ease;
+}
+.eamx-fab:hover { transform: scale(1.05); }
+.eamx-fab:active { transform: scale(0.97); }
+.eamx-fab:focus-visible { outline: 3px solid rgba(255, 255, 255, 0.9); outline-offset: 2px; }
+.eamx-fab__icon { font-size: 18px; line-height: 1; }
+.eamx-fab__label { white-space: nowrap; }
+.eamx-fab--busy { cursor: progress; opacity: 0.85; }
+.eamx-fab--busy .eamx-fab__icon { animation: eamx-spin 1s linear infinite; display: inline-block; }
+.eamx-fab--busy .eamx-fab__label::after { content: "…"; }
+@keyframes eamx-spin { to { transform: rotate(360deg); } }
+
+@media (max-width: 640px) {
+  .eamx-fab { padding: 0; width: 56px; height: 56px; justify-content: center; gap: 0; }
+  .eamx-fab__label { display: none; }
+  .eamx-fab__icon { font-size: 22px; }
+}
+
+/* --- Side panel ---------------------------------------------------------- */
+.eamx-panel {
+  position: fixed; top: 0; right: 0; width: 400px; max-width: 100vw; min-width: 320px; height: 100vh;
+  z-index: 2147483601; display: flex; flex-direction: column;
+  background: #fff; color: #111827;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  box-shadow: -16px 0 40px rgba(0, 0, 0, 0.18);
+  transform: translateX(100%);
+  transition: transform 260ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.eamx-panel--open { transform: translateX(0); }
+
+.eamx-panel__header {
+  padding: 20px 24px 16px; border-bottom: 1px solid #e5e7eb;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff;
+}
+.eamx-panel__title { font-size: 17px; font-weight: 700; line-height: 1.3; word-break: break-word; }
+.eamx-panel__company { margin-top: 4px; font-size: 13px; opacity: 0.9; }
+
+.eamx-panel__body {
+  flex: 1; overflow-y: auto; padding: 20px 24px;
+  display: flex; flex-direction: column; gap: 10px;
+  font-size: 14px; line-height: 1.5;
+}
+.eamx-panel__body label { font-size: 13px; color: #4b5563; }
+
+.eamx-panel__warning {
+  padding: 10px 12px; border-radius: 8px;
+  background: #fef3c7; color: #92400e; border: 1px solid #fde68a;
+  font-size: 13px; line-height: 1.4;
+}
+
+.eamx-panel__footer {
+  display: flex; gap: 8px; padding: 14px 24px;
+  border-top: 1px solid #e5e7eb; background: #f9fafb;
+  position: sticky; bottom: 0;
+}
+
+.eamx-textarea {
+  width: 100%; min-height: 220px; resize: vertical;
+  padding: 12px; border: 1px solid #d1d5db; border-radius: 8px;
+  background: #fff; color: #111827;
+  font: 14px/1.5 inherit; box-sizing: border-box;
+  transition: border-color 120ms, box-shadow 120ms;
+}
+.eamx-textarea:focus { outline: none; border-color: #667eea; box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.25); }
+
+.eamx-answer {
+  border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px 12px;
+  background: #f9fafb; margin-top: 8px;
+}
+.eamx-answer__label {
+  font-size: 12px; color: #6b7280; text-transform: uppercase;
+  letter-spacing: 0.03em; font-weight: 600; margin-bottom: 4px;
+}
+.eamx-answer__value {
+  font-size: 13px; line-height: 1.5; cursor: copy;
+  white-space: pre-wrap; word-break: break-word;
+}
+.eamx-answer__value:hover { background: rgba(102, 126, 234, 0.06); }
+
+.eamx-btn {
+  flex: 1; padding: 10px 14px; border-radius: 8px; border: 0;
+  font: 600 14px inherit; cursor: pointer;
+  transition: transform 100ms, box-shadow 100ms, background 120ms;
+}
+.eamx-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.eamx-btn:active:not(:disabled) { transform: scale(0.98); }
+.eamx-btn--primary {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.35);
+}
+.eamx-btn--secondary { background: #eef2ff; color: #4338ca; }
+.eamx-btn--ghost { background: transparent; color: #6b7280; }
+.eamx-btn--ghost:hover:not(:disabled) { background: #f3f4f6; }
+
+/* --- Toast --------------------------------------------------------------- */
+.eamx-toast {
+  position: fixed; left: 24px; bottom: 24px; z-index: 2147483602;
+  max-width: 360px; padding: 12px 16px; border-radius: 10px;
+  font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: #fff; background: #374151;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.18);
+  transform: translateY(16px); opacity: 0;
+  transition: transform 250ms ease, opacity 250ms ease;
+}
+.eamx-toast--show { transform: translateY(0); opacity: 1; }
+.eamx-toast--success { background: #047857; }
+.eamx-toast--error { background: #b91c1c; }
+.eamx-toast--info { background: #374151; }
+
+.eamx-toast__action {
+  margin-left: 12px;
+  padding: 4px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: 600 13px inherit;
+  cursor: pointer;
+}
+.eamx-toast__action:hover { background: rgba(255, 255, 255, 0.15); }
+
+/* --- Submit pulse (gold highlight per spec) ------------------------------ */
+.eamx-submit-pulse {
+  position: relative; border-radius: 8px;
+  box-shadow: 0 0 0 3px gold;
+  animation: eamx-pulse 2s ease-in-out infinite;
+}
+@keyframes eamx-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px gold, 0 0 0 0 rgba(255, 215, 0, 0.55); }
+  50%      { box-shadow: 0 0 0 3px gold, 0 0 0 10px rgba(255, 215, 0, 0); }
+}
+
+/* --- Motion & dark mode -------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  .eamx-fab, .eamx-panel, .eamx-toast, .eamx-btn, .eamx-textarea { transition: none !important; }
+  .eamx-fab--busy .eamx-fab__icon, .eamx-submit-pulse { animation: none !important; }
+  .eamx-submit-pulse { box-shadow: 0 0 0 3px gold; }
+}
+
+@media (prefers-color-scheme: dark) {
+  .eamx-panel { background: #111827; color: #e5e7eb; box-shadow: -16px 0 40px rgba(0,0,0,0.6); }
+  .eamx-panel__header { border-bottom-color: #1f2937; }
+  .eamx-panel__body label { color: #9ca3af; }
+  .eamx-panel__warning { background: #3f2d08; color: #fde68a; border-color: #78541a; }
+  .eamx-panel__footer { background: #0b1220; border-top-color: #1f2937; }
+  .eamx-textarea { background: #1f2937; color: #f3f4f6; border-color: #374151; }
+  .eamx-textarea:focus { border-color: #818cf8; box-shadow: 0 0 0 3px rgba(129,140,248,0.25); }
+  .eamx-answer { background: #1f2937; border-color: #374151; }
+  .eamx-answer__label { color: #9ca3af; }
+  .eamx-answer__value:hover { background: rgba(129,140,248,0.1); }
+  .eamx-btn--secondary { background: #312e81; color: #c7d2fe; }
+  .eamx-btn--ghost { color: #9ca3af; }
+  .eamx-btn--ghost:hover:not(:disabled) { background: #1f2937; }
+}

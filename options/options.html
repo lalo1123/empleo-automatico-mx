@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="es-MX">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Opciones &middot; Empleo Autom&aacute;tico MX</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <header class="page-header">
+      <div class="logo-wrap">
+        <div class="logo-mark" aria-hidden="true">E</div>
+        <div>
+          <div class="logo-title">Empleo Autom&aacute;tico MX &mdash; por SkyBrandMX</div>
+          <div class="logo-sub">Opciones <span id="versionTag"></span></div>
+        </div>
+      </div>
+    </header>
+
+    <main class="container">
+      <!-- ============ Card 1A: Login / Signup (when logged out) ============ -->
+      <section class="card" id="authCard" aria-labelledby="authHeading">
+        <h2 id="authHeading">Tu cuenta de Empleo Autom&aacute;tico</h2>
+        <p class="help">
+          Inicia sesi&oacute;n con tu cuenta de SkyBrandMX, o
+          <a href="https://skybrandmx.com/signup" target="_blank" rel="noreferrer">crea tu cuenta gratis</a>
+          si a&uacute;n no tienes una. Plan Gratis incluye 3 postulaciones al mes.
+        </p>
+
+        <div class="tab-row" role="tablist" aria-label="Acceder o crear cuenta">
+          <button type="button" class="tab active" id="tabLogin" role="tab" aria-selected="true">Iniciar sesi&oacute;n</button>
+          <button type="button" class="tab" id="tabSignup" role="tab" aria-selected="false">Crear cuenta</button>
+        </div>
+
+        <!-- Login form -->
+        <div id="loginForm" class="auth-form">
+          <label class="field-label" for="loginEmail">Correo</label>
+          <input id="loginEmail" type="email" autocomplete="email" placeholder="tu@correo.com" />
+
+          <label class="field-label" for="loginPassword">Contrase&ntilde;a</label>
+          <input id="loginPassword" type="password" autocomplete="current-password" placeholder="M&iacute;n 8 caracteres" />
+
+          <div class="actions">
+            <button type="button" id="loginBtn">Iniciar sesi&oacute;n</button>
+            <span id="loginStatus" class="status" role="status" aria-live="polite"></span>
+          </div>
+        </div>
+
+        <!-- Signup form -->
+        <div id="signupForm" class="auth-form hidden">
+          <label class="field-label" for="signupName">Nombre</label>
+          <input id="signupName" type="text" autocomplete="name" placeholder="Juan P&eacute;rez" />
+
+          <label class="field-label" for="signupEmail">Correo</label>
+          <input id="signupEmail" type="email" autocomplete="email" placeholder="tu@correo.com" />
+
+          <label class="field-label" for="signupPassword">Contrase&ntilde;a</label>
+          <input id="signupPassword" type="password" autocomplete="new-password" placeholder="M&iacute;n 8 caracteres" />
+
+          <div class="actions">
+            <button type="button" id="signupBtn">Crear cuenta gratis</button>
+            <span id="signupStatus" class="status" role="status" aria-live="polite"></span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ Card 1B: Account summary (when logged in) ============ -->
+      <section class="card hidden" id="accountCard" aria-labelledby="accountHeading">
+        <div class="account-header">
+          <div>
+            <h2 id="accountHeading">Hola, <span id="accountName">&mdash;</span></h2>
+            <div class="subtle" id="accountEmail">&mdash;</div>
+          </div>
+          <div>
+            <span class="plan-badge" id="planBadge">Plan Gratis</span>
+          </div>
+        </div>
+
+        <div class="usage-row" id="usageRow">
+          <div class="usage-label">Postulaciones este mes</div>
+          <div class="usage-value">
+            <span id="usageCurrent">0</span> <span class="usage-sep">/</span> <span id="usageLimit">3</span>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button type="button" id="manageBillingBtn">Gestionar suscripci&oacute;n / Upgrade</button>
+          <button type="button" class="secondary" id="logoutBtn">Cerrar sesi&oacute;n</button>
+          <span id="accountStatus" class="status" role="status" aria-live="polite"></span>
+        </div>
+      </section>
+
+      <!-- ============ Card 2: CV ============ -->
+      <section class="card" aria-labelledby="cvHeading">
+        <h2 id="cvHeading">Mi CV</h2>
+        <p class="help">
+          Subimos tu CV en PDF, extraemos el texto localmente y lo mandamos a
+          nuestro servidor para estructurarlo. Puedes editarlo antes de guardar.
+        </p>
+
+        <div id="cvExistingBanner" class="banner hidden">
+          <div>
+            <strong id="cvExistingName"></strong>
+            <span class="subtle" id="cvExistingWhen"></span>
+          </div>
+          <button type="button" class="secondary small" id="cvReplace">Reemplazar</button>
+        </div>
+
+        <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="Subir CV en PDF">
+          <div class="dz-title">Arrastra tu CV (PDF) aqu&iacute;</div>
+          <div class="dz-sub">o haz clic para seleccionar. M&aacute;x 10 MB.</div>
+          <input id="fileInput" type="file" accept="application/pdf,.pdf" hidden />
+        </div>
+
+        <div id="cvProgress" class="progress hidden" role="status" aria-live="polite">
+          <div class="spinner" aria-hidden="true"></div>
+          <span id="cvProgressText">Analizando&hellip;</span>
+        </div>
+
+        <div id="cvPreview" class="preview hidden">
+          <div class="preview-grid">
+            <div>
+              <div class="kv-label">Nombre</div>
+              <div class="kv-value" id="pvName">&mdash;</div>
+            </div>
+            <div>
+              <div class="kv-label">Puesto actual</div>
+              <div class="kv-value" id="pvRole">&mdash;</div>
+            </div>
+            <div>
+              <div class="kv-label">A&ntilde;os de experiencia</div>
+              <div class="kv-value" id="pvYears">&mdash;</div>
+            </div>
+            <div>
+              <div class="kv-label">Top skills</div>
+              <div class="kv-value" id="pvSkills">&mdash;</div>
+            </div>
+          </div>
+
+          <details class="raw-details">
+            <summary>Editar JSON crudo (avanzado)</summary>
+            <textarea id="rawJson" rows="12" spellcheck="false"></textarea>
+            <div class="subtle small-gap">
+              Edita con cuidado. Debe ser JSON v&aacute;lido que respete el schema
+              <code>UserProfile</code>.
+            </div>
+          </details>
+
+          <div class="actions">
+            <button type="button" id="saveProfile">Guardar perfil</button>
+            <span id="cvStatus" class="status" role="status" aria-live="polite"></span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ Card 3: Settings ============ -->
+      <section class="card" aria-labelledby="settingsHeading">
+        <h2 id="settingsHeading">Configuraci&oacute;n</h2>
+
+        <label class="field-label" for="language">Idioma de la carta</label>
+        <select id="language">
+          <option value="es">Espa&ntilde;ol</option>
+          <option value="en">English</option>
+        </select>
+
+        <div class="toggle-row">
+          <label class="switch">
+            <input id="autoApprove" type="checkbox" />
+            <span class="slider" aria-hidden="true"></span>
+          </label>
+          <div>
+            <div class="toggle-title">Aprobaci&oacute;n autom&aacute;tica</div>
+            <div class="subtle">
+              Recomendado: OFF. Siempre revisa antes de enviar.
+            </div>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button type="button" id="saveSettings">Guardar configuraci&oacute;n</button>
+          <span id="settingsStatus" class="status" role="status" aria-live="polite"></span>
+        </div>
+
+        <hr class="divider" />
+
+        <div class="row-between">
+          <div>
+            <div class="field-label">Exportar / Importar perfil</div>
+            <div class="subtle">Respaldo local en JSON.</div>
+          </div>
+          <div class="actions">
+            <button type="button" class="secondary" id="exportProfile">Exportar</button>
+            <button type="button" class="secondary" id="importProfile">Importar</button>
+            <input id="importInput" type="file" accept="application/json,.json" hidden />
+          </div>
+        </div>
+      </section>
+
+      <footer class="page-footer">
+        <span id="footerVersion"></span> &middot;
+        <a href="https://skybrandmx.com" target="_blank" rel="noreferrer">skybrandmx.com</a>
+        &middot; Human-in-the-loop &middot; Hecho con cari&ntilde;o en M&eacute;xico.
+      </footer>
+    </main>
+
+    <!-- pdf.js (UMD). Agent A may ship either .js or .mjs; options.js handles both. -->
+    <script src="../vendor/pdf.min.js" onerror="window.__pdfScriptMissing = true"></script>
+    <script type="module" src="options.js"></script>
+  </body>
+</html>
