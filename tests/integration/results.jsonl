@@ -1,0 +1,30 @@
+{"id":1,"name":"Signup happy path","result":"PASS","status":"201","time_s":"0.316786","note":"token+plan=free"}
+{"id":2,"name":"Signup duplicate email","result":"PASS","status":"409","time_s":"0.227658","note":"409 EMAIL_TAKEN"}
+{"id":3,"name":"Signup weak password","result":"PASS","status":"400","time_s":"0.213677","note":"400 validation"}
+{"id":4,"name":"Signup invalid email","result":"PASS","status":"400","time_s":"0.217898","note":"400 validation"}
+{"id":5,"name":"Login wrong password","result":"PASS","status":"401","time_s":"0.305076","note":"401"}
+{"id":6,"name":"Login non-existent user","result":"PASS","status":"401","time_s":"0.214333","note":"401 generic"}
+{"id":7,"name":"Logout (204)","result":"PASS","status":"204","time_s":"0.224349","note":"revoked"}
+{"id":8,"name":"Revoked token returns 401 revocada","result":"PASS","status":"401","time_s":"0.211700","note":"401+revocada"}
+{"id":9,"name":"/account valid token","result":"PASS","status":"200","time_s":"0.226236","note":"shape ok"}
+{"id":10,"name":"/account without token","result":"PASS","status":"401","time_s":"0.216580","note":"401"}
+{"id":11,"name":"/account malformed token","result":"PASS","status":"401","time_s":"0.222085","note":"401"}
+{"id":12,"name":"parse-cv returns UserProfile","result":"PASS","status":"200","time_s":"7.491232","note":"profile shape ok"}
+{"id":13,"name":"generate cover letter","result":"FAIL","status":"502","time_s":"6.603761","note":"body={\"ok\":false,\"error\":{\"code\":\"UPSTREAM_ERROR\",\"message\":\"La IA devolvió JSON inválido.\"}}"}
+{"id":14,"name":"Plan limit enforcement (free=3)","result":"FAIL","status":"-","time_s":"0","note":"blocked by upstream generate failure: call 1 returned 502 body={\"ok\":false,\"error\":{\"code\":\"UPSTREAM_ERROR\",\"message\":\"La IA devolvió JSON inválido.\"}}"}
+{"id":15,"name":"generate without profile -> 400","result":"PASS","status":"400","time_s":"0.225026","note":"validation error"}
+{"id":16,"name":"billing checkout pro/monthly","result":"PASS","status":"500","time_s":"0.218409","note":"plan id not configured (acceptable)"}
+{"id":17,"name":"billing checkout invalid plan","result":"PASS","status":"400","time_s":"0.226461","note":"400"}
+{"id":18,"name":"webhook without signature","result":"PASS","status":"401","time_s":"0.212546","note":"401 sig invalid"}
+{"id":19,"name":"CORS preflight allowed origin","result":"PASS","status":"204","time_s":"0","note":"ACAO=https://empleo.skybrandmx.com"}
+{"id":20,"name":"CORS preflight rejects evil.com","result":"PASS","status":"204","time_s":"0","note":"no ACAO (good)"}
+{"id":21,"name":"Landing /","result":"PASS","status":"200","time_s":"0.425086","note":"contains brand"}
+{"id":22,"name":"Landing /signup","result":"PASS","status":"200","time_s":"0.302888","note":"200"}
+{"id":23,"name":"Landing /login","result":"PASS","status":"200","time_s":"0.299368","note":"200"}
+{"id":24,"name":"Landing /privacy (LFPDPPP)","result":"PASS","status":"200","time_s":"0.333158","note":"ok"}
+{"id":25,"name":"Landing /terms","result":"PASS","status":"200","time_s":"0.355677","note":"200"}
+{"id":26,"name":"Landing /api/health","result":"PASS","status":"200","time_s":"0.211637","note":"ok:true"}
+{"id":27,"name":"Landing HTML meta tags","result":"PASS","status":"200","time_s":"0.385520","note":"title=1 desc=1 viewport=1"}
+{"id":28,"name":"SQL injection on signup email","result":"PASS","status":"400","time_s":"0.223212","note":"400 validation (sanitized)"}
+{"id":29,"name":"XSS name JSON-escaped","result":"PASS","status":"200","time_s":"0.224486","note":"JSON content-type preserved, no html"}
+{"id":30,"name":"Account cannot be spoofed by header","result":"PASS","status":"401","time_s":"0.215694","note":"401 (authz via JWT only)"}

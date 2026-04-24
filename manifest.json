@@ -11,6 +11,8 @@
   "host_permissions": [
     "https://www.occ.com.mx/*",
     "https://occ.com.mx/*",
+    "https://www.computrabajo.com.mx/*",
+    "https://computrabajo.com.mx/*",
     "https://api.empleo.skybrandmx.com/*",
     "http://localhost:8787/*"
   ],
@@ -25,6 +27,15 @@
         "https://occ.com.mx/*"
       ],
       "js": ["content/occ.js"],
+      "css": ["content/occ.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.computrabajo.com.mx/*",
+        "https://computrabajo.com.mx/*"
+      ],
+      "js": ["content/computrabajo.js"],
       "css": ["content/occ.css"],
       "run_at": "document_idle"
     }

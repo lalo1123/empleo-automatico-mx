@@ -214,7 +214,10 @@ export async function generateCoverLetter(
     contents: [{ role: "user", parts: [{ text: userText }] }],
     generationConfig: {
       temperature: 0.7,
-      maxOutputTokens: 1200,
+      // 2.5 burns "thinking" tokens before the response — disable thinking and
+      // size the budget for the JSON cover letter (~600 tokens worst case).
+      maxOutputTokens: 3000,
+      thinkingConfig: { thinkingBudget: 0 },
       responseMimeType: "application/json",
       responseJsonSchema: COVER_LETTER_SCHEMA
     }
@@ -257,7 +260,8 @@ export async function parseCvText(args: ParseCvArgs): Promise<ParseCvResult> {
     contents: [{ role: "user", parts: [{ text: `Texto del CV:\n\n${rawText}` }] }],
     generationConfig: {
       temperature: 0.1,
-      maxOutputTokens: 2500,
+      maxOutputTokens: 4000,
+      thinkingConfig: { thinkingBudget: 0 },
       responseMimeType: "application/json",
       responseJsonSchema: PARSE_CV_SCHEMA
     }

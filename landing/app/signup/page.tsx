@@ -2,14 +2,22 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Nav } from "@/components/nav";
 import { Footer } from "@/components/footer";
+import { Turnstile } from "@/components/turnstile";
 import { signup, ApiCallError } from "@/lib/api";
-import { setSessionCookie, getSessionToken } from "@/lib/auth";
+import {
+  setSessionCookie,
+  getSessionToken,
+  setVerificationUrlCookie,
+} from "@/lib/auth";
+import { pageMetadata } from "@/lib/seo";
 import type { Metadata } from "next";
 
-export const metadata: Metadata = {
-  title: "Crear cuenta",
-  description: "Crea tu cuenta en Empleo Automático MX. Gratis, sin tarjeta.",
-};
+export const metadata: Metadata = pageMetadata({
+  title: "Crea tu cuenta gratis",
+  description:
+    "Regístrate gratis en Empleo Automático MX y postúlate a más empleos en OCC Mundial con cartas de presentación generadas por IA. Sin tarjeta de crédito.",
+  path: "/signup",
+});
 
 interface PageProps {
   searchParams: Promise<{ error?: string }>;
@@ -21,6 +29,11 @@ async function createAccountAction(formData: FormData) {
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const password = String(formData.get("password") ?? "");
   const name = String(formData.get("name") ?? "").trim();
+  // Turnstile injects this hidden input once the user solves the challenge.
+  // When the widget is disabled (dev / no sitekey) the field is empty; we
+  // pass undefined and the backend short-circuits too.
+  const rawTurnstile = String(formData.get("cf-turnstile-response") ?? "");
+  const turnstileToken = rawTurnstile.length > 0 ? rawTurnstile : undefined;
 
   if (!email || !password) {
     redirect("/signup?error=missing");
@@ -30,26 +43,41 @@ async function createAccountAction(formData: FormData) {
   }
 
   try {
-    const { token } = await signup({
+    const res = await signup({
       email,
       password,
       name: name || undefined,
+      turnstileToken,
     });
-    await setSessionCookie(token);
+    await setSessionCookie(res.token);
+    // Surface the verification URL via cookie so /account can show the
+    // "verify your email" banner. TODO: remove once email delivery lands.
+    if (res.verification?.verificationUrl) {
+      await setVerificationUrlCookie(res.verification.verificationUrl);
+    }
   } catch (err) {
     if (err instanceof ApiCallError) {
       if (err.code === "EMAIL_TAKEN") redirect("/signup?error=taken");
+      if (err.code === "EMAIL_NOT_ALLOWED") redirect("/signup?error=disposable");
+      if (err.code === "CAPTCHA_FAILED") redirect("/signup?error=captcha");
+      if (err.code === "RATE_LIMITED") redirect("/signup?error=rate");
       redirect(`/signup?error=${encodeURIComponent(err.code)}`);
     }
     redirect("/signup?error=unknown");
   }
-  redirect("/account");
+  redirect("/account?msg=verify_pending");
 }
 
 const ERROR_MESSAGES: Record<string, string> = {
   missing: "Completa email y contraseña.",
   weak: "La contraseña debe tener al menos 8 caracteres.",
   taken: "Ya existe una cuenta con ese email. Intenta iniciar sesión.",
+  disposable:
+    "Por favor usa un correo electrónico permanente (no temporales / desechables).",
+  captcha:
+    "No pudimos verificar que no eres un bot. Recarga la página e intenta de nuevo.",
+  rate:
+    "Demasiados intentos de registro. Intenta más tarde.",
   NETWORK_ERROR:
     "No pudimos conectar con el servidor. Verifica tu internet o intenta de nuevo.",
   unknown: "No pudimos crear tu cuenta. Intenta de nuevo.",
@@ -154,6 +182,10 @@ export default async function SignupPage({ searchParams }: PageProps) {
                 Mínimo 8 caracteres.
               </p>
             </div>
+
+            {/* Cloudflare Turnstile widget. Renders nothing when
+                NEXT_PUBLIC_TURNSTILE_SITEKEY is unset (dev mode). */}
+            <Turnstile action="signup" />
 
             <button
               type="submit"

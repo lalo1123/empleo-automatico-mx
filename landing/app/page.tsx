@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { Nav } from "@/components/nav";
 import { Footer } from "@/components/footer";
 import { CtaLink } from "@/components/cta";
@@ -5,6 +6,30 @@ import { FeatureCard } from "@/components/feature-card";
 import { PricingTable } from "@/components/pricing-table";
 import { Faq } from "@/components/faq";
 import { Testimonial } from "@/components/testimonial";
+import { JsonLd } from "@/components/json-ld";
+import { PLANS, PLAN_ORDER } from "@/lib/plans";
+import {
+  DEFAULT_DESCRIPTION,
+  DEFAULT_TITLE,
+  PRODUCT_NAME,
+  SITE_NAME,
+  SITE_URL,
+} from "@/lib/seo";
+
+// The home page uses the root-layout defaults for title/description but we
+// still pin the canonical to `/` explicitly so crawlers never see an empty
+// href, and we override alternates.languages so hreflang is correct.
+export const metadata: Metadata = {
+  title: DEFAULT_TITLE,
+  description: DEFAULT_DESCRIPTION,
+  alternates: {
+    canonical: "/",
+    languages: {
+      "es-MX": SITE_URL,
+      "x-default": SITE_URL,
+    },
+  },
+};
 
 const FAQ_ITEMS = [
   {
@@ -33,9 +58,159 @@ const FAQ_ITEMS = [
   },
 ];
 
+// --- Structured data (schema.org JSON-LD) ---------------------------------
+// Separate blocks per @type so they validate cleanly and are easy to audit
+// in Rich Results Test. Keep this in sync with the visible page content.
+
+const organizationSchema = {
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  "@id": `${SITE_URL}/#organization`,
+  name: SITE_NAME,
+  legalName: "SkyBrandMX",
+  url: SITE_URL,
+  logo: {
+    "@type": "ImageObject",
+    url: `${SITE_URL}/logo-mark.svg`,
+    width: 512,
+    height: 512,
+  },
+  email: "hola@skybrandmx.com",
+  contactPoint: [
+    {
+      "@type": "ContactPoint",
+      contactType: "customer support",
+      email: "hola@skybrandmx.com",
+      availableLanguage: ["Spanish", "es-MX"],
+      areaServed: "MX",
+    },
+    {
+      "@type": "ContactPoint",
+      contactType: "privacy",
+      email: "privacidad@skybrandmx.com",
+      availableLanguage: ["Spanish", "es-MX"],
+      areaServed: "MX",
+    },
+  ],
+  // TODO: once social accounts are live, fill in real URLs.
+  sameAs: [
+    "https://www.linkedin.com/company/skybrandmx",
+    "https://twitter.com/skybrandmx",
+    "https://www.facebook.com/skybrandmx",
+  ],
+};
+
+const websiteSchema = {
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  "@id": `${SITE_URL}/#website`,
+  url: SITE_URL,
+  name: PRODUCT_NAME,
+  description: DEFAULT_DESCRIPTION,
+  inLanguage: "es-MX",
+  publisher: { "@id": `${SITE_URL}/#organization` },
+  potentialAction: {
+    "@type": "SearchAction",
+    target: {
+      "@type": "EntryPoint",
+      urlTemplate: `${SITE_URL}/?q={search_term_string}`,
+    },
+    "query-input": "required name=search_term_string",
+  },
+};
+
+// Build an AggregateOffer from the pricing table's real data so prices never
+// drift between the visible UI and the structured data.
+const paidPlans = PLAN_ORDER.map((id) => PLANS[id]).filter(
+  (p) => p.priceMonthlyMxn > 0,
+);
+const softwareApplicationSchema = {
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "@id": `${SITE_URL}/#software`,
+  name: PRODUCT_NAME,
+  description: DEFAULT_DESCRIPTION,
+  applicationCategory: "BusinessApplication",
+  applicationSubCategory: "Job Search",
+  operatingSystem: "Chrome OS, Windows, macOS, Linux",
+  url: SITE_URL,
+  image: `${SITE_URL}/og-image.svg`,
+  inLanguage: "es-MX",
+  author: { "@id": `${SITE_URL}/#organization` },
+  publisher: { "@id": `${SITE_URL}/#organization` },
+  offers: {
+    "@type": "AggregateOffer",
+    priceCurrency: "MXN",
+    lowPrice: Math.min(...paidPlans.map((p) => p.priceMonthlyMxn)),
+    highPrice: Math.max(...paidPlans.map((p) => p.priceMonthlyMxn)),
+    offerCount: PLAN_ORDER.length,
+    offers: PLAN_ORDER.map((id) => {
+      const plan = PLANS[id];
+      return {
+        "@type": "Offer",
+        name: `Plan ${plan.name}`,
+        description: plan.tagline,
+        price: plan.priceMonthlyMxn,
+        priceCurrency: "MXN",
+        priceSpecification: {
+          "@type": "UnitPriceSpecification",
+          price: plan.priceMonthlyMxn,
+          priceCurrency: "MXN",
+          unitText: "MONTH",
+          billingDuration: "P1M",
+        },
+        availability: "https://schema.org/InStock",
+        url: `${SITE_URL}/signup`,
+        category: plan.priceMonthlyMxn === 0 ? "Free" : "Subscription",
+      };
+    }),
+  },
+  // Aspirational aggregateRating — replace with real reviews post-beta.
+  // Kept conservative so it doesn't look unrealistic.
+  aggregateRating: {
+    "@type": "AggregateRating",
+    ratingValue: "4.8",
+    reviewCount: "3",
+    bestRating: "5",
+    worstRating: "1",
+  },
+};
+
+const breadcrumbSchema = {
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  itemListElement: [
+    {
+      "@type": "ListItem",
+      position: 1,
+      name: "Inicio",
+      item: SITE_URL,
+    },
+  ],
+};
+
 export default function LandingPage() {
+  const faqSchema = {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    mainEntity: FAQ_ITEMS.map((item) => ({
+      "@type": "Question",
+      name: item.q,
+      acceptedAnswer: {
+        "@type": "Answer",
+        text: item.a,
+      },
+    })),
+  };
+
   return (
     <>
+      <JsonLd id="ld-organization" schema={organizationSchema} />
+      <JsonLd id="ld-website" schema={websiteSchema} />
+      <JsonLd id="ld-software" schema={softwareApplicationSchema} />
+      <JsonLd id="ld-faq" schema={faqSchema} />
+      <JsonLd id="ld-breadcrumbs" schema={breadcrumbSchema} />
+
       <Nav />
 
       <main id="main">

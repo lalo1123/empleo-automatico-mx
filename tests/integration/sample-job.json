@@ -1,0 +1,19 @@
+{
+  "source": "occ",
+  "url": "https://www.occ.com.mx/empleo/oferta/12345678-desarrollador-fullstack-senior/",
+  "id": "occ-12345678",
+  "title": "Desarrollador Fullstack Senior",
+  "company": "TechCorp México",
+  "location": "Ciudad de México",
+  "salary": "$45,000 - $60,000 MXN",
+  "modality": "híbrido",
+  "description": "Buscamos un Desarrollador Fullstack Senior para unirse a nuestro equipo de plataforma. Trabajarás en un stack moderno con TypeScript, React y Node.js construyendo servicios críticos para nuestros clientes en LATAM.",
+  "requirements": [
+    "5+ años de experiencia en desarrollo web",
+    "Experiencia sólida con TypeScript y Node.js",
+    "Conocimiento de React o Next.js",
+    "Experiencia con PostgreSQL",
+    "Inglés avanzado"
+  ],
+  "extractedAt": "2026-04-23T10:00:00Z"
+}

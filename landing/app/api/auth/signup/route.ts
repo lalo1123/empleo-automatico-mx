@@ -1,9 +1,14 @@
 import { NextResponse } from "next/server";
 import { signup, ApiCallError } from "@/lib/api";
-import { setSessionCookie } from "@/lib/auth";
+import { setSessionCookie, setVerificationUrlCookie } from "@/lib/auth";
 
 export async function POST(req: Request): Promise<Response> {
-  let body: { email?: unknown; password?: unknown; name?: unknown };
+  let body: {
+    email?: unknown;
+    password?: unknown;
+    name?: unknown;
+    turnstileToken?: unknown;
+  };
   try {
     body = await req.json();
   } catch {
@@ -18,6 +23,10 @@ export async function POST(req: Request): Promise<Response> {
   const name =
     typeof body.name === "string" && body.name.trim().length > 0
       ? body.name.trim()
+      : undefined;
+  const turnstileToken =
+    typeof body.turnstileToken === "string" && body.turnstileToken.length > 0
+      ? body.turnstileToken
       : undefined;
 
   if (!email || !password) {
@@ -43,9 +52,20 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   try {
-    const { token, user } = await signup({ email, password, name });
+    const { token, user, verification, requiresVerification } = await signup({
+      email,
+      password,
+      name,
+      turnstileToken,
+    });
     await setSessionCookie(token);
-    return NextResponse.json({ ok: true, user }, { status: 201 });
+    if (verification?.verificationUrl) {
+      await setVerificationUrlCookie(verification.verificationUrl);
+    }
+    return NextResponse.json(
+      { ok: true, user, requiresVerification, verification },
+      { status: 201 },
+    );
   } catch (err) {
     if (err instanceof ApiCallError) {
       return NextResponse.json(

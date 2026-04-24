@@ -5,7 +5,7 @@ import { setSessionCookie } from "@/lib/auth";
 // Proxy login from the browser. The reason we expose this at all is so the
 // server can set an httpOnly cookie on success. The JWT never touches client JS.
 export async function POST(req: Request): Promise<Response> {
-  let body: { email?: unknown; password?: unknown };
+  let body: { email?: unknown; password?: unknown; turnstileToken?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -17,6 +17,10 @@ export async function POST(req: Request): Promise<Response> {
 
   const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
   const password = typeof body.password === "string" ? body.password : "";
+  const turnstileToken =
+    typeof body.turnstileToken === "string" && body.turnstileToken.length > 0
+      ? body.turnstileToken
+      : undefined;
   if (!email || !password) {
     return NextResponse.json(
       {
@@ -28,7 +32,7 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   try {
-    const { token, user } = await login({ email, password });
+    const { token, user } = await login({ email, password, turnstileToken });
     await setSessionCookie(token);
     return NextResponse.json({ ok: true, user });
   } catch (err) {

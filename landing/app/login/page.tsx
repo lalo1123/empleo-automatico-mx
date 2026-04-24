@@ -2,14 +2,18 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Nav } from "@/components/nav";
 import { Footer } from "@/components/footer";
+import { Turnstile } from "@/components/turnstile";
 import { login, ApiCallError } from "@/lib/api";
 import { setSessionCookie, getSessionToken } from "@/lib/auth";
+import { pageMetadata } from "@/lib/seo";
 import type { Metadata } from "next";
 
-export const metadata: Metadata = {
-  title: "Iniciar sesión",
-  description: "Inicia sesión en tu cuenta de Empleo Automático MX.",
-};
+export const metadata: Metadata = pageMetadata({
+  title: "Inicia sesión",
+  description:
+    "Entra a tu cuenta de Empleo Automático MX para revisar tu plan, tu uso y tus postulaciones en OCC Mundial. Acceso seguro, rápido y sin fricción.",
+  path: "/login",
+});
 
 interface PageProps {
   searchParams: Promise<{ error?: string; next?: string }>;
@@ -21,18 +25,22 @@ async function loginAction(formData: FormData) {
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const password = String(formData.get("password") ?? "");
   const next = String(formData.get("next") ?? "/account");
+  const rawTurnstile = String(formData.get("cf-turnstile-response") ?? "");
+  const turnstileToken = rawTurnstile.length > 0 ? rawTurnstile : undefined;
 
   if (!email || !password) {
     redirect("/login?error=missing");
   }
 
   try {
-    const { token } = await login({ email, password });
+    const { token } = await login({ email, password, turnstileToken });
     await setSessionCookie(token);
   } catch (err) {
     if (err instanceof ApiCallError) {
       if (err.code === "INVALID_CREDENTIALS")
         redirect("/login?error=invalid");
+      if (err.code === "CAPTCHA_FAILED")
+        redirect("/login?error=captcha");
       redirect(`/login?error=${encodeURIComponent(err.code)}`);
     }
     redirect("/login?error=unknown");
@@ -45,6 +53,8 @@ async function loginAction(formData: FormData) {
 const ERROR_MESSAGES: Record<string, string> = {
   missing: "Completa email y contraseña.",
   invalid: "Email o contraseña incorrectos.",
+  captcha:
+    "No pudimos verificar que no eres un bot. Recarga la página e intenta de nuevo.",
   NETWORK_ERROR:
     "No pudimos conectar con el servidor. Verifica tu internet o intenta de nuevo.",
   unknown: "No pudimos iniciar sesión. Intenta de nuevo.",
@@ -123,6 +133,9 @@ export default async function LoginPage({ searchParams }: PageProps) {
                 className="mt-1 w-full rounded-[10px] border border-[color:var(--color-border)] bg-white px-3 py-2 text-sm shadow-[var(--shadow-soft)] placeholder:text-[color:var(--color-ink-muted)]"
               />
             </div>
+
+            {/* Turnstile widget (renders only when sitekey env is set). */}
+            <Turnstile action="login" />
 
             <button
               type="submit"

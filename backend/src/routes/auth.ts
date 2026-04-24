@@ -1,38 +1,80 @@
-// /v1/auth/* - signup, login, logout.
+// /v1/auth/* - signup, login, logout, verify-email, resend-verification.
 
 import { Hono } from "hono";
-import { z } from "zod";
+import type { Context } from "hono";
 import { randomUUID } from "node:crypto";
+import { z } from "zod";
 import type { AppContext } from "../lib/env.js";
 import { loadEnv } from "../lib/env.js";
-import { HttpError, sendError } from "../lib/errors.js";
+import { HttpError, sendError, errorResponse } from "../lib/errors.js";
 import { hashPassword, verifyPassword } from "../lib/password.js";
 import { signToken } from "../lib/jwt.js";
 import {
+  consumeEmailVerification,
+  countActiveEmailVerifications,
   createSession,
   createUser,
+  findEmailVerification,
   findUserByEmail,
+  findUserById,
+  markUserEmailVerified,
   revokeSession,
   rowToUser
 } from "../lib/db.js";
 import { authRequired } from "../middleware/auth.js";
 import { rateLimit } from "../middleware/rate-limit.js";
+import {
+  buildDisposableSet,
+  emailDomain,
+  isDisposableEmail
+} from "../lib/disposable-domains.js";
+import { verifyTurnstile } from "../lib/turnstile.js";
+import { issueVerificationToken } from "../lib/email-verification.js";
+import { checkSignupAbuse } from "../lib/abuse-limits.js";
 
 const MIN_PASSWORD = 8;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// Turnstile token is optional in the schema — we treat missing-when-required
+// as a CAPTCHA_FAILED response below, so we can return a dedicated code
+// rather than a generic validation error.
+const turnstileTokenSchema = z.string().min(1).max(2048).optional();
+
 const signupSchema = z.object({
   email: z.string().trim().toLowerCase().regex(EMAIL_RE, "Correo invalido"),
   password: z.string().min(MIN_PASSWORD, `La contrasena debe tener al menos ${MIN_PASSWORD} caracteres`),
-  name: z.string().trim().min(1).max(120).optional()
+  name: z.string().trim().min(1).max(120).optional(),
+  turnstileToken: turnstileTokenSchema
 });
 
 const loginSchema = z.object({
   email: z.string().trim().toLowerCase().regex(EMAIL_RE, "Correo invalido"),
-  password: z.string().min(1, "Contrasena requerida")
+  password: z.string().min(1, "Contrasena requerida"),
+  turnstileToken: turnstileTokenSchema
+});
+
+const verifyEmailSchema = z.object({
+  token: z.string().trim().min(1).max(256)
 });
 
 const authLimiter = rateLimit({ key: "auth", windowMs: 60_000, max: 10 });
+
+// Limit resend-verification: 3 attempts per 10 min per IP on top of the
+// per-user active-token cap in the handler.
+const resendLimiter = rateLimit({ key: "auth-resend", windowMs: 10 * 60_000, max: 3 });
+
+function clientIpFromRequest(c: Context): string {
+  const xff = c.req.header("X-Forwarded-For");
+  if (xff) {
+    const first = xff.split(",")[0]?.trim();
+    if (first) return first;
+  }
+  const xrip = c.req.header("X-Real-IP");
+  if (xrip) return xrip.trim();
+  const cf = c.req.header("CF-Connecting-IP");
+  if (cf) return cf.trim();
+  return "unknown";
+}
 
 export const authRoutes = new Hono<AppContext>();
 
@@ -44,13 +86,54 @@ authRoutes.post("/signup", authLimiter, async (c) => {
       throw new HttpError(400, "VALIDATION_ERROR", parsed.error.issues[0]?.message ?? "Datos invalidos");
     }
 
-    const { email, password, name } = parsed.data;
+    const { email, password, name, turnstileToken } = parsed.data;
+    const env = loadEnv();
+    const ip = clientIpFromRequest(c);
+
+    // 1) CAPTCHA. When TURNSTILE_SECRET is unset, verifyTurnstile() short-circuits
+    //    to ok:true — keeps local dev working without Cloudflare keys.
+    const captcha = await verifyTurnstile(env.TURNSTILE_SECRET, turnstileToken, ip);
+    if (!captcha.ok) {
+      console.warn(
+        `[auth] signup captcha failed ip=${ip} codes=${(captcha.errorCodes ?? []).join(",")}`
+      );
+      throw new HttpError(
+        400,
+        "CAPTCHA_FAILED",
+        "No pudimos verificar que no eres un bot. Intenta de nuevo."
+      );
+    }
+
+    // 2) Disposable-email blocklist. Cheap check before DB work.
+    const disposableSet = buildDisposableSet(env.DISPOSABLE_DOMAINS_EXTRA);
+    if (isDisposableEmail(email, disposableSet)) {
+      const domain = emailDomain(email) ?? "";
+      console.warn(`[auth] signup disposable-email blocked ip=${ip} domain=${domain}`);
+      throw new HttpError(
+        400,
+        "EMAIL_NOT_ALLOWED",
+        "Por favor usa un correo electrónico permanente."
+      );
+    }
+
+    // 3) Per-email + per-/24-subnet abuse counters. Complement the IP rate
+    //    limit above; see abuse-limits.ts for the thresholds.
+    const abuse = checkSignupAbuse(email, ip);
+    if (!abuse.ok) {
+      if (abuse.retryAfter) c.header("Retry-After", String(abuse.retryAfter));
+      console.warn(`[auth] signup abuse-limit trip reason=${abuse.reason} ip=${ip}`);
+      throw new HttpError(
+        429,
+        "RATE_LIMITED",
+        "Demasiados intentos de registro. Intenta de nuevo más tarde."
+      );
+    }
+
     const existing = findUserByEmail(email);
     if (existing) {
       throw new HttpError(409, "EMAIL_TAKEN", "Este correo ya esta registrado.");
     }
 
-    const env = loadEnv();
     const now = Math.floor(Date.now() / 1000);
     const userId = randomUUID();
     const passwordHash = await hashPassword(password);
@@ -65,8 +148,28 @@ authRoutes.post("/signup", authLimiter, async (c) => {
     const { token, jti, exp } = signToken(env.JWT_SECRET, userId);
     createSession({ jti, userId, expiresAt: exp, now });
 
-    console.log(`[auth] signup ok user=${userId}`);
-    return c.json({ ok: true, token, user: rowToUser(userRow) }, 201);
+    // Issue the verification token. In MVP we surface it to the user in the
+    // response — once a mailer is wired up this stays the same; we just also
+    // send the email.
+    const verification = issueVerificationToken(userId, now);
+
+    console.log(`[auth] signup ok user=${userId} verify-pending=true`);
+    return c.json(
+      {
+        ok: true,
+        token,
+        user: rowToUser(userRow),
+        requiresVerification: true,
+        verification: {
+          verificationUrl: verification.verificationUrl,
+          expiresAt: verification.expiresAt,
+          // `token` is included so the landing can show a copy-paste fallback
+          // while the mailer is still a TODO. Remove once email sending lands.
+          token: verification.token
+        }
+      },
+      201
+    );
   } catch (err) {
     return sendError(c, err);
   }
@@ -80,7 +183,23 @@ authRoutes.post("/login", authLimiter, async (c) => {
       throw new HttpError(400, "VALIDATION_ERROR", parsed.error.issues[0]?.message ?? "Datos invalidos");
     }
 
-    const { email, password } = parsed.data;
+    const { email, password, turnstileToken } = parsed.data;
+    const env = loadEnv();
+    const ip = clientIpFromRequest(c);
+
+    // CAPTCHA on login too — protects against credential stuffing.
+    const captcha = await verifyTurnstile(env.TURNSTILE_SECRET, turnstileToken, ip);
+    if (!captcha.ok) {
+      console.warn(
+        `[auth] login captcha failed ip=${ip} codes=${(captcha.errorCodes ?? []).join(",")}`
+      );
+      throw new HttpError(
+        400,
+        "CAPTCHA_FAILED",
+        "No pudimos verificar que no eres un bot. Intenta de nuevo."
+      );
+    }
+
     const userRow = findUserByEmail(email);
     // Same error for "no user" and "bad password" to prevent account enumeration.
     if (!userRow) {
@@ -91,7 +210,6 @@ authRoutes.post("/login", authLimiter, async (c) => {
       throw new HttpError(401, "INVALID_CREDENTIALS", "Correo o contrasena incorrectos.");
     }
 
-    const env = loadEnv();
     const now = Math.floor(Date.now() / 1000);
     const { token, jti, exp } = signToken(env.JWT_SECRET, userRow.id);
     createSession({ jti, userId: userRow.id, expiresAt: exp, now });
@@ -113,3 +231,88 @@ authRoutes.post("/logout", authRequired(), async (c) => {
     return sendError(c, err);
   }
 });
+
+// POST /v1/auth/verify-email — public (token is the credential).
+authRoutes.post("/verify-email", authLimiter, async (c) => {
+  try {
+    const body = await c.req.json().catch(() => null);
+    const parsed = verifyEmailSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new HttpError(
+        400,
+        "VALIDATION_ERROR",
+        parsed.error.issues[0]?.message ?? "Token invalido"
+      );
+    }
+
+    const { token } = parsed.data;
+    const row = findEmailVerification(token);
+    const now = Math.floor(Date.now() / 1000);
+
+    if (!row) {
+      throw new HttpError(400, "VERIFICATION_INVALID", "Enlace de verificación inválido.");
+    }
+    if (row.consumed_at !== null) {
+      throw new HttpError(400, "VERIFICATION_INVALID", "Este enlace ya fue usado.");
+    }
+    if (row.expires_at < now) {
+      throw new HttpError(400, "VERIFICATION_INVALID", "Este enlace expiró. Solicita uno nuevo.");
+    }
+
+    markUserEmailVerified(row.user_id);
+    consumeEmailVerification(token, now);
+    console.log(`[auth] verify-email ok user=${row.user_id}`);
+
+    return c.json({ ok: true, userId: row.user_id });
+  } catch (err) {
+    return sendError(c, err);
+  }
+});
+
+// POST /v1/auth/resend-verification — authed. Returns a fresh token.
+authRoutes.post(
+  "/resend-verification",
+  resendLimiter,
+  authRequired(),
+  async (c) => {
+    try {
+      const user = c.get("user");
+      const userRow = findUserById(user.id);
+      if (!userRow) {
+        return errorResponse(c, 401, "UNAUTHORIZED", "Usuario no encontrado.");
+      }
+      if (userRow.email_verified === 1) {
+        // Idempotent — already verified, no need to issue a new token.
+        return c.json({ ok: true, alreadyVerified: true });
+      }
+
+      const now = Math.floor(Date.now() / 1000);
+
+      // Per-user cap on outstanding tokens — issueVerificationToken()
+      // invalidates previous ones, so we only need to rate-limit how often
+      // the user can request a new one. Baseline: 5 resends per day.
+      const active = countActiveEmailVerifications(user.id, now);
+      if (active >= 5) {
+        throw new HttpError(
+          429,
+          "RATE_LIMITED",
+          "Has solicitado demasiados enlaces. Intenta mañana."
+        );
+      }
+
+      const verification = issueVerificationToken(user.id, now);
+      console.log(`[auth] resend-verification ok user=${user.id}`);
+
+      return c.json({
+        ok: true,
+        verification: {
+          verificationUrl: verification.verificationUrl,
+          expiresAt: verification.expiresAt,
+          token: verification.token
+        }
+      });
+    } catch (err) {
+      return sendError(c, err);
+    }
+  }
+);

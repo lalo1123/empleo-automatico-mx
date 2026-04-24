@@ -7,6 +7,7 @@ import type { AppContext } from "../lib/env.js";
 import { loadEnv } from "../lib/env.js";
 import { HttpError, sendError } from "../lib/errors.js";
 import { authRequired } from "../middleware/auth.js";
+import { emailVerifiedRequired } from "../middleware/email-verified.js";
 import { generateCoverLetter, parseCvText } from "../lib/gemini.js";
 import { assertUnderLimit, incrementUsage } from "../lib/usage.js";
 import { getPlan } from "../lib/plans.js";
@@ -83,7 +84,10 @@ const parseCvSchema = z.object({
 
 export const applicationsRoutes = new Hono<AppContext>();
 
-applicationsRoutes.post("/generate", authRequired(), async (c) => {
+// /generate is quota-bearing and hits paid upstream APIs — gate on verified
+// email to prevent bot-generated requests from burning Gemini budget.
+// parse-cv stays open so users can finish onboarding before they verify.
+applicationsRoutes.post("/generate", authRequired(), emailVerifiedRequired(), async (c) => {
   try {
     const body = await c.req.json().catch(() => null);
     const parsed = generateSchema.safeParse(body);

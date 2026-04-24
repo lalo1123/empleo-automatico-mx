@@ -1,0 +1,51 @@
+{
+  "personal": {
+    "fullName": "Ana López Martínez",
+    "email": "ana.lopez@example.com",
+    "phone": "+52 55 1234 5678",
+    "location": "Ciudad de México, CDMX",
+    "linkedin": "linkedin.com/in/analopezmartinez"
+  },
+  "summary": "Ingeniera de software con 5 años de experiencia desarrollando aplicaciones web con Node.js, TypeScript y React. Experiencia liderando equipos pequeños y entregando productos SaaS en producción.",
+  "experience": [
+    {
+      "company": "Globant",
+      "role": "Desarrolladora Senior Fullstack",
+      "startDate": "2022-03",
+      "endDate": null,
+      "description": "Lidera la migración a microservicios y mentoría a desarrolladores junior.",
+      "achievements": [
+        "Migración monolito a microservicios Node.js reduciendo latencia 40%",
+        "Mentoría a 3 desarrolladores junior",
+        "Pipelines CI/CD con GitHub Actions"
+      ],
+      "location": "Ciudad de México"
+    },
+    {
+      "company": "Nearsoft",
+      "role": "Desarrolladora Fullstack",
+      "startDate": "2020-01",
+      "endDate": "2022-02",
+      "description": "Desarrollo de dashboards para clientes en EUA.",
+      "achievements": [
+        "Dashboards con React y TypeScript",
+        "Integración APIs REST y GraphQL con PostgreSQL"
+      ],
+      "location": "Guadalajara"
+    }
+  ],
+  "education": [
+    {
+      "institution": "Universidad Nacional Autónoma de México",
+      "degree": "Licenciatura",
+      "field": "Ingeniería en Computación",
+      "startDate": "2014-08",
+      "endDate": "2019-12"
+    }
+  ],
+  "skills": ["TypeScript", "JavaScript", "Node.js", "React", "Next.js", "PostgreSQL", "Docker", "AWS", "Git", "Scrum"],
+  "languages": [
+    { "language": "Español", "level": "nativo" },
+    { "language": "Inglés", "level": "avanzado" }
+  ]
+}

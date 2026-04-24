@@ -39,11 +39,25 @@ const envSchema = z.object({
     .string()
     .url()
     .default("https://empleo.skybrandmx.com/account?sub=success"),
+  // Public URL of the landing used in verification links surfaced to the
+  // user. Only referenced by the signup response payload; not inlined anywhere.
+  FRONTEND_URL: z
+    .string()
+    .url()
+    .default("https://empleo.skybrandmx.com"),
   CORS_ORIGINS: z
     .string()
     .default(
       "https://empleo.skybrandmx.com,https://skybrandmx.com,chrome-extension://*,http://localhost:3000,http://localhost:5173"
-    )
+    ),
+
+  // ---- Anti-abuse --------------------------------------------------------
+  // Cloudflare Turnstile — get keys at https://dash.cloudflare.com -> Turnstile.
+  // Leave blank to skip CAPTCHA checks (dev / local tests).
+  TURNSTILE_SECRET: z.string().default(""),
+  // Comma-separated extra domains to block on signup (extends the bundled
+  // list in src/lib/disposable-domains.ts).
+  DISPOSABLE_DOMAINS_EXTRA: z.string().default("")
 });
 
 export type AppEnv = z.infer<typeof envSchema>;

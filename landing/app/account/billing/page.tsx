@@ -9,13 +9,15 @@ import {
 } from "@/lib/api";
 import { clearSessionCookie, getSessionToken } from "@/lib/auth";
 import { PLANS, formatMxn, limitLabel, type PlanId } from "@/lib/plans";
+import { pageMetadata } from "@/lib/seo";
 import type { Metadata } from "next";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = pageMetadata({
   title: "Gestionar suscripción",
   description: "Cambia o contrata un plan de Empleo Automático MX.",
-  robots: { index: false, follow: false },
-};
+  path: "/account/billing",
+  noIndex: true,
+});
 
 interface PageProps {
   searchParams: Promise<{ error?: string }>;

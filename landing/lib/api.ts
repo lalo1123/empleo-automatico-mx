@@ -12,6 +12,13 @@ export interface AuthUser {
   name?: string;
   plan: PlanId;
   planExpiresAt?: number;
+  emailVerified?: boolean;
+}
+
+export interface VerificationPayload {
+  verificationUrl: string;
+  expiresAt: number;
+  token: string;
 }
 
 export interface Usage {
@@ -118,17 +125,48 @@ export async function apiRequest<T>(
 
 // Convenience wrappers for specific endpoints.
 
-export function signup(input: { email: string; password: string; name?: string }) {
-  return apiRequest<{ token: string; user: AuthUser }>("/auth/signup", {
+export function signup(input: {
+  email: string;
+  password: string;
+  name?: string;
+  turnstileToken?: string;
+}) {
+  return apiRequest<{
+    token: string;
+    user: AuthUser;
+    requiresVerification?: boolean;
+    verification?: VerificationPayload;
+  }>("/auth/signup", {
     method: "POST",
     body: input,
   });
 }
 
-export function login(input: { email: string; password: string }) {
+export function login(input: {
+  email: string;
+  password: string;
+  turnstileToken?: string;
+}) {
   return apiRequest<{ token: string; user: AuthUser }>("/auth/login", {
     method: "POST",
     body: input,
+  });
+}
+
+export function verifyEmail(token: string) {
+  return apiRequest<{ userId: string }>("/auth/verify-email", {
+    method: "POST",
+    body: { token },
+  });
+}
+
+export function resendVerification(token: string) {
+  return apiRequest<{
+    alreadyVerified?: boolean;
+    verification?: VerificationPayload;
+  }>("/auth/resend-verification", {
+    method: "POST",
+    token,
   });
 }
 

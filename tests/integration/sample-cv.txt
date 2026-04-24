@@ -1,0 +1,31 @@
+Ana López Martínez
+Correo: ana.lopez@example.com
+Teléfono: +52 55 1234 5678
+Ubicación: Ciudad de México, CDMX
+LinkedIn: linkedin.com/in/analopezmartinez
+
+Resumen profesional
+Ingeniera de software con 5 años de experiencia desarrollando aplicaciones web con Node.js, TypeScript y React. Experiencia liderando equipos pequeños y entregando productos SaaS en producción.
+
+Experiencia
+Globant — Desarrolladora Senior Fullstack
+Marzo 2022 - Actualidad, Ciudad de México (Híbrido)
+- Lideré la migración de un monolito a microservicios en Node.js reduciendo latencia 40%.
+- Mentoría a 3 desarrolladores junior.
+- Implementé pipelines de CI/CD con GitHub Actions.
+
+Nearsoft — Desarrolladora Fullstack
+Enero 2020 - Febrero 2022, Guadalajara
+- Construí dashboards con React y TypeScript para clientes de retail en EUA.
+- Integré APIs REST y GraphQL con PostgreSQL.
+
+Educación
+Universidad Nacional Autónoma de México — Licenciatura en Ingeniería en Computación
+Agosto 2014 - Diciembre 2019
+
+Habilidades
+TypeScript, JavaScript, Node.js, React, Next.js, PostgreSQL, Docker, AWS, Git, Scrum
+
+Idiomas
+Español: nativo
+Inglés: avanzado

@@ -1,12 +1,14 @@
 import { Nav } from "@/components/nav";
 import { Footer } from "@/components/footer";
+import { pageMetadata } from "@/lib/seo";
 import type { Metadata } from "next";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = pageMetadata({
   title: "Términos y condiciones",
   description:
-    "Términos y condiciones de uso de Empleo Automático MX (SkyBrandMX).",
-};
+    "Términos y condiciones de uso del servicio Empleo Automático MX (SkyBrandMX). Planes, facturación, cancelación, reembolsos y uso aceptable en México.",
+  path: "/terms",
+});
 
 // DIRECTOR: Antes de lanzamiento, confirmar con un abogado mexicano:
 // - Límites de responsabilidad (sección 8)

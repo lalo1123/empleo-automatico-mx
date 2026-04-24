@@ -3,12 +3,15 @@ import { redirect } from "next/navigation";
 import { Nav } from "@/components/nav";
 import { Footer } from "@/components/footer";
 import { getSessionToken } from "@/lib/auth";
+import { pageMetadata } from "@/lib/seo";
 import type { Metadata } from "next";
 
-export const metadata: Metadata = {
-  title: "¡Suscripción activada!",
-  robots: { index: false, follow: false },
-};
+export const metadata: Metadata = pageMetadata({
+  title: "Suscripción activada",
+  description: "Confirmación de suscripción en Empleo Automático MX.",
+  path: "/account/success",
+  noIndex: true,
+});
 
 interface PageProps {
   searchParams: Promise<{ sub?: string }>;

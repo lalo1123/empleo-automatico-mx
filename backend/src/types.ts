@@ -15,6 +15,7 @@ export interface User {
   name: string | null;
   plan: PlanId;
   planExpiresAt: number | null;
+  emailVerified: boolean;
   createdAt: number;
   updatedAt: number;
 }
@@ -27,8 +28,17 @@ export interface UserRow {
   plan: PlanId;
   plan_expires_at: number | null;
   conekta_customer_id: string | null;
+  email_verified: number;
   created_at: number;
   updated_at: number;
+}
+
+export interface EmailVerificationRow {
+  token: string;
+  user_id: string;
+  expires_at: number;
+  consumed_at: number | null;
+  created_at: number;
 }
 
 export interface SessionRow {

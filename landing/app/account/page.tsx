@@ -2,16 +2,30 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Nav } from "@/components/nav";
 import { Footer } from "@/components/footer";
-import { getAccount, cancelSubscription, ApiCallError } from "@/lib/api";
-import { clearSessionCookie, getSessionToken } from "@/lib/auth";
+import {
+  getAccount,
+  cancelSubscription,
+  resendVerification,
+  ApiCallError,
+} from "@/lib/api";
+import {
+  clearSessionCookie,
+  getSessionToken,
+  getVerificationUrlCookie,
+  setVerificationUrlCookie,
+} from "@/lib/auth";
 import { PLANS, formatMxn, limitLabel } from "@/lib/plans";
+import { pageMetadata } from "@/lib/seo";
 import type { Metadata } from "next";
 
-export const metadata: Metadata = {
+// Private page — kept out of Google via noindex. Still set a nice title for
+// tab legibility, but no structured metadata / OG since it isn't shareable.
+export const metadata: Metadata = pageMetadata({
   title: "Mi cuenta",
   description: "Administra tu plan y uso de Empleo Automático MX.",
-  robots: { index: false, follow: false },
-};
+  path: "/account",
+  noIndex: true,
+});
 
 // Placeholder — reemplazar con el ID real cuando la extensión esté publicada en
 // Chrome Web Store (se define en COMMERCIAL.md fase 2).
@@ -26,6 +40,28 @@ async function logoutAction() {
   "use server";
   await clearSessionCookie();
   redirect("/");
+}
+
+async function resendVerifyAction() {
+  "use server";
+  const token = await getSessionToken();
+  if (!token) redirect("/login?next=/account");
+  try {
+    const res = await resendVerification(token!);
+    if (res.alreadyVerified) {
+      redirect("/account?msg=already_verified");
+    }
+    if (res.verification?.verificationUrl) {
+      await setVerificationUrlCookie(res.verification.verificationUrl);
+    }
+    redirect("/account?msg=verify_resent");
+  } catch (err) {
+    if (err instanceof ApiCallError) {
+      if (err.code === "RATE_LIMITED") redirect("/account?error=rate");
+      redirect(`/account?error=${encodeURIComponent(err.code)}`);
+    }
+    redirect("/account?error=unknown");
+  }
 }
 
 async function cancelAction() {
@@ -99,6 +135,14 @@ export default async function AccountPage({ searchParams }: PageProps) {
   const isFree = user.plan === "free";
   const { msg, error } = await searchParams;
 
+  // Email verification banner: show if the backend reports unverified. Until
+  // email delivery is wired up, we also surface the verification URL from the
+  // signup cookie so the user can click straight through (dev workflow).
+  const needsVerify = user.emailVerified === false;
+  const verifyUrlFromCookie = needsVerify
+    ? await getVerificationUrlCookie()
+    : null;
+
   const usagePct =
     usage.limit > 0
       ? Math.min(100, Math.round((usage.current / usage.limit) * 100))
@@ -119,6 +163,63 @@ export default async function AccountPage({ searchParams }: PageProps) {
             {user.email}
           </p>
         </header>
+
+        {needsVerify && (
+          <div
+            role="status"
+            className="mt-6 rounded-[12px] border border-amber-300 bg-amber-50 px-4 py-4 text-sm text-amber-900"
+          >
+            <p className="font-semibold">Verifica tu correo electrónico</p>
+            <p className="mt-1">
+              Para generar postulaciones o contratar un plan, confirma tu
+              correo. Te enviamos un enlace al registrarte.
+            </p>
+            {verifyUrlFromCookie && (
+              <p className="mt-2 break-all text-xs">
+                Enlace de verificación:{" "}
+                <a
+                  href={verifyUrlFromCookie}
+                  className="font-medium underline"
+                >
+                  {verifyUrlFromCookie}
+                </a>
+              </p>
+            )}
+            <form action={resendVerifyAction} className="mt-3">
+              <button
+                type="submit"
+                className="rounded-[10px] border border-amber-400 bg-white px-3 py-1.5 text-xs font-semibold text-amber-900 hover:bg-amber-100"
+              >
+                Reenviar enlace
+              </button>
+            </form>
+          </div>
+        )}
+
+        {msg === "verify_pending" && !needsVerify && (
+          <div
+            role="status"
+            className="mt-6 rounded-[12px] border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900"
+          >
+            Cuenta creada. Revisa tu correo para confirmar tu dirección.
+          </div>
+        )}
+        {msg === "verify_resent" && (
+          <div
+            role="status"
+            className="mt-6 rounded-[12px] border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900"
+          >
+            Te generamos un enlace de verificación nuevo. Revisa abajo.
+          </div>
+        )}
+        {msg === "already_verified" && (
+          <div
+            role="status"
+            className="mt-6 rounded-[12px] border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900"
+          >
+            Tu correo ya estaba verificado.
+          </div>
+        )}
 
         {msg === "cancel_scheduled" && (
           <div

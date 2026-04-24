@@ -17,6 +17,7 @@ import type { AppContext } from "../lib/env.js";
 import { loadEnv } from "../lib/env.js";
 import { HttpError, sendError } from "../lib/errors.js";
 import { authRequired } from "../middleware/auth.js";
+import { emailVerifiedRequired } from "../middleware/email-verified.js";
 import {
   cancelCustomerSubscription,
   createCustomer,
@@ -38,7 +39,9 @@ const checkoutSchema = z.object({
 
 export const billingRoutes = new Hono<AppContext>();
 
-billingRoutes.post("/checkout", authRequired(), async (c) => {
+// Checkout is also verified-only — no sense letting an unverified account
+// start a Conekta subscription.
+billingRoutes.post("/checkout", authRequired(), emailVerifiedRequired(), async (c) => {
   try {
     const body = await c.req.json().catch(() => null);
     const parsed = checkoutSchema.safeParse(body);

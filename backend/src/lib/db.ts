@@ -9,6 +9,7 @@ import { mkdirSync } from "node:fs";
 import { loadEnv } from "./env.js";
 import type {
   BillingInterval,
+  EmailVerificationRow,
   PlanId,
   SessionRow,
   SubscriptionRow,
@@ -52,6 +53,9 @@ export function rowToUser(row: UserRow): User {
     name: row.name,
     plan: row.plan,
     planExpiresAt: row.plan_expires_at,
+    // Coerce 0/1 from SQLite into a real boolean for callers. Older rows
+    // (pre-migration) will return 0 from the ADD COLUMN default.
+    emailVerified: row.email_verified === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
@@ -122,6 +126,72 @@ export function findUserByConektaCustomerId(
     "SELECT * FROM users WHERE conekta_customer_id = ? LIMIT 1"
   );
   return stmt.get(conektaCustomerId) ?? null;
+}
+
+export function markUserEmailVerified(userId: string): void {
+  getDb()
+    .prepare(
+      `UPDATE users SET email_verified = 1, updated_at = ? WHERE id = ?`
+    )
+    .run(Math.floor(Date.now() / 1000), userId);
+}
+
+// EMAIL VERIFICATIONS -------------------------------------------------------
+
+export function createEmailVerification(data: {
+  token: string;
+  userId: string;
+  expiresAt: number;
+  now: number;
+}): void {
+  getDb()
+    .prepare(
+      `INSERT INTO email_verifications (token, user_id, expires_at, consumed_at, created_at)
+       VALUES (?, ?, ?, NULL, ?)`
+    )
+    .run(data.token, data.userId, data.expiresAt, data.now);
+}
+
+export function findEmailVerification(
+  token: string
+): EmailVerificationRow | null {
+  const stmt = getDb().prepare<[string], EmailVerificationRow>(
+    "SELECT * FROM email_verifications WHERE token = ? LIMIT 1"
+  );
+  return stmt.get(token) ?? null;
+}
+
+export function consumeEmailVerification(
+  token: string,
+  now: number
+): void {
+  getDb()
+    .prepare(
+      `UPDATE email_verifications SET consumed_at = ? WHERE token = ?`
+    )
+    .run(now, token);
+}
+
+/** Count non-consumed, non-expired tokens for rate-limiting resends. */
+export function countActiveEmailVerifications(
+  userId: string,
+  now: number
+): number {
+  const stmt = getDb().prepare<[string, number], { c: number }>(
+    `SELECT COUNT(*) as c FROM email_verifications
+     WHERE user_id = ? AND consumed_at IS NULL AND expires_at > ?`
+  );
+  return stmt.get(userId, now)?.c ?? 0;
+}
+
+/** Invalidate all outstanding tokens for a user (e.g. on resend or consume). */
+export function expireEmailVerifications(userId: string, now: number): void {
+  getDb()
+    .prepare(
+      `UPDATE email_verifications SET expires_at = ?
+       WHERE user_id = ? AND consumed_at IS NULL AND expires_at > ?`
+    )
+    .run(now - 1, userId, now);
 }
 
 // SESSIONS ------------------------------------------------------------------

@@ -1,12 +1,14 @@
 import { Nav } from "@/components/nav";
 import { Footer } from "@/components/footer";
+import { pageMetadata } from "@/lib/seo";
 import type { Metadata } from "next";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = pageMetadata({
   title: "Aviso de privacidad",
   description:
-    "Aviso de privacidad integral de Empleo Automático MX (SkyBrandMX). Conforme a la LFPDPPP vigente en México.",
-};
+    "Aviso de privacidad integral de Empleo Automático MX (SkyBrandMX). Cumple con la LFPDPPP, su Reglamento y los lineamientos vigentes del INAI en México.",
+  path: "/privacy",
+});
 
 // DIRECTOR: Este aviso se construyó con base en LFPDPPP (2025) + lineamientos del INAI.
 // Antes de lanzamiento público debes completar:
