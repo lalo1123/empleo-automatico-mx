@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 
 interface NavProps {
@@ -10,28 +11,17 @@ export function Nav({ authed = false }: NavProps) {
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
         <Link
           href="/"
-          className="flex items-center gap-2 text-lg font-semibold tracking-tight"
+          className="flex items-center"
           aria-label="Inicio de Empleo Automático MX"
         >
-          <span
-            aria-hidden
-            className="flex h-8 w-8 items-center justify-center rounded-[10px] bg-gradient-to-br from-[#7c3aed] to-[#0ea5e9] text-white shadow-[var(--shadow-soft)]"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              className="h-4 w-4"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M5 12l4 4L19 6" />
-            </svg>
-          </span>
-          <span>
-            SkyBrand<span className="text-[#0ea5e9]">MX</span>
-          </span>
+          <Image
+            src="/logo.svg"
+            alt="SkyBrandMX"
+            width={160}
+            height={32}
+            priority
+            className="h-8 w-auto"
+          />
         </Link>
 
         <nav className="hidden items-center gap-7 text-sm text-[color:var(--color-ink-soft)] md:flex">
