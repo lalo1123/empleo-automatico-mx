@@ -41,12 +41,11 @@ export function verifyToken(secret: string, token: string): JwtPayload | null {
     if (
       typeof sub !== "string" ||
       typeof jti !== "string" ||
-      typeof iat !== "number" ||
       typeof exp !== "number"
     ) {
       return null;
     }
-    return { sub, jti, iat, exp };
+    return { sub, jti, iat: iat ?? 0, exp };
   } catch {
     return null;
   }
