@@ -1,17 +1,27 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 80" role="img" aria-label="SkyBrandMX">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 80" role="img" aria-label="SkyBrandMX">
   <defs>
-    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#0f2030"/>
-      <stop offset="100%" stop-color="#142a3d"/>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="45%" stop-color="#70D1C6"/>
+      <stop offset="55%" stop-color="#0f1d2c"/>
     </linearGradient>
-    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#7c3aed"/>
-      <stop offset="100%" stop-color="#0ea5e9"/>
+    <linearGradient id="under" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#70D1C6"/>
+      <stop offset="100%" stop-color="#105971"/>
     </linearGradient>
   </defs>
-  <rect width="400" height="80" rx="8" fill="url(#bg)"/>
-  <text x="200" y="54" text-anchor="middle"
-        font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
-        font-weight="900" font-size="38" letter-spacing="2"
-        fill="#ffffff">SKYBR<tspan fill="url(#accent)">A</tspan>NDMX</text>
+  <!-- rocket icon (24x24 vbox scaled to 56) -->
+  <g transform="translate(8 12) scale(2.2)">
+    <g stroke="#105971" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none">
+      <path d="M12 2L15 6V14C15 14 15 17 12 17C9 17 9 14 9 14V6L12 2Z"/>
+    </g>
+    <g fill="#105971">
+      <path d="M9 11L6 14H9V11Z"/>
+      <path d="M15 11L18 14H15V11Z"/>
+    </g>
+    <path d="M9 17C10.5 20 12 22 12 22C12 22 13.5 20 15 17H9Z" fill="#ff6600"/>
+    <path d="M10 17.5C11 19.5 12 21 12 21C12 21 13 19.5 14 17.5H10Z" fill="#ef6f6f"/>
+  </g>
+  <!-- wordmark -->
+  <text x="68" y="50" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-weight="800" font-size="28" letter-spacing="1" fill="#0f1d2c">SKYBR<tspan fill="url(#g)">A</tspan><tspan fill="url(#g)">N</tspan>DM<tspan fill="url(#g)">X</tspan></text>
+  <rect x="68" y="56" width="120" height="3" rx="1.5" fill="url(#under)"/>
 </svg>

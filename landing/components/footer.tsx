@@ -1,5 +1,5 @@
-import Image from "next/image";
 import Link from "next/link";
+import { BrandLogo } from "./brand-logo";
 
 export function Footer() {
   const year = new Date().getFullYear();
@@ -8,13 +8,7 @@ export function Footer() {
       <div className="mx-auto grid max-w-6xl gap-10 px-4 py-12 sm:px-6 md:grid-cols-4">
         <div className="md:col-span-2">
           <Link href="/" className="inline-flex items-center" aria-label="SkyBrandMX">
-            <Image
-              src="/logo.svg"
-              alt="SkyBrandMX"
-              width={160}
-              height={32}
-              className="h-8 w-auto"
-            />
+            <BrandLogo />
           </Link>
           <p className="mt-3 max-w-sm text-sm text-[color:var(--color-ink-muted)]">
             Copiloto con IA para buscar empleo en México. Hecho en CDMX por

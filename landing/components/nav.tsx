@@ -1,5 +1,5 @@
-import Image from "next/image";
 import Link from "next/link";
+import { BrandLogo } from "./brand-logo";
 
 interface NavProps {
   authed?: boolean;
@@ -14,14 +14,7 @@ export function Nav({ authed = false }: NavProps) {
           className="flex items-center"
           aria-label="Inicio de Empleo Automático MX"
         >
-          <Image
-            src="/logo.svg"
-            alt="SkyBrandMX"
-            width={160}
-            height={32}
-            priority
-            className="h-8 w-auto"
-          />
+          <BrandLogo />
         </Link>
 
         <nav className="hidden items-center gap-7 text-sm text-[color:var(--color-ink-soft)] md:flex">
