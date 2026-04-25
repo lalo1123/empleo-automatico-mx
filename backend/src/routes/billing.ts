@@ -93,7 +93,7 @@ billingRoutes.post("/checkout", authRequired(), emailVerifiedRequired(), async (
     const subscriptionId = randomUUID();
     const now = Math.floor(Date.now() / 1000);
 
-    const orderName = `Empleo Automatico ${PLANS[plan].name} (${interval === "monthly" ? "mensual" : "anual"})`;
+    const orderName = `Empleo Automatico ${PLANS[plan].name} ${interval === "monthly" ? "mensual" : "anual"}`;
 
     const checkout = await createSubscriptionCheckout({
       apiKey: env.CONEKTA_API_KEY,
