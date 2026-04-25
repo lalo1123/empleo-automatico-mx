@@ -11,7 +11,7 @@
 // "Orders with checkout" in Conekta's docs over time. We use POST /checkouts
 // which is the stable public endpoint today (2025+).
 
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createPublicKey, createVerify } from "node:crypto";
 import { HttpError } from "./errors.js";
 
 const CONEKTA_BASE = "https://api.conekta.io";
@@ -197,32 +197,58 @@ export async function createSubscriptionCheckout(args: {
 }
 
 // ---------------------------------------------------------------------------
-// Webhook signature verification (HMAC-SHA1 via `Digest` header).
-// Conekta sends `Digest: SHA1=<hex>` where the mac is computed on the raw body
-// using the webhook signing key (CONEKTA_WEBHOOK_KEY).
+// Webhook signature verification (RSA-SHA256 via `digest` header).
+// Conekta signs the raw body with their private key and exposes the matching
+// public key in the dashboard. Header format: `digest: SHA256=<base64>`.
+// CONEKTA_WEBHOOK_KEY now holds the PEM public key (single line is fine —
+// we normalize newlines before parsing).
 // ---------------------------------------------------------------------------
+
+function normalizePublicKeyPem(raw: string): string {
+  // The Conekta dashboard often returns the PEM with no newlines between the
+  // header/body/footer. Node's createPublicKey accepts DER-style multilines,
+  // so we re-insert the boundary newlines and split the base64 body into
+  // 64-char lines per RFC 7468.
+  const trimmed = raw.trim();
+  const m = /-----BEGIN PUBLIC KEY-----([\s\S]+?)-----END PUBLIC KEY-----/i.exec(trimmed);
+  if (!m) return trimmed;
+  const body = (m[1] ?? "").replace(/\s+/g, "");
+  const wrapped = body.match(/.{1,64}/g)?.join("\n") ?? body;
+  return `-----BEGIN PUBLIC KEY-----\n${wrapped}\n-----END PUBLIC KEY-----\n`;
+}
 
 export function verifyWebhookSignature(args: {
   digestHeader: string | null;
   rawBody: string;
-  webhookKey: string;
+  webhookKey: string;  // RSA public key in PEM format
 }): boolean {
   const { digestHeader, rawBody, webhookKey } = args;
   if (!digestHeader || !webhookKey) return false;
 
-  // Accept `SHA1=<hex>` (standard) or `sha1=<hex>`.
-  const match = /^sha1=([0-9a-fA-F]+)$/i.exec(digestHeader.trim());
+  const match = /^sha256=([A-Za-z0-9+/=]+)$/i.exec(digestHeader.trim());
   if (!match) return false;
-  const provided = match[1];
-  if (!provided) return false;
+  const providedB64 = match[1];
+  if (!providedB64) return false;
 
-  const expected = createHmac("sha1", webhookKey).update(rawBody, "utf8").digest("hex");
-
-  const a = Buffer.from(expected, "utf8");
-  const b = Buffer.from(provided.toLowerCase(), "utf8");
-  if (a.length !== b.length) return false;
+  let providedSig: Buffer;
   try {
-    return timingSafeEqual(a, b);
+    providedSig = Buffer.from(providedB64, "base64");
+  } catch {
+    return false;
+  }
+
+  let publicKey;
+  try {
+    publicKey = createPublicKey(normalizePublicKeyPem(webhookKey));
+  } catch {
+    return false;
+  }
+
+  try {
+    const verifier = createVerify("RSA-SHA256");
+    verifier.update(rawBody, "utf8");
+    verifier.end();
+    return verifier.verify(publicKey, providedSig);
   } catch {
     return false;
   }
