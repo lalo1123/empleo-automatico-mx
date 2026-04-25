@@ -13,6 +13,10 @@
     "https://occ.com.mx/*",
     "https://www.computrabajo.com.mx/*",
     "https://computrabajo.com.mx/*",
+    "https://www.bumeran.com.mx/*",
+    "https://bumeran.com.mx/*",
+    "https://mx.indeed.com/*",
+    "https://www.linkedin.com/*",
     "https://api.empleo.skybrandmx.com/*",
     "http://localhost:8787/*"
   ],
@@ -36,6 +40,31 @@
         "https://computrabajo.com.mx/*"
       ],
       "js": ["content/computrabajo.js"],
+      "css": ["content/occ.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.bumeran.com.mx/*",
+        "https://bumeran.com.mx/*"
+      ],
+      "js": ["content/bumeran.js"],
+      "css": ["content/occ.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://mx.indeed.com/*"
+      ],
+      "js": ["content/indeed.js"],
+      "css": ["content/occ.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.linkedin.com/*"
+      ],
+      "js": ["content/linkedin.js"],
       "css": ["content/occ.css"],
       "run_at": "document_idle"
     }
