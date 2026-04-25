@@ -290,7 +290,7 @@ export default async function AccountPage({ searchParams }: PageProps) {
                     aria-valuemin={0}
                     aria-valuemax={100}
                     aria-valuenow={usagePct}
-                    className="h-full rounded-full bg-gradient-to-r from-[#7c3aed] to-[#0ea5e9] transition-all"
+                    className="h-full rounded-full bg-gradient-to-r from-[#70d1c6] to-[#105971] transition-all"
                     style={{ width: `${usagePct}%` }}
                   />
                 </div>

@@ -3,24 +3,28 @@
 @theme inline {
   --font-sans: var(--font-inter), system-ui, -apple-system, "Segoe UI", sans-serif;
 
-  --color-brand-50: #f5f3ff;
-  --color-brand-100: #ede9fe;
-  --color-brand-200: #ddd6fe;
-  --color-brand-300: #c4b5fd;
-  --color-brand-400: #a78bfa;
-  --color-brand-500: #8b5cf6;
-  --color-brand-600: #7c3aed;
-  --color-brand-700: #6d28d9;
-  --color-brand-800: #5b21b6;
-  --color-brand-900: #4c1d95;
+  /* SkyBrandMX palette — cyan/teal primary + navy ink + flame accent. */
+  --color-brand-50: #ecfaf7;
+  --color-brand-100: #d2f3ec;
+  --color-brand-200: #a8e6da;
+  --color-brand-300: #70d1c6;   /* primary cyan (logo accent letters) */
+  --color-brand-400: #4fb9ad;
+  --color-brand-500: #2a9c91;
+  --color-brand-600: #137e7a;
+  --color-brand-700: #105971;   /* deep teal (logo underline end) */
+  --color-brand-800: #0d3f57;
+  --color-brand-900: #0f1d2c;   /* navy ink */
 
-  --color-sky-400: #38bdf8;
-  --color-sky-500: #0ea5e9;
-  --color-sky-600: #0284c7;
+  --color-sky-400: #4fb9ad;
+  --color-sky-500: #137e7a;
+  --color-sky-600: #105971;
 
-  --color-ink: #0f172a;
-  --color-ink-soft: #334155;
-  --color-ink-muted: #64748b;
+  --color-flame-500: #ff6600;
+  --color-flame-400: #ef6f6f;
+
+  --color-ink: #0f1d2c;
+  --color-ink-soft: #1f3447;
+  --color-ink-muted: #5b6e7e;
 
   --color-surface: #ffffff;
   --color-surface-soft: #f8fafc;
@@ -36,7 +40,7 @@
     0 1px 3px 0 rgba(15, 23, 42, 0.08);
   --shadow-md: 0 4px 6px -1px rgba(15, 23, 42, 0.08),
     0 2px 4px -2px rgba(15, 23, 42, 0.06);
-  --shadow-brand: 0 8px 24px -6px rgba(124, 58, 237, 0.35);
+  --shadow-brand: 0 8px 24px -6px rgba(16, 89, 113, 0.35);
 }
 
 :root {

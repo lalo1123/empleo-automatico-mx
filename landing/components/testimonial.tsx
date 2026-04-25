@@ -25,7 +25,7 @@ export function Testimonial({ quote, name, role }: TestimonialProps) {
       <figcaption className="flex items-center gap-3">
         <span
           aria-hidden
-          className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-[#7c3aed] to-[#0ea5e9] text-sm font-semibold text-white"
+          className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-[#70d1c6] to-[#105971] text-sm font-semibold text-white"
         >
           {name
             .split(" ")

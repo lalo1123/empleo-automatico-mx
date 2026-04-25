@@ -231,7 +231,7 @@ export default function LandingPage() {
               </span>
               <h1 className="mt-5 text-balance text-4xl font-bold tracking-tight text-[color:var(--color-ink)] sm:text-5xl md:text-6xl">
                 Postúlate a más empleos{" "}
-                <span className="bg-gradient-to-r from-[#7c3aed] to-[#0ea5e9] bg-clip-text text-transparent">
+                <span className="bg-gradient-to-r from-[#70d1c6] to-[#105971] bg-clip-text text-transparent">
                   en menos tiempo.
                 </span>
               </h1>
@@ -298,7 +298,7 @@ export default function LandingPage() {
                     <div className="flex items-center gap-2">
                       <span
                         aria-hidden
-                        className="flex h-7 w-7 items-center justify-center rounded-[8px] bg-gradient-to-br from-[#7c3aed] to-[#0ea5e9] text-white"
+                        className="flex h-7 w-7 items-center justify-center rounded-[8px] bg-gradient-to-br from-[#70d1c6] to-[#105971] text-white"
                       >
                         <svg
                           viewBox="0 0 24 24"
@@ -547,7 +547,7 @@ export default function LandingPage() {
 
         {/* CTA FINAL */}
         <section className="mx-auto max-w-6xl px-4 pb-20 sm:px-6">
-          <div className="relative overflow-hidden rounded-[20px] bg-gradient-to-br from-[#7c3aed] to-[#0ea5e9] p-10 text-center shadow-[0_30px_80px_-30px_rgba(124,58,237,0.6)] md:p-16">
+          <div className="relative overflow-hidden rounded-[20px] bg-gradient-to-br from-[#70d1c6] to-[#105971] p-10 text-center shadow-[0_30px_80px_-30px_rgba(16,89,113,0.6)] md:p-16">
             <div
               aria-hidden
               className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_bottom_right,rgba(255,255,255,0.18),transparent_50%)]"
