@@ -46,6 +46,12 @@ export function closeDb(): void {
   }
 }
 
+// Sentinel stored in `users.password_hash` for accounts that only signed in
+// via Google. Not a valid bcrypt hash, so verifyPassword() always returns
+// false against it — protects the email/password login path from being used
+// by Google-only accounts. See migrations/0003_google_oauth.sql.
+export const GOOGLE_ONLY_PASSWORD_SENTINEL = "GOOGLE_ONLY";
+
 export function rowToUser(row: UserRow): User {
   return {
     id: row.id,
@@ -56,6 +62,7 @@ export function rowToUser(row: UserRow): User {
     // Coerce 0/1 from SQLite into a real boolean for callers. Older rows
     // (pre-migration) will return 0 from the ADD COLUMN default.
     emailVerified: row.email_verified === 1,
+    avatarUrl: row.avatar_url,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
@@ -134,6 +141,82 @@ export function markUserEmailVerified(userId: string): void {
       `UPDATE users SET email_verified = 1, updated_at = ? WHERE id = ?`
     )
     .run(Math.floor(Date.now() / 1000), userId);
+}
+
+// GOOGLE OAUTH --------------------------------------------------------------
+
+/** Look up a user by their Google subject id. */
+export function findUserByGoogleId(googleId: string): UserRow | null {
+  const stmt = getDb().prepare<[string], UserRow>(
+    "SELECT * FROM users WHERE google_id = ? LIMIT 1"
+  );
+  return stmt.get(googleId) ?? null;
+}
+
+/**
+ * Link an existing user to a Google account. Sets `google_id`, marks the
+ * email as verified (Google verified it for us), and updates `avatar_url`
+ * if provided. Idempotent — safe to call when already linked.
+ */
+export function linkGoogleAccount(
+  userId: string,
+  googleId: string,
+  avatarUrl: string | null
+): void {
+  const now = Math.floor(Date.now() / 1000);
+  if (avatarUrl !== null) {
+    getDb()
+      .prepare(
+        `UPDATE users
+         SET google_id = ?, email_verified = 1, avatar_url = ?, updated_at = ?
+         WHERE id = ?`
+      )
+      .run(googleId, avatarUrl, now, userId);
+  } else {
+    getDb()
+      .prepare(
+        `UPDATE users
+         SET google_id = ?, email_verified = 1, updated_at = ?
+         WHERE id = ?`
+      )
+      .run(googleId, now, userId);
+  }
+}
+
+/**
+ * Create a passwordless user from a verified Google profile. The
+ * `password_hash` column is filled with the GOOGLE_ONLY sentinel — see
+ * migrations/0003_google_oauth.sql for why. `email_verified` is set to 1
+ * because Google has already verified the email.
+ */
+export function createGoogleUser(data: {
+  id: string;
+  email: string;
+  name: string | null;
+  googleId: string;
+  avatarUrl: string | null;
+  now: number;
+}): UserRow {
+  const { id, email, name, googleId, avatarUrl, now } = data;
+  getDb()
+    .prepare(
+      `INSERT INTO users
+         (id, email, password_hash, name, plan, email_verified, google_id, avatar_url, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'free', 1, ?, ?, ?, ?)`
+    )
+    .run(
+      id,
+      email.toLowerCase(),
+      GOOGLE_ONLY_PASSWORD_SENTINEL,
+      name,
+      googleId,
+      avatarUrl,
+      now,
+      now
+    );
+  const created = findUserById(id);
+  if (!created) throw new Error("Google user inserted but not retrievable");
+  return created;
 }
 
 // EMAIL VERIFICATIONS -------------------------------------------------------

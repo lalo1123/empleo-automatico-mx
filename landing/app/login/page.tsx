@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { Nav } from "@/components/nav";
 import { Footer } from "@/components/footer";
 import { Turnstile } from "@/components/turnstile";
+import { GoogleSignIn } from "@/components/google-sign-in";
 import { login, ApiCallError } from "@/lib/api";
 import { setSessionCookie, getSessionToken } from "@/lib/auth";
 import { pageMetadata } from "@/lib/seo";
@@ -82,9 +83,26 @@ export default async function LoginPage({ searchParams }: PageProps) {
             </p>
           </div>
 
+          <div className="mt-8 space-y-4 rounded-[16px] border border-[color:var(--color-border)] bg-white p-6 shadow-[var(--shadow-soft)]">
+            <GoogleSignIn redirectTo={next && next.startsWith("/") && !next.startsWith("//") ? next : "/account"} />
+
+            <div className="relative">
+              <div
+                aria-hidden="true"
+                className="absolute inset-0 flex items-center"
+              >
+                <div className="w-full border-t border-[color:var(--color-border)]" />
+              </div>
+              <div className="relative flex justify-center">
+                <span className="bg-white px-3 text-xs uppercase tracking-wide text-[color:var(--color-ink-muted)]">
+                  o entra con email
+                </span>
+              </div>
+            </div>
+
           <form
             action={loginAction}
-            className="mt-8 space-y-4 rounded-[16px] border border-[color:var(--color-border)] bg-white p-6 shadow-[var(--shadow-soft)]"
+            className="space-y-4"
           >
             {errorMessage && (
               <div
@@ -144,6 +162,7 @@ export default async function LoginPage({ searchParams }: PageProps) {
               Entrar
             </button>
           </form>
+          </div>
 
           <p className="mt-5 text-center text-sm text-[color:var(--color-ink-soft)]">
             ¿Nuevo por aquí?{" "}

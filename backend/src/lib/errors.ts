@@ -20,6 +20,8 @@ export type ErrorCode =
   | "UPSTREAM_ERROR"
   | "WEBHOOK_SIGNATURE_INVALID"
   | "PAYMENT_ERROR"
+  | "GOOGLE_OAUTH_DISABLED"
+  | "GOOGLE_TOKEN_INVALID"
   | "INTERNAL_ERROR";
 
 export class HttpError extends Error {

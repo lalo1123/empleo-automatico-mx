@@ -57,7 +57,16 @@ const envSchema = z.object({
   TURNSTILE_SECRET: z.string().default(""),
   // Comma-separated extra domains to block on signup (extends the bundled
   // list in src/lib/disposable-domains.ts).
-  DISPOSABLE_DOMAINS_EXTRA: z.string().default("")
+  DISPOSABLE_DOMAINS_EXTRA: z.string().default(""),
+
+  // ---- Google Sign-In ----------------------------------------------------
+  // OAuth 2.0 Client ID for the "Web application" client created in
+  // Google Cloud Console -> APIs & Services -> Credentials. Used as the
+  // expected `aud` when verifying Google-issued ID tokens.
+  // Leave blank to disable the /v1/auth/google endpoint (it returns
+  // 503 GOOGLE_OAUTH_DISABLED in that case). Same value MUST be set as
+  // NEXT_PUBLIC_GOOGLE_CLIENT_ID on the landing.
+  GOOGLE_CLIENT_ID: z.string().default("")
 });
 
 export type AppEnv = z.infer<typeof envSchema>;

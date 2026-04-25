@@ -13,6 +13,8 @@ export interface AuthUser {
   plan: PlanId;
   planExpiresAt?: number;
   emailVerified?: boolean;
+  /** Google profile picture URL (when the user signed in with Google). */
+  avatarUrl?: string | null;
 }
 
 export interface VerificationPayload {
@@ -150,6 +152,18 @@ export function login(input: {
   return apiRequest<{ token: string; user: AuthUser }>("/auth/login", {
     method: "POST",
     body: input,
+  });
+}
+
+/**
+ * Exchange a Google-issued ID token for our session JWT. The backend
+ * verifies the token against Google's JWKS, links/creates the local user,
+ * and returns our standard {token, user} envelope.
+ */
+export function loginWithGoogle(idToken: string) {
+  return apiRequest<{ token: string; user: AuthUser }>("/auth/google", {
+    method: "POST",
+    body: { idToken },
   });
 }
 

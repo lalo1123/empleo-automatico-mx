@@ -7,6 +7,8 @@ import { PricingTable } from "@/components/pricing-table";
 import { Faq } from "@/components/faq";
 import { Testimonial } from "@/components/testimonial";
 import { JsonLd } from "@/components/json-ld";
+import { Walkthrough } from "@/components/walkthrough";
+import { DemoVideo } from "@/components/demo-video";
 import { PLANS, PLAN_ORDER } from "@/lib/plans";
 import {
   DEFAULT_DESCRIPTION,
@@ -346,30 +348,39 @@ export default function LandingPage() {
         <section id="como-funciona" className="mx-auto max-w-6xl px-4 py-16 sm:px-6 md:py-24">
           <header className="mx-auto max-w-2xl text-center">
             <h2 className="text-3xl font-bold tracking-tight text-[color:var(--color-ink)] sm:text-4xl">
-              Tres pasos. Cero fricción.
+              Cómo funciona
             </h2>
             <p className="mt-3 text-base text-[color:var(--color-ink-soft)]">
-              Te integra a tu flujo normal de búsqueda. No tienes que aprender
-              nada nuevo.
+              3 minutos en configurar. Después es solo navegar y postular.
             </p>
           </header>
 
-          <ol className="mx-auto mt-12 grid max-w-5xl gap-5 md:grid-cols-3">
+          <div className="mt-12">
+            <DemoVideo />
+          </div>
+
+          <div className="mt-14">
+            <Walkthrough />
+          </div>
+
+          {/* Mini-tips: 3 short bullets retained for SEO + skim-readers who
+              don't watch the animation. Mirrors the legacy 3-step copy. */}
+          <ol className="mx-auto mt-14 grid max-w-5xl gap-5 md:grid-cols-3">
             {[
               {
                 n: "01",
                 title: "Sube tu CV una vez",
-                body: "Carga tu CV en PDF y lo parseamos con IA. Queda guardado en tu navegador, listo para todas tus postulaciones.",
+                body: "PDF parseado con IA. Queda guardado en tu navegador para todas tus postulaciones.",
               },
               {
                 n: "02",
-                title: "Navega OCC como siempre",
-                body: "Abres vacantes igual que siempre. No hay que instalar nada raro ni cambiar tu forma de buscar empleo.",
+                title: "Navega como siempre",
+                body: "Abres vacantes en OCC, Computrabajo, Bumeran, Indeed o LinkedIn igual que siempre.",
               },
               {
                 n: "03",
-                title: "Click, revisa, envía",
-                body: "La extensión genera una carta personalizada contra la vacante. Tú la revisas, la ajustas si quieres, y la envías.",
+                title: "Tú das el último clic",
+                body: "Generamos la carta y llenamos el formulario. El botón de enviar lo activas tú.",
               },
             ].map((step) => (
               <li

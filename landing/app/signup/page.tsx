@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { Nav } from "@/components/nav";
 import { Footer } from "@/components/footer";
 import { Turnstile } from "@/components/turnstile";
+import { GoogleSignIn } from "@/components/google-sign-in";
 import { signup, ApiCallError } from "@/lib/api";
 import {
   setSessionCookie,
@@ -106,9 +107,32 @@ export default async function SignupPage({ searchParams }: PageProps) {
             </p>
           </div>
 
+          <div className="mt-8 space-y-4 rounded-[16px] border border-[color:var(--color-border)] bg-white p-6 shadow-[var(--shadow-soft)]">
+            <GoogleSignIn redirectTo="/account" />
+
+            {/* Divider entre Google y el formulario de email/password. Renders
+                visually only when the Google button itself rendered (i.e.
+                NEXT_PUBLIC_GOOGLE_CLIENT_ID is set). The component above
+                returns null in prod when unset, so an extra divider would
+                look orphaned — keep it always visible: it still reads as a
+                heading for the email/password form. */}
+            <div className="relative">
+              <div
+                aria-hidden="true"
+                className="absolute inset-0 flex items-center"
+              >
+                <div className="w-full border-t border-[color:var(--color-border)]" />
+              </div>
+              <div className="relative flex justify-center">
+                <span className="bg-white px-3 text-xs uppercase tracking-wide text-[color:var(--color-ink-muted)]">
+                  o regístrate con email
+                </span>
+              </div>
+            </div>
+
           <form
             action={createAccountAction}
-            className="mt-8 space-y-4 rounded-[16px] border border-[color:var(--color-border)] bg-white p-6 shadow-[var(--shadow-soft)]"
+            className="space-y-4"
           >
             {errorMessage && (
               <div
@@ -206,6 +230,7 @@ export default async function SignupPage({ searchParams }: PageProps) {
               .
             </p>
           </form>
+          </div>
 
           <p className="mt-5 text-center text-sm text-[color:var(--color-ink-soft)]">
             ¿Ya tienes cuenta?{" "}

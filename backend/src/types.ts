@@ -16,6 +16,8 @@ export interface User {
   plan: PlanId;
   planExpiresAt: number | null;
   emailVerified: boolean;
+  /** Google profile picture URL (null for non-Google users). */
+  avatarUrl: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -23,12 +25,20 @@ export interface User {
 export interface UserRow {
   id: string;
   email: string;
+  /**
+   * Bcrypt hash for email/password users, or the sentinel string
+   * "GOOGLE_ONLY" for accounts that only signed in via Google. The
+   * sentinel is never a valid bcrypt hash so verifyPassword() will
+   * always return false for it.
+   */
   password_hash: string;
   name: string | null;
   plan: PlanId;
   plan_expires_at: number | null;
   conekta_customer_id: string | null;
   email_verified: number;
+  google_id: string | null;
+  avatar_url: string | null;
   created_at: number;
   updated_at: number;
 }

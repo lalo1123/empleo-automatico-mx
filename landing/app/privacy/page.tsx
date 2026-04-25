@@ -76,6 +76,13 @@ export default function PrivacyPage() {
                 como hash con bcrypt; nadie puede leerla, ni nosotros).
               </li>
               <li>
+                <strong>Si inicias sesión con Google</strong>: tu identificador
+                único de Google (sub), correo electrónico, nombre y foto de
+                perfil. Nunca vemos ni almacenamos tu contraseña de Google;
+                Google sólo nos comparte los datos del perfil que tú apruebas
+                durante el inicio de sesión.
+              </li>
+              <li>
                 <strong>Datos profesionales</strong>: contenido del currículum
                 vitae (CV) que subes, incluyendo experiencia, educación,
                 habilidades.
@@ -180,6 +187,13 @@ export default function PrivacyPage() {
                 procesa pagos y suscripciones. Recibe datos de pago
                 directamente de ti; SkyBrandMX solo recibe el estado del
                 cobro.
+              </li>
+              <li>
+                <strong>Google LLC</strong> (autenticación con Google
+                Sign-In): sólo recibimos los datos del perfil de Google que
+                tú apruebas (identificador, correo, nombre, foto). No
+                compartimos información tuya con Google: el flujo es de
+                Google hacia nosotros, no al revés.
               </li>
               <li>
                 <strong>Hostinger</strong>: provee el servidor (VPS) donde

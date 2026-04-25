@@ -12,11 +12,14 @@ import { signToken } from "../lib/jwt.js";
 import {
   consumeEmailVerification,
   countActiveEmailVerifications,
+  createGoogleUser,
   createSession,
   createUser,
   findEmailVerification,
   findUserByEmail,
+  findUserByGoogleId,
   findUserById,
+  linkGoogleAccount,
   markUserEmailVerified,
   revokeSession,
   rowToUser
@@ -31,6 +34,7 @@ import {
 import { verifyTurnstile } from "../lib/turnstile.js";
 import { issueVerificationToken } from "../lib/email-verification.js";
 import { checkSignupAbuse } from "../lib/abuse-limits.js";
+import { verifyGoogleIdToken } from "../lib/google-oauth.js";
 
 const MIN_PASSWORD = 8;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -55,6 +59,11 @@ const loginSchema = z.object({
 
 const verifyEmailSchema = z.object({
   token: z.string().trim().min(1).max(256)
+});
+
+// Google ID tokens are JWTs ~1.5KB on average. Cap at 4KB to bound work.
+const googleSignInSchema = z.object({
+  idToken: z.string().min(20).max(4096)
 });
 
 const authLimiter = rateLimit({ key: "auth", windowMs: 60_000, max: 10 });
@@ -215,6 +224,104 @@ authRoutes.post("/login", authLimiter, async (c) => {
     createSession({ jti, userId: userRow.id, expiresAt: exp, now });
 
     console.log(`[auth] login ok user=${userRow.id}`);
+    return c.json({ ok: true, token, user: rowToUser(userRow) });
+  } catch (err) {
+    return sendError(c, err);
+  }
+});
+
+// POST /v1/auth/google — Google Sign-In (One Tap + button).
+//
+// Body: { idToken: string }
+// 1. Verify the ID token against Google's JWKS.
+// 2. Look up by google_id; fall back to email-based lookup (link path).
+// 3. Auto-create a passwordless user if neither exists.
+// 4. Issue our own session JWT — same shape as /login.
+//
+// Disposable-domain check is NOT applied: Google has already verified the
+// email address, and Gmail/Workspace addresses can't be disposable. The
+// per-IP rate limit matches /login to keep credential-stuffing surface small.
+authRoutes.post("/google", authLimiter, async (c) => {
+  try {
+    const env = loadEnv();
+    if (!env.GOOGLE_CLIENT_ID) {
+      throw new HttpError(
+        503,
+        "GOOGLE_OAUTH_DISABLED",
+        "El inicio de sesión con Google no está habilitado."
+      );
+    }
+
+    const body = await c.req.json().catch(() => null);
+    const parsed = googleSignInSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new HttpError(
+        400,
+        "VALIDATION_ERROR",
+        parsed.error.issues[0]?.message ?? "Datos invalidos"
+      );
+    }
+
+    const { idToken } = parsed.data;
+    const ip = clientIpFromRequest(c);
+
+    let verified;
+    try {
+      verified = await verifyGoogleIdToken(idToken, env.GOOGLE_CLIENT_ID);
+    } catch (err) {
+      console.warn(
+        `[auth] google token rejected ip=${ip} reason=${err instanceof Error ? err.message : String(err)}`
+      );
+      throw new HttpError(
+        401,
+        "GOOGLE_TOKEN_INVALID",
+        "No pudimos verificar tu cuenta de Google. Intenta de nuevo."
+      );
+    }
+
+    const now = Math.floor(Date.now() / 1000);
+
+    // 1) Match by google_id first (fast path, returning Google user).
+    let userRow = findUserByGoogleId(verified.sub);
+
+    // 2) Match by email — link the Google account to an existing
+    //    email/password user. We trust the email because Google's
+    //    `email_verified` was true (validated above).
+    if (!userRow) {
+      const byEmail = findUserByEmail(verified.email);
+      if (byEmail) {
+        linkGoogleAccount(byEmail.id, verified.sub, verified.picture);
+        const refreshed = findUserById(byEmail.id);
+        if (!refreshed) {
+          throw new HttpError(
+            500,
+            "INTERNAL_ERROR",
+            "Error al vincular tu cuenta. Intenta de nuevo."
+          );
+        }
+        userRow = refreshed;
+        console.log(`[auth] google link ok user=${userRow.id}`);
+      }
+    }
+
+    // 3) Brand-new user — create passwordless account.
+    if (!userRow) {
+      const userId = randomUUID();
+      userRow = createGoogleUser({
+        id: userId,
+        email: verified.email,
+        name: verified.name,
+        googleId: verified.sub,
+        avatarUrl: verified.picture,
+        now
+      });
+      console.log(`[auth] google signup ok user=${userRow.id}`);
+    }
+
+    const { token, jti, exp } = signToken(env.JWT_SECRET, userRow.id);
+    createSession({ jti, userId: userRow.id, expiresAt: exp, now });
+
+    console.log(`[auth] google login ok user=${userRow.id}`);
     return c.json({ ok: true, token, user: rowToUser(userRow) });
   } catch (err) {
     return sendError(c, err);
