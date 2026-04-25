@@ -85,13 +85,25 @@ export interface ConektaCustomer {
   subscription?: ConektaSubscription | null;
 }
 
+/**
+ * Conekta rejects names with digits or special chars (only letters, spaces,
+ * accents, hyphens, apostrophes are allowed).
+ */
+function sanitizeName(raw: string): string {
+  const cleaned = raw
+    .replace(/[^a-zA-ZáéíóúüÁÉÍÓÚÜñÑ\s'-]/g, "")
+    .trim()
+    .replace(/\s+/g, " ");
+  return cleaned.length >= 2 ? cleaned : "Cliente";
+}
+
 export async function createCustomer(args: {
   apiKey: string;
   name: string;
   email: string;
 }): Promise<ConektaCustomer> {
   return conektaFetch<ConektaCustomer>(args.apiKey, "POST", "/customers", {
-    name: args.name,
+    name: sanitizeName(args.name),
     email: args.email
   });
 }
@@ -165,7 +177,7 @@ export async function createSubscriptionCheckout(args: {
       currency: "MXN",
       customer_info: {
         customer_id: args.customerId,
-        name: args.customerName,
+        name: sanitizeName(args.customerName),
         email: args.customerEmail
       },
       line_items: [
