@@ -19,11 +19,10 @@ export const SITE_URL =
 export const DEFAULT_TITLE =
   "Empleo Automático MX: Postúlate a más empleos con IA";
 
-// Default meta description. Kept at 155 chars (inside 150-160 target) and
-// naturally includes: "buscar empleo", "postularte", "OCC Mundial", "IA",
-// "carta de presentación" and the price anchor. Spanish MX voice.
+// Default meta description. Kept under 160 chars and naturally includes:
+// "buscar empleo", "postularte", the 5 portals, "IA", price anchor.
 export const DEFAULT_DESCRIPTION =
-  "Copiloto con IA para buscar empleo en México: escribe cartas de presentación personalizadas y llena formularios en OCC Mundial. Desde $199 MXN al mes.";
+  "Copiloto con IA para buscar empleo en México. Postúlate en OCC, Computrabajo, Bumeran, Indeed y LinkedIn con cartas IA. Desde $199 MXN al mes.";
 
 // Target keyword set, high-intent for the Mexican job market. Google ignores
 // the meta keywords tag but Next's Metadata type accepts it and some crawlers
@@ -40,6 +39,10 @@ export const KEYWORDS: string[] = [
   "automatizar búsqueda de empleo",
   "extensión chrome empleo méxico",
   "OCC Mundial",
+  "Computrabajo",
+  "Bumeran México",
+  "Indeed México",
+  "LinkedIn Easy Apply",
   "IA para conseguir trabajo",
   "cover letter automática",
   "búsqueda de empleo automática",
@@ -52,7 +55,7 @@ export const OG_IMAGE = "/og-image.svg";
 export const OG_IMAGE_WIDTH = 1200;
 export const OG_IMAGE_HEIGHT = 630;
 export const OG_IMAGE_ALT =
-  "Empleo Automático MX — copiloto con IA para postularte en OCC Mundial. Por SkyBrandMX.";
+  "Empleo Automático MX — copiloto con IA para postularte en los principales portales de empleo de México. Por SkyBrandMX.";
 
 interface PageMetadataArgs {
   /** Page-specific title. Rendered as `${title} | SkyBrandMX` via layout template. */

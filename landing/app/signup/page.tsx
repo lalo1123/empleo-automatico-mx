@@ -15,7 +15,7 @@ import type { Metadata } from "next";
 export const metadata: Metadata = pageMetadata({
   title: "Crea tu cuenta gratis",
   description:
-    "Regístrate gratis en Empleo Automático MX y postúlate a más empleos en OCC Mundial con cartas de presentación generadas por IA. Sin tarjeta de crédito.",
+    "Regístrate gratis en Empleo Automático MX y postúlate en OCC, Computrabajo, Bumeran, Indeed y LinkedIn con cartas de presentación generadas por IA. Sin tarjeta de crédito.",
   path: "/signup",
 });
 

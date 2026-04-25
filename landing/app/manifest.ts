@@ -10,7 +10,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: "Empleo Automático MX",
     short_name: "EmpleoAuto",
     description:
-      "Copiloto con IA para postularte a más empleos en OCC Mundial y acelerar tu búsqueda de trabajo en México.",
+      "Copiloto con IA para postularte en OCC, Computrabajo, Bumeran, Indeed y LinkedIn. Acelera tu búsqueda de empleo en México.",
     start_url: "/",
     scope: "/",
     display: "standalone",

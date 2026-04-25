@@ -11,7 +11,7 @@ import type { Metadata } from "next";
 export const metadata: Metadata = pageMetadata({
   title: "Inicia sesión",
   description:
-    "Entra a tu cuenta de Empleo Automático MX para revisar tu plan, tu uso y tus postulaciones en OCC Mundial. Acceso seguro, rápido y sin fricción.",
+    "Entra a tu cuenta de Empleo Automático MX para revisar tu plan, tu uso y tus postulaciones en los 5 portales soportados. Acceso seguro, rápido y sin fricción.",
   path: "/login",
 });
 

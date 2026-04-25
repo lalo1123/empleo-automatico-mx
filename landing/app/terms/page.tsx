@@ -61,7 +61,7 @@ export default function TermsPage() {
               extensión de navegador y un copiloto con inteligencia artificial,
               te ayuda a redactar cartas de presentación personalizadas y a
               completar formularios de postulación en portales de empleo como
-              OCC Mundial.
+              los principales portales de empleo en México (OCC, Computrabajo, Bumeran, Indeed, LinkedIn).
             </p>
             <p className="mt-3">
               El Servicio <strong>no es un reclutador</strong>, no garantiza
