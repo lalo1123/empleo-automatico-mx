@@ -102,6 +102,7 @@ billingRoutes.post("/checkout", authRequired(), emailVerifiedRequired(), async (
       customerName: userRow.name ?? user.email,
       customerEmail: user.email,
       name: orderName,
+      unitPriceCentavos: price * 100,
       redirectUrl: env.FRONTEND_BACK_URL
     });
 

@@ -142,23 +142,41 @@ export async function createSubscriptionCheckout(args: {
   customerName: string;
   customerEmail: string;
   name: string;              // human-readable order name
+  unitPriceCentavos: number; // MXN price * 100
   redirectUrl: string;       // user is sent here after a successful payment
 }): Promise<ConektaCheckout> {
-  // Conekta "Checkout" PaymentLink with subscription plan. The user visits
-  // checkout.url, pays, and Conekta creates the subscription + first charge.
+  // Conekta "Checkout" PaymentLink with subscription plan (v2.1 schema:
+  // requires expires_at, payments_limit_count, and order_template wrapper).
+  const expiresAt = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 30; // 30 days
   const body: Record<string, unknown> = {
     name: args.name,
     type: "PaymentLink",
     recurrent: true,
     plan_id: args.planId,
-    success_url: args.redirectUrl,
-    failure_url: args.redirectUrl,
+    expires_at: expiresAt,
+    payments_limit_count: 1,
     needs_shipping_contact: false,
     allowed_payment_methods: ["card"],
-    customer_info: {
-      customer_id: args.customerId,
-      name: args.customerName,
-      email: args.customerEmail
+    redirection_time: 5,
+    on_demand_enabled: false,
+    order_template: {
+      currency: "MXN",
+      customer_info: {
+        customer_id: args.customerId,
+        name: args.customerName,
+        email: args.customerEmail
+      },
+      line_items: [
+        {
+          name: args.name,
+          unit_price: args.unitPriceCentavos,
+          quantity: 1
+        }
+      ]
+    },
+    metadata: {
+      success_url: args.redirectUrl,
+      failure_url: args.redirectUrl
     }
   };
   return conektaFetch<ConektaCheckout>(args.apiKey, "POST", "/checkouts", body);
