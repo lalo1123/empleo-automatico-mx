@@ -154,7 +154,9 @@ export async function createSubscriptionCheckout(args: {
     recurrent: true,
     plan_id: args.planId,
     expires_at: expiresAt,
-    payments_limit_count: 1,
+    // Conekta requires >1 even for single-user subscription links; 100 is
+    // a safe high cap (link is per-user, won't actually be shared).
+    payments_limit_count: 100,
     needs_shipping_contact: false,
     allowed_payment_methods: ["card"],
     redirection_time: 5,
