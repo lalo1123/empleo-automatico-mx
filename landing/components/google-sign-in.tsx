@@ -1,46 +1,41 @@
 "use client";
 
-// Google Sign-In button + One Tap.
-//
-// Loads Google Identity Services lazily and renders the official
-// "Sign in with Google" button. When the user accepts, GIS calls a
-// global callback with a short-lived ID token; we POST it to our own
-// /api/auth/google route, which exchanges it for our session cookie.
-//
-// If NEXT_PUBLIC_GOOGLE_CLIENT_ID is unset:
-//   - In dev: render a small muted "disabled" hint.
-//   - In prod: render NOTHING (graceful fallback).
-//
-// Implementation notes:
-//   - The button is rendered by GIS itself by attaching to a div
-//     marked .g_id_signin (data-* attributes drive the look).
-//   - We set the global window.onGoogleCredential per the GIS contract,
-//     using data-callback="onGoogleCredential" on the .g_id_onload div.
-//   - We do NOT cache the ID token anywhere; only our session cookie
-//     persists, and it's httpOnly.
+// Google Sign-In button using the JS API directly.
+// HTML data-attribute integration is unreliable with React (GIS only scans
+// the DOM at script load; React-mounted divs that arrive later are missed).
+// We instead call google.accounts.id.initialize + renderButton imperatively.
 
 import Script from "next/script";
-import { useRouter } from "next/navigation";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-type GoogleCredentialResponse = {
-  credential?: string;
-  select_by?: string;
-};
+type GoogleCredentialResponse = { credential?: string; select_by?: string };
+
+interface GISApi {
+  accounts: {
+    id: {
+      initialize: (config: {
+        client_id: string;
+        callback: (resp: GoogleCredentialResponse) => void;
+        auto_select?: boolean;
+        itp_support?: boolean;
+        ux_mode?: "popup" | "redirect";
+      }) => void;
+      renderButton: (
+        parent: HTMLElement,
+        options: Record<string, unknown>
+      ) => void;
+    };
+  };
+}
 
 declare global {
   interface Window {
-    onGoogleCredential?: (response: GoogleCredentialResponse) => void;
+    google?: GISApi;
   }
 }
 
 interface GoogleSignInProps {
-  /** Where to redirect after a successful login. Defaults to /account. */
   redirectTo?: string;
-  /**
-   * Optional className to add to the wrapper. The component still keeps
-   * its default vertical-stacking layout for the button + error.
-   */
   className?: string;
 }
 
@@ -51,69 +46,79 @@ export function GoogleSignIn({
   className,
 }: GoogleSignInProps) {
   const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
-  const router = useRouter();
+  const buttonRef = useRef<HTMLDivElement | null>(null);
+  const renderedRef = useRef<boolean>(false);
+  const [scriptReady, setScriptReady] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<boolean>(false);
-  // Stable id per render so multiple instances on a page don't clash.
-  const onloadId = useId();
 
-  // Mark whether we've attached the callback at least once. We attach it
-  // synchronously so it's available the moment the GIS script runs the
-  // data-callback lookup.
-  const attachedRef = useRef<boolean>(false);
-
-  useEffect(() => {
-    if (!clientId) return;
-    if (attachedRef.current) return;
-    attachedRef.current = true;
-
-    window.onGoogleCredential = async (response: GoogleCredentialResponse) => {
-      const idToken = response?.credential;
-      if (!idToken) {
-        setError(
-          "No recibimos credenciales de Google. Intenta de nuevo o usa email."
-        );
-        return;
-      }
-      setError(null);
-      setPending(true);
-      try {
-        const res = await fetch("/api/auth/google", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ idToken }),
-        });
+  const handleCredential = (response: GoogleCredentialResponse) => {
+    const idToken = response?.credential;
+    if (!idToken) {
+      setError("No recibimos credenciales de Google. Intenta de nuevo.");
+      return;
+    }
+    setError(null);
+    setPending(true);
+    fetch("/api/auth/google", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ idToken }),
+    })
+      .then(async (res) => {
         const payload = (await res.json().catch(() => null)) as
           | { ok: boolean; error?: { message?: string } }
           | null;
         if (!res.ok || !payload?.ok) {
-          const msg =
+          setError(
             payload?.error?.message ??
-            "No pudimos iniciar sesión con Google. Intenta de nuevo.";
-          setError(msg);
+              "No pudimos iniciar sesión con Google. Intenta de nuevo."
+          );
           setPending(false);
           return;
         }
-        // Success: hard navigate so the new httpOnly cookie is read by
-        // the destination route's server components.
         window.location.href = redirectTo;
-      } catch {
+      })
+      .catch(() => {
         setError(
           "No pudimos conectar con el servidor. Verifica tu internet e intenta de nuevo."
         );
         setPending(false);
-      }
-    };
+      });
+  };
 
-    return () => {
-      // Best-effort cleanup. If the user navigates away mid-flow we
-      // simply ignore subsequent callbacks.
-      if (window.onGoogleCredential) {
-        delete window.onGoogleCredential;
-      }
-    };
-    // router intentionally omitted — we use window.location for a hard nav.
-  }, [clientId, redirectTo]);
+  useEffect(() => {
+    if (!clientId || !scriptReady) return;
+    if (renderedRef.current) return;
+    if (!buttonRef.current) return;
+    if (!window.google?.accounts?.id) return;
+
+    renderedRef.current = true;
+    try {
+      window.google.accounts.id.initialize({
+        client_id: clientId,
+        callback: handleCredential,
+        auto_select: false,
+        itp_support: true,
+        ux_mode: "popup",
+      });
+      window.google.accounts.id.renderButton(buttonRef.current, {
+        type: "standard",
+        shape: "rectangular",
+        theme: "outline",
+        text: "signin_with",
+        size: "large",
+        locale: "es",
+        logo_alignment: "left",
+        width: 320,
+      });
+    } catch (err) {
+      console.error("[google-sign-in] init failed", err);
+      setError("No se pudo cargar el botón de Google. Recarga la página.");
+    }
+    // handleCredential is a stable closure; safe to omit from deps.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId, scriptReady]);
 
   if (!clientId || clientId.length === 0) {
     if (process.env.NODE_ENV === "development") {
@@ -129,27 +134,13 @@ export function GoogleSignIn({
 
   return (
     <div className={className}>
-      <Script src={SCRIPT_SRC} strategy="afterInteractive" async defer />
-      {/* GIS renders the button into the .g_id_signin div on script load. */}
-      <div
-        id={onloadId}
-        className="g_id_onload"
-        data-client_id={clientId}
-        data-callback="onGoogleCredential"
-        data-locale="es"
-        data-auto_select="false"
-        data-itp_support="true"
+      <Script
+        src={SCRIPT_SRC}
+        strategy="afterInteractive"
+        onLoad={() => setScriptReady(true)}
+        onReady={() => setScriptReady(true)}
       />
-      <div
-        className="g_id_signin flex justify-center"
-        data-type="standard"
-        data-shape="rectangular"
-        data-theme="outline"
-        data-text="signin_with"
-        data-size="large"
-        data-locale="es"
-        data-logo_alignment="left"
-      />
+      <div ref={buttonRef} className="flex justify-center" />
       {pending && (
         <p
           className="mt-2 text-center text-xs text-[color:var(--color-ink-muted)]"
