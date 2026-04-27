@@ -111,7 +111,7 @@ function updatePreviewFromProfile(profile) {
   const top = (profile?.skills || []).slice(0, 3);
   pvSkills.textContent = top.length ? top.join(", ") : "\u2014";
   rawJsonArea.value = JSON.stringify(profile, null, 2);
-  cvPreview.classList.remove("hidden");
+  cvPreview.classList.remove("is-hidden");
 }
 
 // ---------------------------------------------------------------------------
@@ -153,21 +153,21 @@ async function extractPdfText(arrayBuffer) {
 // ---------------------------------------------------------------------------
 
 function showLoginTab() {
-  tabLogin.classList.add("active");
-  tabSignup.classList.remove("active");
+  tabLogin.classList.add("is-active");
+  tabSignup.classList.remove("is-active");
   tabLogin.setAttribute("aria-selected", "true");
   tabSignup.setAttribute("aria-selected", "false");
-  loginForm.classList.remove("hidden");
-  signupForm.classList.add("hidden");
+  loginForm.classList.remove("is-hidden");
+  signupForm.classList.add("is-hidden");
 }
 
 function showSignupTab() {
-  tabSignup.classList.add("active");
-  tabLogin.classList.remove("active");
+  tabSignup.classList.add("is-active");
+  tabLogin.classList.remove("is-active");
   tabSignup.setAttribute("aria-selected", "true");
   tabLogin.setAttribute("aria-selected", "false");
-  signupForm.classList.remove("hidden");
-  loginForm.classList.add("hidden");
+  signupForm.classList.remove("is-hidden");
+  loginForm.classList.add("is-hidden");
 }
 
 tabLogin.addEventListener("click", showLoginTab);
@@ -251,8 +251,8 @@ manageBillingBtn.addEventListener("click", async () => {
 });
 
 function renderAuthLoggedIn(user, usage) {
-  authCard.classList.add("hidden");
-  accountCard.classList.remove("hidden");
+  authCard.classList.add("is-hidden");
+  accountCard.classList.remove("is-hidden");
   accountName.textContent = user?.name || user?.email || "\u2014";
   accountEmail.textContent = user?.email || "\u2014";
   planBadge.textContent = PLAN_LABELS[user?.plan] || "Plan Gratis";
@@ -267,8 +267,8 @@ function renderAuthLoggedIn(user, usage) {
 }
 
 function renderAuthLoggedOut() {
-  authCard.classList.remove("hidden");
-  accountCard.classList.add("hidden");
+  authCard.classList.remove("is-hidden");
+  accountCard.classList.add("is-hidden");
   showLoginTab();
 }
 
@@ -327,7 +327,7 @@ fileInput.addEventListener("change", () => {
 });
 
 cvReplaceBtn.addEventListener("click", () => {
-  cvExistingBanner.classList.add("hidden");
+  cvExistingBanner.classList.add("is-hidden");
   openFilePicker();
 });
 
@@ -342,8 +342,8 @@ async function handleFile(file) {
     return;
   }
 
-  cvPreview.classList.add("hidden");
-  cvProgress.classList.remove("hidden");
+  cvPreview.classList.add("is-hidden");
+  cvProgress.classList.remove("is-hidden");
   cvProgressText.textContent = "Extrayendo texto del PDF\u2026";
 
   try {
@@ -369,7 +369,7 @@ async function handleFile(file) {
   } catch (e) {
     setStatus(cvStatus, "err", e.message || "Error al procesar el CV");
   } finally {
-    cvProgress.classList.add("hidden");
+    cvProgress.classList.add("is-hidden");
   }
 }
 
@@ -400,9 +400,9 @@ async function refreshExistingBanner() {
   if (profile?.personal?.fullName) {
     cvExistingName.textContent = `CV cargado: ${profile.personal.fullName}`;
     cvExistingWhen.textContent = `\u2014 actualizado ${formatRelative(profile.updatedAt)}`;
-    cvExistingBanner.classList.remove("hidden");
+    cvExistingBanner.classList.remove("is-hidden");
   } else {
-    cvExistingBanner.classList.add("hidden");
+    cvExistingBanner.classList.add("is-hidden");
   }
 }
 
