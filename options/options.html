@@ -39,20 +39,91 @@
 
     <main class="container">
       <!-- ============ Card 1A: Login / Signup (when logged out) ============ -->
-      <section class="card" id="authCard" aria-labelledby="authHeading">
-        <div class="card__head">
-          <h2 id="authHeading">Tu cuenta de Empleo Autom&aacute;tico</h2>
+      <!--
+        TODO Phase 2: integrate chrome.identity.launchWebAuthFlow + oauth2 client_id
+        in manifest.json so users get native Google Sign-In here. Until then we
+        round-trip via the landing's Google flow (https://empleo.skybrandmx.com/signup)
+        and they return to enter the same credentials in the login form.
+      -->
+      <section class="card auth-card" id="authCard" aria-labelledby="authHeading">
+        <!-- A. Hero visual ------------------------------------------------ -->
+        <div class="auth-hero" aria-hidden="true">
+          <div class="auth-hero__browser">
+            <div class="auth-hero__chrome">
+              <span class="auth-hero__dot auth-hero__dot--r"></span>
+              <span class="auth-hero__dot auth-hero__dot--y"></span>
+              <span class="auth-hero__dot auth-hero__dot--g"></span>
+              <span class="auth-hero__url">occ.com.mx/empleo/desarrollador-frontend</span>
+            </div>
+            <div class="auth-hero__page">
+              <span class="auth-hero__chip">Tiempo completo &middot; CDMX</span>
+              <div class="auth-hero__title">Desarrollador Frontend Senior</div>
+              <div class="auth-hero__bars">
+                <span class="auth-hero__bar" style="width:96%"></span>
+                <span class="auth-hero__bar" style="width:82%"></span>
+                <span class="auth-hero__bar" style="width:64%"></span>
+              </div>
+            </div>
+            <button type="button" class="auth-hero__fab" tabindex="-1" aria-hidden="true">
+              <span class="auth-hero__sparkle">&#10024;</span>
+              <span>Postular con IA</span>
+            </button>
+          </div>
+
+          <div class="auth-hero__panel">
+            <div class="auth-hero__panel-head">
+              <span class="auth-hero__panel-dot"></span>
+              <span>Empleo Autom&aacute;tico &middot; generando carta</span>
+            </div>
+            <div class="auth-hero__letter">
+              <p class="auth-hero__type">Hola, vi su vacante de Frontend Senior y encaja con mi experiencia. Llevo 5 a&ntilde;os con React y TypeScript. Saludos, Daniela.</p>
+            </div>
+            <button type="button" class="auth-hero__approve" tabindex="-1" aria-hidden="true">
+              <span class="auth-hero__sparkle">&#10003;</span>
+              <span>Aprobar y postular</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="card__head auth-card__head">
+          <h2 id="authHeading">Postula a m&aacute;s empleos con IA, en menos tiempo</h2>
           <p class="card__sub">
             Inicia sesi&oacute;n con tu cuenta de SkyBrandMX, o
-            <a href="https://skybrandmx.com/signup" target="_blank" rel="noreferrer">crea tu cuenta gratis</a>
+            <a href="https://empleo.skybrandmx.com/signup" target="_blank" rel="noreferrer">crea tu cuenta gratis</a>
             si a&uacute;n no tienes una. El plan Gratis incluye 3 postulaciones al mes.
           </p>
         </div>
 
-        <div class="tabs" role="tablist" aria-label="Acceder o crear cuenta">
+        <!-- B. Trust badges ---------------------------------------------- -->
+        <ul class="auth-badges" role="list">
+          <li class="auth-badge"><span class="auth-badge__emoji" aria-hidden="true">&#127919;</span><span><strong>5 portales</strong> &middot; OCC, Computrabajo, Bumeran, Indeed, LinkedIn</span></li>
+          <li class="auth-badge"><span class="auth-badge__emoji" aria-hidden="true">&#129302;</span><span><strong>IA Gemini</strong> personaliza tu carta</span></li>
+          <li class="auth-badge"><span class="auth-badge__emoji" aria-hidden="true">&#127381;</span><span><strong>3 gratis al mes</strong> &middot; sin tarjeta</span></li>
+          <li class="auth-badge"><span class="auth-badge__emoji" aria-hidden="true">&#128737;&#65039;</span><span><strong>Tu CV es privado</strong> &middot; local + cifrado</span></li>
+        </ul>
+
+        <!-- C. Tabs (sliding underline) ---------------------------------- -->
+        <div class="tabs auth-tabs" role="tablist" aria-label="Acceder o crear cuenta">
           <button type="button" class="tab is-active" id="tabLogin" role="tab" aria-selected="true">Iniciar sesi&oacute;n</button>
           <button type="button" class="tab" id="tabSignup" role="tab" aria-selected="false">Crear cuenta</button>
+          <span class="auth-tabs__indicator" aria-hidden="true"></span>
         </div>
+
+        <!-- D. Google CTA + divider -------------------------------------- -->
+        <a class="auth-google-cta" href="https://empleo.skybrandmx.com/signup?source=extension" target="_blank" rel="noreferrer">
+          <svg class="auth-google-cta__icon" viewBox="0 0 48 48" width="20" height="20" aria-hidden="true">
+            <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3c-1.6 4.7-6.1 8-11.3 8-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.5 6.1 29.5 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z" />
+            <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.5 6.1 29.5 4 24 4 16.3 4 9.7 8.3 6.3 14.7z" />
+            <path fill="#4CAF50" d="M24 44c5.4 0 10.3-2.1 14-5.5l-6.5-5.5c-2 1.5-4.6 2.4-7.5 2.4-5.1 0-9.5-3.3-11.1-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z" />
+            <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.3 4.3-4.2 5.6l6.5 5.5c-.4.4 6.5-4.7 6.5-15.1 0-1.3-.1-2.4-.5-3.5z" />
+          </svg>
+          <span>Continuar con Google</span>
+        </a>
+        <p class="auth-google-cta__hint">
+          Te abriremos la p&aacute;gina de SkyBrandMX para registrarte. Despu&eacute;s regresa aqu&iacute; e inicia sesi&oacute;n con el correo que usaste.
+        </p>
+
+        <div class="auth-divider-or" aria-hidden="true"><span>o usa correo y contrase&ntilde;a</span></div>
 
         <!-- Login form -->
         <div id="loginForm" class="auth-form">
@@ -68,6 +139,12 @@
             <button type="button" class="btn btn--primary" id="loginBtn">Iniciar sesi&oacute;n</button>
             <span id="loginStatus" class="status" role="status" aria-live="polite"></span>
           </div>
+          <p class="auth-fineprint">
+            Al continuar aceptas nuestros
+            <a href="https://empleo.skybrandmx.com/terms" target="_blank" rel="noreferrer">t&eacute;rminos</a>
+            y el
+            <a href="https://empleo.skybrandmx.com/privacy" target="_blank" rel="noreferrer">aviso de privacidad</a>.
+          </p>
         </div>
 
         <!-- Signup form -->
@@ -88,6 +165,12 @@
             <button type="button" class="btn btn--primary" id="signupBtn">Crear cuenta gratis</button>
             <span id="signupStatus" class="status" role="status" aria-live="polite"></span>
           </div>
+          <p class="auth-fineprint">
+            Al continuar aceptas nuestros
+            <a href="https://empleo.skybrandmx.com/terms" target="_blank" rel="noreferrer">t&eacute;rminos</a>
+            y el
+            <a href="https://empleo.skybrandmx.com/privacy" target="_blank" rel="noreferrer">aviso de privacidad</a>.
+          </p>
         </div>
       </section>
 
