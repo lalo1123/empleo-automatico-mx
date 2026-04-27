@@ -8,146 +8,198 @@
   </head>
   <body>
     <header class="page-header">
-      <div class="logo-wrap">
-        <div class="logo-mark" aria-hidden="true">E</div>
-        <div>
-          <div class="logo-title">Empleo Autom&aacute;tico MX &mdash; por SkyBrandMX</div>
-          <div class="logo-sub">Opciones <span id="versionTag"></span></div>
+      <div class="page-header__inner">
+        <div class="brand" aria-label="SkyBrandMX">
+          <div class="brand__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="36" height="36" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <g style="transform-origin: center bottom;">
+                <g stroke="#105971" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 2L15 6V14C15 14 15 17 12 17C9 17 9 14 9 14V6L12 2Z" />
+                  <path d="M9 11L6 14H9V11Z" fill="#105971" />
+                  <path d="M15 11L18 14H15V11Z" fill="#105971" />
+                </g>
+                <g>
+                  <path d="M9 17C10.5 20 12 22 12 22C12 22 13.5 20 15 17H9Z" fill="#ff6600" />
+                  <path d="M10 17.5C11 19.5 12 21 12 21C12 21 13 19.5 14 17.5H10Z" fill="#ef6f6f" />
+                </g>
+              </g>
+            </svg>
+          </div>
+          <div class="brand__textwrap">
+            <div class="brand__wordmark">
+              <span>SKYBR</span><span class="brand__accent">A</span><span class="brand__accent">N</span><span>DM</span><span class="brand__accent">X</span>
+            </div>
+            <span class="brand__underline" aria-hidden="true"></span>
+            <div class="brand__sub">Opciones <span class="brand__version" id="versionTag"></span></div>
+          </div>
         </div>
+        <p class="brand__tagline">Copiloto con IA para postularte a m&aacute;s empleos en M&eacute;xico.</p>
       </div>
     </header>
 
     <main class="container">
       <!-- ============ Card 1A: Login / Signup (when logged out) ============ -->
       <section class="card" id="authCard" aria-labelledby="authHeading">
-        <h2 id="authHeading">Tu cuenta de Empleo Autom&aacute;tico</h2>
-        <p class="help">
-          Inicia sesi&oacute;n con tu cuenta de SkyBrandMX, o
-          <a href="https://skybrandmx.com/signup" target="_blank" rel="noreferrer">crea tu cuenta gratis</a>
-          si a&uacute;n no tienes una. Plan Gratis incluye 3 postulaciones al mes.
-        </p>
+        <div class="card__head">
+          <h2 id="authHeading">Tu cuenta de Empleo Autom&aacute;tico</h2>
+          <p class="card__sub">
+            Inicia sesi&oacute;n con tu cuenta de SkyBrandMX, o
+            <a href="https://skybrandmx.com/signup" target="_blank" rel="noreferrer">crea tu cuenta gratis</a>
+            si a&uacute;n no tienes una. El plan Gratis incluye 3 postulaciones al mes.
+          </p>
+        </div>
 
-        <div class="tab-row" role="tablist" aria-label="Acceder o crear cuenta">
-          <button type="button" class="tab active" id="tabLogin" role="tab" aria-selected="true">Iniciar sesi&oacute;n</button>
+        <div class="tabs" role="tablist" aria-label="Acceder o crear cuenta">
+          <button type="button" class="tab is-active" id="tabLogin" role="tab" aria-selected="true">Iniciar sesi&oacute;n</button>
           <button type="button" class="tab" id="tabSignup" role="tab" aria-selected="false">Crear cuenta</button>
         </div>
 
         <!-- Login form -->
         <div id="loginForm" class="auth-form">
-          <label class="field-label" for="loginEmail">Correo</label>
-          <input id="loginEmail" type="email" autocomplete="email" placeholder="tu@correo.com" />
-
-          <label class="field-label" for="loginPassword">Contrase&ntilde;a</label>
-          <input id="loginPassword" type="password" autocomplete="current-password" placeholder="M&iacute;n 8 caracteres" />
-
+          <div class="field">
+            <label class="field-label" for="loginEmail">Correo</label>
+            <input id="loginEmail" type="email" autocomplete="email" placeholder="tu@correo.com" />
+          </div>
+          <div class="field">
+            <label class="field-label" for="loginPassword">Contrase&ntilde;a</label>
+            <input id="loginPassword" type="password" autocomplete="current-password" placeholder="M&iacute;n 8 caracteres" />
+          </div>
           <div class="actions">
-            <button type="button" id="loginBtn">Iniciar sesi&oacute;n</button>
+            <button type="button" class="btn btn--primary" id="loginBtn">Iniciar sesi&oacute;n</button>
             <span id="loginStatus" class="status" role="status" aria-live="polite"></span>
           </div>
         </div>
 
         <!-- Signup form -->
-        <div id="signupForm" class="auth-form hidden">
-          <label class="field-label" for="signupName">Nombre</label>
-          <input id="signupName" type="text" autocomplete="name" placeholder="Juan P&eacute;rez" />
-
-          <label class="field-label" for="signupEmail">Correo</label>
-          <input id="signupEmail" type="email" autocomplete="email" placeholder="tu@correo.com" />
-
-          <label class="field-label" for="signupPassword">Contrase&ntilde;a</label>
-          <input id="signupPassword" type="password" autocomplete="new-password" placeholder="M&iacute;n 8 caracteres" />
-
+        <div id="signupForm" class="auth-form is-hidden">
+          <div class="field">
+            <label class="field-label" for="signupName">Nombre</label>
+            <input id="signupName" type="text" autocomplete="name" placeholder="Juan P&eacute;rez" />
+          </div>
+          <div class="field">
+            <label class="field-label" for="signupEmail">Correo</label>
+            <input id="signupEmail" type="email" autocomplete="email" placeholder="tu@correo.com" />
+          </div>
+          <div class="field">
+            <label class="field-label" for="signupPassword">Contrase&ntilde;a</label>
+            <input id="signupPassword" type="password" autocomplete="new-password" placeholder="M&iacute;n 8 caracteres" />
+          </div>
           <div class="actions">
-            <button type="button" id="signupBtn">Crear cuenta gratis</button>
+            <button type="button" class="btn btn--primary" id="signupBtn">Crear cuenta gratis</button>
             <span id="signupStatus" class="status" role="status" aria-live="polite"></span>
           </div>
         </div>
       </section>
 
       <!-- ============ Card 1B: Account summary (when logged in) ============ -->
-      <section class="card hidden" id="accountCard" aria-labelledby="accountHeading">
-        <div class="account-header">
+      <section class="card is-hidden" id="accountCard" aria-labelledby="accountHeading">
+        <div class="account-head">
           <div>
+            <div class="card__eyebrow">Mi cuenta</div>
             <h2 id="accountHeading">Hola, <span id="accountName">&mdash;</span></h2>
-            <div class="subtle" id="accountEmail">&mdash;</div>
+            <div class="muted" id="accountEmail">&mdash;</div>
           </div>
-          <div>
-            <span class="plan-badge" id="planBadge">Plan Gratis</span>
-          </div>
+          <span class="plan-badge" id="planBadge" data-plan="free">Plan Gratis</span>
         </div>
 
-        <div class="usage-row" id="usageRow">
-          <div class="usage-label">Postulaciones este mes</div>
-          <div class="usage-value">
-            <span id="usageCurrent">0</span> <span class="usage-sep">/</span> <span id="usageLimit">3</span>
+        <div class="usage" id="usageRow">
+          <div class="usage__head">
+            <div class="usage__label">Postulaciones este mes</div>
+            <div class="usage__value">
+              <span id="usageCurrent">0</span><span class="usage__sep">/</span><span id="usageLimit">3</span>
+            </div>
+          </div>
+          <div class="usage__bar" aria-hidden="true">
+            <div class="usage__fill" id="usageFill" style="width: 0%"></div>
           </div>
         </div>
 
         <div class="actions">
-          <button type="button" id="manageBillingBtn">Gestionar suscripci&oacute;n / Upgrade</button>
-          <button type="button" class="secondary" id="logoutBtn">Cerrar sesi&oacute;n</button>
+          <button type="button" class="btn btn--primary" id="manageBillingBtn">Gestionar suscripci&oacute;n / Upgrade</button>
+          <button type="button" class="btn btn--ghost" id="logoutBtn">Cerrar sesi&oacute;n</button>
           <span id="accountStatus" class="status" role="status" aria-live="polite"></span>
         </div>
       </section>
 
       <!-- ============ Card 2: CV ============ -->
       <section class="card" aria-labelledby="cvHeading">
-        <h2 id="cvHeading">Mi CV</h2>
-        <p class="help">
-          Subimos tu CV en PDF, extraemos el texto localmente y lo mandamos a
-          nuestro servidor para estructurarlo. Puedes editarlo antes de guardar.
-        </p>
+        <div class="card__head">
+          <h2 id="cvHeading">Mi CV</h2>
+          <p class="card__sub">
+            Subimos tu CV en PDF, extraemos el texto en tu navegador y lo enviamos a
+            nuestro servidor para estructurarlo. Pod&aacute;s editarlo antes de guardar.
+          </p>
+        </div>
 
-        <div id="cvExistingBanner" class="banner hidden">
-          <div>
-            <strong id="cvExistingName"></strong>
-            <span class="subtle" id="cvExistingWhen"></span>
+        <div id="cvExistingBanner" class="banner is-hidden">
+          <div class="banner__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <polyline points="14 2 14 8 20 8" />
+              <polyline points="9 13 11 15 15 11" />
+            </svg>
           </div>
-          <button type="button" class="secondary small" id="cvReplace">Reemplazar</button>
+          <div class="banner__body">
+            <strong id="cvExistingName">CV cargado</strong>
+            <span class="muted" id="cvExistingWhen"></span>
+          </div>
+          <button type="button" class="btn btn--ghost btn--sm" id="cvReplace">Reemplazar</button>
         </div>
 
         <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="Subir CV en PDF">
-          <div class="dz-title">Arrastra tu CV (PDF) aqu&iacute;</div>
-          <div class="dz-sub">o haz clic para seleccionar. M&aacute;x 10 MB.</div>
+          <div class="dropzone__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
+          </div>
+          <div class="dropzone__title">Arrastra tu CV (PDF) aqu&iacute;</div>
+          <div class="dropzone__sub">o haz clic para seleccionar. M&aacute;x 10 MB.</div>
           <input id="fileInput" type="file" accept="application/pdf,.pdf" hidden />
         </div>
 
-        <div id="cvProgress" class="progress hidden" role="status" aria-live="polite">
+        <div id="cvProgress" class="progress is-hidden" role="status" aria-live="polite">
           <div class="spinner" aria-hidden="true"></div>
           <span id="cvProgressText">Analizando&hellip;</span>
         </div>
 
-        <div id="cvPreview" class="preview hidden">
+        <div id="cvPreview" class="preview is-hidden">
           <div class="preview-grid">
-            <div>
-              <div class="kv-label">Nombre</div>
-              <div class="kv-value" id="pvName">&mdash;</div>
+            <div class="kv">
+              <div class="kv__label">Nombre</div>
+              <div class="kv__value" id="pvName">&mdash;</div>
             </div>
-            <div>
-              <div class="kv-label">Puesto actual</div>
-              <div class="kv-value" id="pvRole">&mdash;</div>
+            <div class="kv">
+              <div class="kv__label">Puesto actual</div>
+              <div class="kv__value" id="pvRole">&mdash;</div>
             </div>
-            <div>
-              <div class="kv-label">A&ntilde;os de experiencia</div>
-              <div class="kv-value" id="pvYears">&mdash;</div>
+            <div class="kv">
+              <div class="kv__label">A&ntilde;os de experiencia</div>
+              <div class="kv__value" id="pvYears">&mdash;</div>
             </div>
-            <div>
-              <div class="kv-label">Top skills</div>
-              <div class="kv-value" id="pvSkills">&mdash;</div>
+            <div class="kv">
+              <div class="kv__label">Top skills</div>
+              <div class="kv__value" id="pvSkills">&mdash;</div>
             </div>
           </div>
 
           <details class="raw-details">
-            <summary>Editar JSON crudo (avanzado)</summary>
+            <summary>
+              <span>Editar JSON crudo (avanzado)</span>
+              <svg class="raw-details__chev" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </summary>
             <textarea id="rawJson" rows="12" spellcheck="false"></textarea>
-            <div class="subtle small-gap">
-              Edita con cuidado. Debe ser JSON v&aacute;lido que respete el schema
+            <div class="muted small-gap">
+              Edit&aacute; con cuidado. Debe ser JSON v&aacute;lido que respete el schema
               <code>UserProfile</code>.
             </div>
           </details>
 
           <div class="actions">
-            <button type="button" id="saveProfile">Guardar perfil</button>
+            <button type="button" class="btn btn--primary" id="saveProfile">Guardar perfil</button>
             <span id="cvStatus" class="status" role="status" aria-live="polite"></span>
           </div>
         </div>
@@ -155,29 +207,39 @@
 
       <!-- ============ Card 3: Settings ============ -->
       <section class="card" aria-labelledby="settingsHeading">
-        <h2 id="settingsHeading">Configuraci&oacute;n</h2>
+        <div class="card__head">
+          <h2 id="settingsHeading">Configuraci&oacute;n</h2>
+          <p class="card__sub">Idioma de la carta y comportamiento del copiloto.</p>
+        </div>
 
-        <label class="field-label" for="language">Idioma de la carta</label>
-        <select id="language">
-          <option value="es">Espa&ntilde;ol</option>
-          <option value="en">English</option>
-        </select>
+        <div class="field">
+          <label class="field-label" for="language">Idioma de la carta</label>
+          <div class="select-wrap">
+            <select id="language">
+              <option value="es">Espa&ntilde;ol</option>
+              <option value="en">English</option>
+            </select>
+            <svg class="select-chev" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </div>
+        </div>
 
         <div class="toggle-row">
           <label class="switch">
             <input id="autoApprove" type="checkbox" />
-            <span class="slider" aria-hidden="true"></span>
+            <span class="switch__slider" aria-hidden="true"></span>
           </label>
           <div>
-            <div class="toggle-title">Aprobaci&oacute;n autom&aacute;tica</div>
-            <div class="subtle">
-              Recomendado: OFF. Siempre revisa antes de enviar.
+            <div class="toggle-row__title">Aprobaci&oacute;n autom&aacute;tica</div>
+            <div class="muted">
+              Recomendado: OFF. Siempre revis&aacute; antes de enviar.
             </div>
           </div>
         </div>
 
         <div class="actions">
-          <button type="button" id="saveSettings">Guardar configuraci&oacute;n</button>
+          <button type="button" class="btn btn--primary" id="saveSettings">Guardar configuraci&oacute;n</button>
           <span id="settingsStatus" class="status" role="status" aria-live="polite"></span>
         </div>
 
@@ -186,20 +248,24 @@
         <div class="row-between">
           <div>
             <div class="field-label">Exportar / Importar perfil</div>
-            <div class="subtle">Respaldo local en JSON.</div>
+            <div class="muted">Respaldo local en JSON.</div>
           </div>
           <div class="actions">
-            <button type="button" class="secondary" id="exportProfile">Exportar</button>
-            <button type="button" class="secondary" id="importProfile">Importar</button>
+            <button type="button" class="btn btn--ghost" id="exportProfile">Exportar</button>
+            <button type="button" class="btn btn--ghost" id="importProfile">Importar</button>
             <input id="importInput" type="file" accept="application/json,.json" hidden />
           </div>
         </div>
       </section>
 
       <footer class="page-footer">
-        <span id="footerVersion"></span> &middot;
+        <span id="footerVersion"></span>
+        <span class="page-footer__dot">&middot;</span>
         <a href="https://skybrandmx.com" target="_blank" rel="noreferrer">skybrandmx.com</a>
-        &middot; Human-in-the-loop &middot; Hecho con cari&ntilde;o en M&eacute;xico.
+        <span class="page-footer__dot">&middot;</span>
+        Human-in-the-loop
+        <span class="page-footer__dot">&middot;</span>
+        Hecho con cari&ntilde;o en M&eacute;xico.
       </footer>
     </main>
 

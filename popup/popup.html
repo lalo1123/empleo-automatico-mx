@@ -7,14 +7,45 @@
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
+    <header class="pop-header">
+      <div class="pop-brand" aria-label="SkyBrandMX">
+        <span class="pop-brand__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <g style="transform-origin: center bottom;">
+              <g stroke="#105971" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 2L15 6V14C15 14 15 17 12 17C9 17 9 14 9 14V6L12 2Z" />
+                <path d="M9 11L6 14H9V11Z" fill="#105971" />
+                <path d="M15 11L18 14H15V11Z" fill="#105971" />
+              </g>
+              <g>
+                <path d="M9 17C10.5 20 12 22 12 22C12 22 13.5 20 15 17H9Z" fill="#ff6600" />
+                <path d="M10 17.5C11 19.5 12 21 12 21C12 21 13 19.5 14 17.5H10Z" fill="#ef6f6f" />
+              </g>
+            </g>
+          </svg>
+        </span>
+        <span class="pop-brand__wordmark">
+          <span>SKYBR</span><span class="pop-brand__accent">A</span><span class="pop-brand__accent">N</span><span>DM</span><span class="pop-brand__accent">X</span>
+        </span>
+      </div>
+      <span class="pop-version" id="popHeaderVersion">v0.1.0</span>
+    </header>
     <main id="root" aria-live="polite">
       <!-- Loading state rendered by popup.js -->
-      <div class="skeleton">
-        <div class="skeleton-line" style="width: 60%"></div>
-        <div class="skeleton-line" style="width: 90%"></div>
-        <div class="skeleton-line" style="width: 80%"></div>
+      <div class="pop-skeleton" aria-hidden="true">
+        <div class="pop-skeleton__line" style="width: 55%"></div>
+        <div class="pop-skeleton__line" style="width: 92%"></div>
+        <div class="pop-skeleton__line" style="width: 78%"></div>
+        <div class="pop-skeleton__btn"></div>
       </div>
     </main>
+    <footer class="pop-footer" id="popFooter" hidden>
+      <a href="#" id="popFooterOptions">Opciones</a>
+      <span class="pop-footer__dot">·</span>
+      <a href="#" id="popFooterAccount">Mi cuenta</a>
+      <span class="pop-footer__dot">·</span>
+      <span id="popFooterVersion">v0.1.0</span>
+    </footer>
     <script type="module" src="popup.js"></script>
   </body>
 </html>
