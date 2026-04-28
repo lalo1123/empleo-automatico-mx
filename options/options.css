@@ -1418,3 +1418,60 @@ code {
     padding: 8px 14px;
   }
 }
+
+/* =============================================================================
+ * Next steps card — shown after login to guide the user to OCC/Computrabajo/etc
+ * ============================================================================= */
+.next-steps__portals {
+  list-style: none;
+  margin: 0 0 16px;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+.portal-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  border: 1px solid var(--c-border, #e2e8f0);
+  border-radius: 12px;
+  background: var(--c-surface-soft, #f8fafc);
+  text-decoration: none;
+  color: var(--c-ink, #0f1d2c);
+  transition: transform 150ms ease, box-shadow 150ms ease, border-color 150ms ease, background-color 150ms ease;
+}
+.portal-card:hover {
+  transform: translateY(-1px);
+  border-color: var(--c-brand-300, #70d1c6);
+  background: #ffffff;
+  box-shadow: 0 6px 16px -8px rgba(16, 89, 113, 0.25);
+}
+.portal-card:active {
+  transform: translateY(0);
+}
+.portal-card:focus-visible {
+  outline: 2px solid var(--c-brand-300, #70d1c6);
+  outline-offset: 2px;
+}
+.portal-card__name {
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--c-ink, #0f1d2c);
+}
+.portal-card__hint {
+  font-size: 12px;
+  color: var(--c-ink-muted, #5b6e7e);
+  font-family: var(--font-mono, ui-monospace, "SF Mono", monospace);
+}
+.next-steps__list {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--c-ink-soft, #1f3447);
+}
+.next-steps__list li {
+  margin-bottom: 4px;
+}

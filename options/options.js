@@ -35,6 +35,7 @@ const signupBtn = $("signupBtn");
 const signupStatus = $("signupStatus");
 
 // Account card (logged in) refs
+const nextStepsCard = $("nextStepsCard");
 const accountCard = $("accountCard");
 const accountName = $("accountName");
 const accountEmail = $("accountEmail");
@@ -252,6 +253,7 @@ manageBillingBtn.addEventListener("click", async () => {
 function renderAuthLoggedIn(user, usage) {
   authCard.classList.add("is-hidden");
   accountCard.classList.remove("is-hidden");
+  nextStepsCard?.classList.remove("is-hidden");
   accountName.textContent = user?.name || user?.email || "\u2014";
   accountEmail.textContent = user?.email || "\u2014";
   planBadge.textContent = PLAN_LABELS[user?.plan] || "Plan Gratis";
@@ -268,6 +270,7 @@ function renderAuthLoggedIn(user, usage) {
 function renderAuthLoggedOut() {
   authCard.classList.remove("is-hidden");
   accountCard.classList.add("is-hidden");
+  nextStepsCard?.classList.add("is-hidden");
   showLoginTab();
 }
 
