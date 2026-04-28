@@ -144,7 +144,7 @@ async function handleGenerateDraft(msg) {
       return {
         ok: false,
         error: ERROR_CODES.PLAN_LIMIT_EXCEEDED,
-        message: "Llegaste al límite de tu plan. Upgrade en skybrandmx.com/account/billing"
+        message: "Llegaste al límite de tu plan. Upgrade en empleo.skybrandmx.com/account/billing"
       };
     }
     return failFromError(e);

@@ -20,7 +20,7 @@
   const SOURCE = "computrabajo";
   const MSG = { GENERATE_DRAFT: "GENERATE_DRAFT", APPROVE_DRAFT: "APPROVE_DRAFT", REJECT_DRAFT: "REJECT_DRAFT", OPEN_BILLING: "OPEN_BILLING" };
   const ERR = { UNAUTHORIZED: "UNAUTHORIZED", PLAN_LIMIT_EXCEEDED: "PLAN_LIMIT_EXCEEDED" };
-  const BILLING_URL = "https://skybrandmx.com/account/billing";
+  const BILLING_URL = "https://empleo.skybrandmx.com/account/billing";
 
   // TODO(dom): verify against real Computrabajo URLs. These cover the common
   // "oferta-de-trabajo-de-..." slug pattern plus a generic /ofertas-de-trabajo/

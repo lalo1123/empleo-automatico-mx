@@ -33,7 +33,7 @@
   const SOURCE = "linkedin";
   const MSG = { GENERATE_DRAFT: "GENERATE_DRAFT", APPROVE_DRAFT: "APPROVE_DRAFT", REJECT_DRAFT: "REJECT_DRAFT", OPEN_BILLING: "OPEN_BILLING" };
   const ERR = { UNAUTHORIZED: "UNAUTHORIZED", PLAN_LIMIT_EXCEEDED: "PLAN_LIMIT_EXCEEDED" };
-  const BILLING_URL = "https://skybrandmx.com/account/billing";
+  const BILLING_URL = "https://empleo.skybrandmx.com/account/billing";
 
   // --- Anti-ban guardrails -------------------------------------------------
   // LinkedIn flags accounts with ~20+ application patterns per day. We hard

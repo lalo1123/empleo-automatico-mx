@@ -28,7 +28,7 @@
   const SOURCE = "indeed"; // schemas.js will gain SOURCES.INDEED — string is safe to use early.
   const MSG = { GENERATE_DRAFT: "GENERATE_DRAFT", APPROVE_DRAFT: "APPROVE_DRAFT", REJECT_DRAFT: "REJECT_DRAFT", OPEN_BILLING: "OPEN_BILLING" };
   const ERR = { UNAUTHORIZED: "UNAUTHORIZED", PLAN_LIMIT_EXCEEDED: "PLAN_LIMIT_EXCEEDED" };
-  const BILLING_URL = "https://skybrandmx.com/account/billing";
+  const BILLING_URL = "https://empleo.skybrandmx.com/account/billing";
 
   // TODO(dom): verify against real Indeed MX URLs. /viewjob is the canonical
   // detail page; /empleo/ is the slugged path-based variant; /m/ is mobile.
