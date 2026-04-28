@@ -59,16 +59,25 @@
   // =========================================================================
 
   function isJobDetailPage() {
+    // OCC uses /empleo/oferta/... for direct detail pages AND /empleos/... for
+    // search results with a split-pane right panel showing the selected job.
+    // Both expose a "Postularme" button and a heading — that's enough signal.
     const urlMatches = JOB_URL_PATTERNS.some((re) => re.test(location.href));
+    const onAnOccPage = /(^|\.)occ\.com\.mx$/i.test(location.hostname);
     const hasHeading = !!document.querySelector(
       "h1, [class*='job-title' i], [data-testid*='title' i]"
     );
-    const applyRx = /postular|aplicar|postúlate|postulate|apply/i;
+    const applyRx = /postularme|postular|aplicar|postúlate|postulate|apply/i;
     const hasApply = Array.from(document.querySelectorAll(
       "button, a[role='button'], a.btn, a[class*='apply' i], a[class*='postular' i]"
     )).some((el) => applyRx.test((el.textContent || "").trim()));
     const hasJsonLd = !!findJobPostingJsonLd();
-    return (urlMatches && hasHeading) || hasJsonLd || (hasHeading && hasApply);
+    const detected = (urlMatches && hasHeading) || hasJsonLd || (hasHeading && hasApply) || (onAnOccPage && hasApply);
+    // Debug breadcrumbs — open DevTools → Console to see if detection works.
+    if (detected) {
+      console.log("[EmpleoAutomatico] detected job page", { url: location.href, hasJsonLd, hasApply });
+    }
+    return detected;
   }
 
   function findJobPostingJsonLd() {
