@@ -92,15 +92,36 @@ function formatRelative(iso) {
 }
 
 function yearsOfExperience(experience) {
+  // Compute the chronological span covered by all experience entries
+  // (merging overlaps), NOT the naive sum of individual durations — that
+  // double-counts parallel jobs and listed-twice roles.
   if (!Array.isArray(experience) || !experience.length) return 0;
-  let months = 0;
+  const ranges = [];
   for (const e of experience) {
     const s = e.startDate && new Date(e.startDate);
     const f = e.endDate ? new Date(e.endDate) : new Date();
     if (!s || Number.isNaN(s.getTime()) || Number.isNaN(f.getTime())) continue;
-    months += Math.max(0, (f.getFullYear() - s.getFullYear()) * 12 + (f.getMonth() - s.getMonth()));
+    if (f.getTime() < s.getTime()) continue;
+    ranges.push([s.getTime(), f.getTime()]);
   }
-  return Math.round((months / 12) * 10) / 10;
+  if (!ranges.length) return 0;
+  ranges.sort((a, b) => a[0] - b[0]);
+  let totalMs = 0;
+  let curStart = ranges[0][0];
+  let curEnd = ranges[0][1];
+  for (let i = 1; i < ranges.length; i++) {
+    const [s, f] = ranges[i];
+    if (s <= curEnd) {
+      if (f > curEnd) curEnd = f;
+    } else {
+      totalMs += curEnd - curStart;
+      curStart = s;
+      curEnd = f;
+    }
+  }
+  totalMs += curEnd - curStart;
+  const years = totalMs / (1000 * 60 * 60 * 24 * 365.25);
+  return Math.round(years * 10) / 10;
 }
 
 function updatePreviewFromProfile(profile) {
