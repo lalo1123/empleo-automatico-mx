@@ -101,7 +101,14 @@ authRoutes.post("/signup", authLimiter, async (c) => {
 
     // 1) CAPTCHA. When TURNSTILE_SECRET is unset, verifyTurnstile() short-circuits
     //    to ok:true — keeps local dev working without Cloudflare keys.
-    const captcha = await verifyTurnstile(env.TURNSTILE_SECRET, turnstileToken, ip);
+    //    Also skipped for our own Chrome extension origin (Turnstile widget can't
+    //    run inside MV3 surfaces; the extension is already a trusted entry point
+    //    gated by install + manifest CORS whitelist).
+    const origin = c.req.header("origin") ?? "";
+    const isExtensionOrigin = origin.startsWith("chrome-extension://");
+    const captcha = isExtensionOrigin
+      ? { ok: true as const }
+      : await verifyTurnstile(env.TURNSTILE_SECRET, turnstileToken, ip);
     if (!captcha.ok) {
       console.warn(
         `[auth] signup captcha failed ip=${ip} codes=${(captcha.errorCodes ?? []).join(",")}`
