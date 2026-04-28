@@ -204,7 +204,12 @@ authRoutes.post("/login", authLimiter, async (c) => {
     const ip = clientIpFromRequest(c);
 
     // CAPTCHA on login too — protects against credential stuffing.
-    const captcha = await verifyTurnstile(env.TURNSTILE_SECRET, turnstileToken, ip);
+    // Skipped for chrome-extension origin (see signup for rationale).
+    const origin = c.req.header("origin") ?? "";
+    const isExtensionOrigin = origin.startsWith("chrome-extension://");
+    const captcha = isExtensionOrigin
+      ? { ok: true as const }
+      : await verifyTurnstile(env.TURNSTILE_SECRET, turnstileToken, ip);
     if (!captcha.ok) {
       console.warn(
         `[auth] login captcha failed ip=${ip} codes=${(captcha.errorCodes ?? []).join(",")}`

@@ -170,8 +170,10 @@ function showSignupTab() {
   loginForm.classList.add("is-hidden");
 }
 
-tabLogin.addEventListener("click", showLoginTab);
-tabSignup.addEventListener("click", showSignupTab);
+// Tabs are no longer rendered in the extension (signup happens on the
+// landing). Guard the listeners so nothing crashes if the elements are absent.
+if (tabLogin) tabLogin.addEventListener("click", showLoginTab);
+if (tabSignup) tabSignup.addEventListener("click", showSignupTab);
 
 loginBtn.addEventListener("click", async () => {
   const email = loginEmail.value.trim();
@@ -198,35 +200,9 @@ loginBtn.addEventListener("click", async () => {
   }
 });
 
-signupBtn.addEventListener("click", async () => {
-  const name = signupName.value.trim();
-  const email = signupEmail.value.trim();
-  const password = signupPassword.value;
-  if (!name || !email || !password) {
-    setStatus(signupStatus, "err", "Completa nombre, correo y contrase\u00f1a");
-    return;
-  }
-  if (password.length < 8) {
-    setStatus(signupStatus, "err", "La contrase\u00f1a debe tener al menos 8 caracteres");
-    return;
-  }
-  signupBtn.disabled = true;
-  setStatus(signupStatus, "", "Creando cuenta\u2026");
-  try {
-    const res = await sendMessage({ type: MESSAGE_TYPES.SIGNUP, email, password, name });
-    if (res?.ok) {
-      setStatus(signupStatus, "ok", "Cuenta creada");
-      signupPassword.value = "";
-      await refreshAuthState();
-    } else {
-      setStatus(signupStatus, "err", res?.message || "No se pudo crear la cuenta");
-    }
-  } catch (e) {
-    setStatus(signupStatus, "err", e.message || "Error al crear la cuenta");
-  } finally {
-    signupBtn.disabled = false;
-  }
-});
+// Signup flow lives on the website now. The extension only does login.
+// (See options.html: the "Crea tu cuenta gratis" CTA opens
+//  https://empleo.skybrandmx.com/signup?source=extension in a new tab.)
 
 logoutBtn.addEventListener("click", async () => {
   logoutBtn.disabled = true;
