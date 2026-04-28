@@ -152,22 +152,24 @@ async function extractPdfText(arrayBuffer) {
 // Auth card
 // ---------------------------------------------------------------------------
 
+// Signup is on the website now, so the tabs / signup form may not exist.
+// These helpers are tolerant of missing elements.
 function showLoginTab() {
-  tabLogin.classList.add("is-active");
-  tabSignup.classList.remove("is-active");
-  tabLogin.setAttribute("aria-selected", "true");
-  tabSignup.setAttribute("aria-selected", "false");
-  loginForm.classList.remove("is-hidden");
-  signupForm.classList.add("is-hidden");
+  tabLogin?.classList.add("is-active");
+  tabSignup?.classList.remove("is-active");
+  tabLogin?.setAttribute("aria-selected", "true");
+  tabSignup?.setAttribute("aria-selected", "false");
+  loginForm?.classList.remove("is-hidden");
+  signupForm?.classList.add("is-hidden");
 }
 
 function showSignupTab() {
-  tabSignup.classList.add("is-active");
-  tabLogin.classList.remove("is-active");
-  tabSignup.setAttribute("aria-selected", "true");
-  tabLogin.setAttribute("aria-selected", "false");
-  signupForm.classList.remove("is-hidden");
-  loginForm.classList.add("is-hidden");
+  tabSignup?.classList.add("is-active");
+  tabLogin?.classList.remove("is-active");
+  tabSignup?.setAttribute("aria-selected", "true");
+  tabLogin?.setAttribute("aria-selected", "false");
+  signupForm?.classList.remove("is-hidden");
+  loginForm?.classList.add("is-hidden");
 }
 
 // Tabs are no longer rendered in the extension (signup happens on the
