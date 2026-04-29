@@ -985,7 +985,9 @@
       el.appendChild(btn);
     }
 
-    document.body.appendChild(el);
+    // Append to <html> (not <body>) — host pages often have transformed
+    // ancestors that break `position: fixed` on body-level children.
+    document.documentElement.appendChild(el);
     requestAnimationFrame(() => el.classList.add("eamx-toast--show"));
     const duration = action ? 8000 : 4000;
     setTimeout(() => { el.classList.remove("eamx-toast--show"); setTimeout(() => el.remove(), 400); }, duration);
