@@ -268,7 +268,9 @@
   // =========================================================================
 
   function mountFab() {
-    if (fabEl && document.body.contains(fabEl)) return;
+    // Append to <html> not <body>: many SPA hosts (OCC, Indeed, LinkedIn)
+    // hydrate React into <body> and wipe injected children. <html> survives.
+    if (fabEl && document.documentElement.contains(fabEl)) return;
     fabEl = document.createElement("button");
     fabEl.type = "button";
     fabEl.className = "eamx-fab";
@@ -276,8 +278,22 @@
     fabEl.innerHTML =
       '<span class="eamx-fab__icon" aria-hidden="true">✨</span>' +
       '<span class="eamx-fab__label">Postular con IA</span>';
+    // Inline styles as last-resort fallback so even if our stylesheet didn't
+    // apply (CSP, shadow DOM, etc), the FAB is still visible & clickable.
+    Object.assign(fabEl.style, {
+      position: "fixed", right: "24px", bottom: "24px",
+      zIndex: "2147483600",
+      display: "inline-flex", alignItems: "center", gap: "10px",
+      padding: "14px 22px", minHeight: "56px",
+      border: "0", borderRadius: "9999px",
+      background: "linear-gradient(135deg,#137e7a 0%,#105971 100%)",
+      color: "#ffffff", cursor: "pointer",
+      font: "600 14.5px/1 ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif",
+      boxShadow: "0 12px 28px -8px rgba(16,89,113,.5)"
+    });
     fabEl.addEventListener("click", onFabClick);
-    document.body.appendChild(fabEl);
+    document.documentElement.appendChild(fabEl);
+    console.log("[EmpleoAutomatico] FAB mounted");
   }
   function unmountFab() { fabEl?.parentNode?.removeChild(fabEl); fabEl = null; }
   function setFabBusy(b) {
