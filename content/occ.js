@@ -16,6 +16,11 @@
 (function () {
   "use strict";
 
+  // Debug marker — open DevTools Console on OCC page; if this line shows up,
+  // the content script IS injecting. Then inspect window.__eamx_loaded.
+  console.log("[EmpleoAutomatico] occ.js loaded on", location.href);
+  try { window.__eamx_loaded = { source: "occ", at: new Date().toISOString() }; } catch (_) {}
+
   const SOURCE = "occ";
   const MSG = { GENERATE_DRAFT: "GENERATE_DRAFT", APPROVE_DRAFT: "APPROVE_DRAFT", REJECT_DRAFT: "REJECT_DRAFT", OPEN_BILLING: "OPEN_BILLING" };
   const ERR = { UNAUTHORIZED: "UNAUTHORIZED", PLAN_LIMIT_EXCEEDED: "PLAN_LIMIT_EXCEEDED" };
