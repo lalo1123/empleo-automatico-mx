@@ -270,6 +270,26 @@ async function handleOpenBilling() {
   }
 }
 
+// Admin-only: switch the caller's own plan without paying. The backend
+// enforces the allowlist via ADMIN_USER_EMAILS — we surface its FORBIDDEN
+// response unchanged. On success we refresh the cached user so the rest of
+// the UI reflects the new plan immediately (no /account roundtrip needed).
+async function handleAdminSetPlan(msg) {
+  const plan = msg && msg.plan;
+  if (plan !== "free" && plan !== "pro" && plan !== "premium") {
+    return { ok: false, error: ERROR_CODES.INVALID_INPUT, message: "Plan inválido" };
+  }
+  try {
+    const data = await backend.setAdminPlan(plan);
+    if (data && data.user) {
+      await auth.setUser(data.user);
+    }
+    return { ok: true, user: (data && data.user) || null };
+  } catch (e) {
+    return failFromError(e);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
@@ -309,6 +329,8 @@ onMessage(async (msg) => {
       return handleGetAuthStatus();
     case MESSAGE_TYPES.OPEN_BILLING:
       return handleOpenBilling();
+    case MESSAGE_TYPES.ADMIN_SET_PLAN:
+      return handleAdminSetPlan(msg);
     default:
       return {
         ok: false,

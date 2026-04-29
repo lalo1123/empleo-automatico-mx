@@ -11,6 +11,7 @@ import { accountRoutes } from "./routes/account.js";
 import { applicationsRoutes } from "./routes/applications.js";
 import { billingRoutes } from "./routes/billing.js";
 import { webhookRoutes } from "./routes/webhooks.js";
+import { adminRoutes } from "./routes/admin.js";
 
 const VERSION = "0.2.1";
 
@@ -40,6 +41,7 @@ export function createApp(): Hono<AppContext> {
   v1.route("/applications", applicationsRoutes);
   v1.route("/billing", billingRoutes);
   v1.route("/webhooks", webhookRoutes);
+  v1.route("/admin", adminRoutes);
 
   app.route("/v1", v1);
 

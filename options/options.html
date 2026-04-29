@@ -166,6 +166,36 @@
         </div>
       </section>
 
+      <!-- ============ Card: Modo admin (admin-only) ============ -->
+      <!--
+        Hidden by default. options.js toggles `is-hidden` based on
+        user.isAdmin from /v1/account. Backend enforces the allowlist via
+        ADMIN_USER_EMAILS — non-admins get FORBIDDEN even if they call the
+        endpoint directly, so this is purely a UX gate.
+      -->
+      <section class="card is-hidden" id="adminCard" aria-labelledby="adminHeading">
+        <div class="card__head">
+          <div class="card__eyebrow">Modo admin</div>
+          <h2 id="adminHeading">Cambia tu plan para probar</h2>
+          <p class="card__sub">Solo t&uacute; ves esto. &Uacute;til para probar c&oacute;mo se comporta la extensi&oacute;n en cada plan sin pagar. No afecta a tus suscripciones reales de Conekta.</p>
+        </div>
+        <div class="admin-plans" role="group" aria-label="Cambiar plan">
+          <button type="button" class="plan-btn" data-admin-plan="free">
+            <span class="plan-btn__name">Gratis</span>
+            <span class="plan-btn__limit">3 / mes</span>
+          </button>
+          <button type="button" class="plan-btn" data-admin-plan="pro">
+            <span class="plan-btn__name">Pro</span>
+            <span class="plan-btn__limit">100 / mes</span>
+          </button>
+          <button type="button" class="plan-btn" data-admin-plan="premium">
+            <span class="plan-btn__name">Premium</span>
+            <span class="plan-btn__limit">Ilimitado</span>
+          </button>
+        </div>
+        <span id="adminStatus" class="status" role="status" aria-live="polite"></span>
+      </section>
+
       <!-- ============ Card: Empieza a postularte (next steps) ============ -->
       <section class="card next-steps is-hidden" id="nextStepsCard" aria-labelledby="nextHeading">
         <div class="card__head">

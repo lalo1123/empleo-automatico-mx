@@ -66,7 +66,16 @@ const envSchema = z.object({
   // Leave blank to disable the /v1/auth/google endpoint (it returns
   // 503 GOOGLE_OAUTH_DISABLED in that case). Same value MUST be set as
   // NEXT_PUBLIC_GOOGLE_CLIENT_ID on the landing.
-  GOOGLE_CLIENT_ID: z.string().default("")
+  GOOGLE_CLIENT_ID: z.string().default(""),
+
+  // ---- Admin -------------------------------------------------------------
+  // Comma-separated allowlist of emails that get admin powers (currently:
+  // /v1/admin/me/plan to switch their own plan without paying). Used for
+  // testing how the extension behaves under each plan tier. Leave blank to
+  // fully disable admin endpoints in production.
+  // Matched case-insensitively against `users.email`.
+  // Example: ADMIN_USER_EMAILS=serratoslalo@hotmail.com,karla@skybrandmx.com
+  ADMIN_USER_EMAILS: z.string().default("")
 });
 
 export type AppEnv = z.infer<typeof envSchema>;
@@ -97,4 +106,34 @@ export interface AppContext {
     user: import("../types.js").User;
     jti: string;
   };
+}
+
+// ---- Admin allowlist helpers ---------------------------------------------
+
+let adminEmailsCache: { source: string; set: Set<string> } | null = null;
+
+function getAdminEmailSet(env: AppEnv): Set<string> {
+  const raw = env.ADMIN_USER_EMAILS || "";
+  if (adminEmailsCache && adminEmailsCache.source === raw) {
+    return adminEmailsCache.set;
+  }
+  const set = new Set<string>(
+    raw
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter((s) => s.length > 0)
+  );
+  adminEmailsCache = { source: raw, set };
+  return set;
+}
+
+/**
+ * True when the given email is on the admin allowlist (case-insensitive).
+ * Returns false when the allowlist is empty — keeps prod safe by default.
+ */
+export function isAdminEmail(env: AppEnv, email: string | null | undefined): boolean {
+  if (!email) return false;
+  const set = getAdminEmailSet(env);
+  if (set.size === 0) return false;
+  return set.has(email.toLowerCase());
 }

@@ -6,7 +6,8 @@ import Database from "better-sqlite3";
 import type { Database as DatabaseType } from "better-sqlite3";
 import { dirname, resolve } from "node:path";
 import { mkdirSync } from "node:fs";
-import { loadEnv } from "./env.js";
+import { loadEnv, isAdminEmail } from "./env.js";
+import type { AppEnv } from "./env.js";
 import type {
   BillingInterval,
   EmailVerificationRow,
@@ -52,7 +53,11 @@ export function closeDb(): void {
 // by Google-only accounts. See migrations/0003_google_oauth.sql.
 export const GOOGLE_ONLY_PASSWORD_SENTINEL = "GOOGLE_ONLY";
 
-export function rowToUser(row: UserRow): User {
+export function rowToUser(row: UserRow, env?: AppEnv): User {
+  // env is optional so legacy callers don't break — when absent we fall
+  // back to loadEnv() (cached after first call). isAdmin is fully derived
+  // from ADMIN_USER_EMAILS, never persisted.
+  const e = env ?? loadEnv();
   return {
     id: row.id,
     email: row.email,
@@ -63,6 +68,7 @@ export function rowToUser(row: UserRow): User {
     // (pre-migration) will return 0 from the ADD COLUMN default.
     emailVerified: row.email_verified === 1,
     avatarUrl: row.avatar_url,
+    isAdmin: isAdminEmail(e, row.email),
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
@@ -113,6 +119,20 @@ export function updateUserPlan(
       `UPDATE users SET plan = ?, plan_expires_at = ?, updated_at = ? WHERE id = ?`
     )
     .run(plan, planExpiresAt, Math.floor(Date.now() / 1000), userId);
+}
+
+/**
+ * Admin helper — set the user's plan + expiry directly. No Conekta side
+ * effects; webhook events still override this if a real subscription is
+ * later activated. Reuses `updateUserPlan` so behavior stays identical to
+ * the webhook-driven path.
+ */
+export function setUserPlan(
+  userId: string,
+  plan: PlanId,
+  planExpiresAt: number | null
+): void {
+  updateUserPlan(userId, plan, planExpiresAt);
 }
 
 export function setConektaCustomerId(

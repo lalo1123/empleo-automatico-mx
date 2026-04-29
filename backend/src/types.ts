@@ -18,6 +18,12 @@ export interface User {
   emailVerified: boolean;
   /** Google profile picture URL (null for non-Google users). */
   avatarUrl: string | null;
+  /**
+   * Derived flag — TRUE when the user's email is in ADMIN_USER_EMAILS env.
+   * Not stored in the DB. Computed by `rowToUser(row, env)` so the response
+   * shape stays the same whether or not the env is wired up.
+   */
+  isAdmin: boolean;
   createdAt: number;
   updatedAt: number;
 }

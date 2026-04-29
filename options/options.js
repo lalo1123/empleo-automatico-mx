@@ -46,6 +46,16 @@ const manageBillingBtn = $("manageBillingBtn");
 const logoutBtn = $("logoutBtn");
 const accountStatus = $("accountStatus");
 
+// Admin card refs (only ever shown when /account returns user.isAdmin === true).
+const adminCard = $("adminCard");
+const adminStatus = $("adminStatus");
+const adminPlanButtons = adminCard
+  ? Array.from(adminCard.querySelectorAll("[data-admin-plan]"))
+  : [];
+
+// Spanish-MX label for toast on plan change.
+const PLAN_LABEL_SHORT = { free: "Gratis", pro: "Pro", premium: "Premium" };
+
 // CV card refs
 const cvExistingBanner = $("cvExistingBanner");
 const cvExistingName = $("cvExistingName");
@@ -250,6 +260,41 @@ manageBillingBtn.addEventListener("click", async () => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// Admin card — switch plan (admin-only)
+// ---------------------------------------------------------------------------
+
+for (const btn of adminPlanButtons) {
+  btn.addEventListener("click", async () => {
+    const plan = btn.dataset.adminPlan;
+    if (plan !== "free" && plan !== "pro" && plan !== "premium") return;
+
+    // Disable the whole group while the request is in flight so we don't
+    // race two clicks. Re-enable in finally.
+    for (const b of adminPlanButtons) b.disabled = true;
+    setStatus(adminStatus, "", "Cambiando plan\u2026");
+
+    try {
+      const res = await sendMessage({ type: MESSAGE_TYPES.ADMIN_SET_PLAN, plan });
+      if (!res?.ok) {
+        setStatus(adminStatus, "err", res?.message || "No se pudo cambiar el plan");
+        return;
+      }
+      // Refresh from the server so usage + plan badge re-render consistently.
+      await refreshAuthState();
+      setStatus(
+        adminStatus,
+        "ok",
+        `Plan cambiado a ${PLAN_LABEL_SHORT[plan] || plan}`
+      );
+    } catch (e) {
+      setStatus(adminStatus, "err", e.message || "Error al cambiar el plan");
+    } finally {
+      for (const b of adminPlanButtons) b.disabled = false;
+    }
+  });
+}
+
 function renderAuthLoggedIn(user, usage) {
   authCard.classList.add("is-hidden");
   accountCard.classList.remove("is-hidden");
@@ -265,12 +310,25 @@ function renderAuthLoggedIn(user, usage) {
     usageCurrent.textContent = "\u2014";
     usageLimit.textContent = "\u2014";
   }
+
+  // Admin card visibility is purely UX — the backend still enforces the
+  // allowlist, so flipping isAdmin in DevTools won't grant any real powers.
+  if (adminCard) {
+    adminCard.classList.toggle("is-hidden", !user?.isAdmin);
+    if (user?.isAdmin) {
+      const currentPlan = user?.plan || "free";
+      for (const btn of adminPlanButtons) {
+        btn.classList.toggle("is-current", btn.dataset.adminPlan === currentPlan);
+      }
+    }
+  }
 }
 
 function renderAuthLoggedOut() {
   authCard.classList.remove("is-hidden");
   accountCard.classList.add("is-hidden");
   nextStepsCard?.classList.add("is-hidden");
+  adminCard?.classList.add("is-hidden");
   showLoginTab();
 }
 
