@@ -197,9 +197,42 @@
     return best;
   }
 
+  // Find the OCC job-detail panel: on /empleos/... search results pages, the
+  // selected job is shown on the right side. We locate it by walking up from
+  // the unique "Postularme" button to the nearest article/aside/section
+  // container, then scope all extraction to that subtree.
+  function findDetailPanel() {
+    const applyRx = /^(postularme|postular|aplicar)$/i;
+    const buttons = Array.from(document.querySelectorAll("button, a"));
+    for (const btn of buttons) {
+      if (!applyRx.test((btn.textContent || "").trim())) continue;
+      // Walk up to the first reasonable container.
+      let p = btn.parentElement;
+      let depth = 0;
+      while (p && depth < 12) {
+        if (p.tagName === "ARTICLE" || p.tagName === "ASIDE" || p.tagName === "SECTION" || p.tagName === "MAIN") return p;
+        if (p.matches?.("[role='region'], [role='complementary'], [class*='detail' i], [class*='vacante' i], [class*='oferta' i], [class*='aviso' i]")) return p;
+        p = p.parentElement;
+        depth++;
+      }
+      // Fallback: 5 levels up from button.
+      let f = btn.parentElement;
+      for (let i = 0; i < 5 && f?.parentElement; i++) f = f.parentElement;
+      if (f) return f;
+    }
+    return null;
+  }
+
+  function pickInScope(scope, selector) {
+    if (!scope) return "";
+    const el = scope.querySelector(selector);
+    return el ? cleanText(el.textContent) : "";
+  }
+
   function extractJob() {
     const url = location.href;
     const jsonLd = findJobPostingJsonLd();
+    const detail = findDetailPanel();
 
     let title = "", company = "", loc = "", salary = null, modality = null;
     let description = "", requirements = [];
@@ -230,21 +263,51 @@
       }
     }
 
-    // TODO(dom): refine these selectors with real OCC DOM.
-    title = firstNonEmpty(title, textOf("[itemprop='title']"), textOf("[data-testid='job-title']"),
-      textOf("[class*='job-title' i]"), textOf("h1"));
-    company = firstNonEmpty(company, textOf("[itemprop='hiringOrganization']"),
-      textOf("[data-testid='company-name']"), textOf("[class*='company-name' i]"),
-      textOf("[class*='empresa' i] a, [class*='empresa' i]"));
-    loc = firstNonEmpty(loc, textOf("[itemprop='jobLocation']"), textOf("address"),
-      textOf("[data-testid*='location' i]"), textOf("[class*='location' i]"), textOf("[class*='ubicacion' i]"));
+    // Prefer extraction from the detail panel (right side on /empleos/ pages).
+    // Falls back to whole-document selectors when the panel isn't found.
+    title = firstNonEmpty(
+      title,
+      pickInScope(detail, "h1, h2, h3"),
+      pickInScope(detail, "[itemprop='title'], [data-testid*='title' i], [class*='job-title' i]"),
+      textOf("[itemprop='title']"), textOf("[data-testid='job-title']"),
+      textOf("[class*='job-title' i]"),
+      // Last-resort h1 — but only if it doesn't look like pagination/UI noise.
+      (() => {
+        const h = textOf("h1");
+        return /llegaste al final|p[áa]gina \d+|resultados$/i.test(h) ? "" : h;
+      })()
+    );
+    company = firstNonEmpty(
+      company,
+      pickInScope(detail, "[itemprop='hiringOrganization']"),
+      pickInScope(detail, "a[href*='/empresa' i], a[href*='/company' i]"),
+      pickInScope(detail, "[class*='company-name' i], [class*='empresa' i] a, [class*='empresa' i]"),
+      textOf("[itemprop='hiringOrganization']"),
+      textOf("[class*='company-name' i]")
+    );
+    loc = firstNonEmpty(
+      loc,
+      pickInScope(detail, "[itemprop='jobLocation']"),
+      pickInScope(detail, "address, [class*='location' i], [class*='ubicacion' i]"),
+      textOf("[itemprop='jobLocation']"), textOf("address")
+    );
     if (!salary) {
-      salary = firstNonEmpty(textOf("[itemprop='baseSalary']"), textOf("[data-testid*='salary' i]"),
-        textOf("[class*='salary' i]"), textOf("[class*='sueldo' i]")) || null;
+      salary = firstNonEmpty(
+        pickInScope(detail, "[itemprop='baseSalary'], [class*='salary' i], [class*='sueldo' i]"),
+        textOf("[itemprop='baseSalary']"),
+        textOf("[class*='salary' i]"),
+        textOf("[class*='sueldo' i]")
+      ) || null;
     }
     if (!description) {
-      description = firstNonEmpty(textOf("[itemprop='description']"), textOf("[data-testid*='description' i]"),
-        textOf("[class*='job-description' i]"), textOf("[class*='descripcion' i]"), largestTextBlock());
+      description = firstNonEmpty(
+        detail ? cleanText(detail.textContent) : "",
+        textOf("[itemprop='description']"),
+        textOf("[data-testid*='description' i]"),
+        textOf("[class*='job-description' i]"),
+        textOf("[class*='descripcion' i]"),
+        largestTextBlock()
+      );
     }
     if (!modality) modality = detectModality(`${title} ${description} ${loc}`);
     if (!requirements.length) requirements = extractRequirements(description);
