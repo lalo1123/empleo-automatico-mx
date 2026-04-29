@@ -21,6 +21,34 @@
   console.log("[EmpleoAutomatico] occ.js loaded on", location.href);
   try { window.__eamx_loaded = { source: "occ", at: new Date().toISOString() }; } catch (_) {}
 
+  // Visible boot banner: a tiny pill at the top-left of the page, fades after 4s.
+  // This proves the script injected without requiring DevTools.
+  function showBootBanner() {
+    try {
+      if (document.getElementById("eamx-boot-banner")) return;
+      const b = document.createElement("div");
+      b.id = "eamx-boot-banner";
+      b.textContent = "✨ Empleo Automatico cargado";
+      Object.assign(b.style, {
+        position: "fixed", top: "12px", left: "12px",
+        background: "linear-gradient(135deg,#137e7a,#105971)",
+        color: "#fff", padding: "8px 14px", borderRadius: "9999px",
+        fontFamily: "system-ui,sans-serif", fontSize: "13px", fontWeight: "600",
+        zIndex: "2147483647", boxShadow: "0 8px 24px -8px rgba(16,89,113,.5)",
+        opacity: "0", transition: "opacity .25s ease"
+      });
+      document.documentElement.appendChild(b);
+      requestAnimationFrame(() => { b.style.opacity = "1"; });
+      setTimeout(() => { b.style.opacity = "0"; }, 4000);
+      setTimeout(() => { b.remove(); }, 4500);
+    } catch (_) {}
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", showBootBanner);
+  } else {
+    showBootBanner();
+  }
+
   const SOURCE = "occ";
   const MSG = { GENERATE_DRAFT: "GENERATE_DRAFT", APPROVE_DRAFT: "APPROVE_DRAFT", REJECT_DRAFT: "REJECT_DRAFT", OPEN_BILLING: "OPEN_BILLING" };
   const ERR = { UNAUTHORIZED: "UNAUTHORIZED", PLAN_LIMIT_EXCEEDED: "PLAN_LIMIT_EXCEEDED" };
