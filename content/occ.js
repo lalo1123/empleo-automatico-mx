@@ -50,9 +50,33 @@
   }
 
   const SOURCE = "occ";
+  const PORTAL_LABEL = "OCC Mundial";
+  const TIP_STORAGE_KEY = "eamx_panel_tips_shown";
+  const TIP_DISMISS_KEY = "eamx_panel_tips_dismissed";
+  const TIP_MAX_SHOWS = 3;
+  const REGEN_CAP = 5;
   const MSG = { GENERATE_DRAFT: "GENERATE_DRAFT", APPROVE_DRAFT: "APPROVE_DRAFT", REJECT_DRAFT: "REJECT_DRAFT", OPEN_BILLING: "OPEN_BILLING" };
   const ERR = { UNAUTHORIZED: "UNAUTHORIZED", PLAN_LIMIT_EXCEEDED: "PLAN_LIMIT_EXCEEDED" };
   const BILLING_URL = "https://empleo.skybrandmx.com/account/billing";
+
+  // Inline icons (lucide-style, 16px, stroke 1.75) — avoid external libs.
+  const ICONS = {
+    building: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M9 22v-4h6v4"/><path d="M8 6h.01M16 6h.01M12 6h.01M8 10h.01M16 10h.01M12 10h.01M8 14h.01M16 14h.01M12 14h.01"/></svg>',
+    check: '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>',
+    close: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+    pin: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10c0 7-8 13-8 13s-8-6-8-13a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/></svg>',
+    money: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>',
+    laptop: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><line x1="2" y1="20" x2="22" y2="20"/></svg>',
+    sparkles: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M5.6 18.4l2.8-2.8M15.6 8.4l2.8-2.8"/></svg>',
+    list: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>',
+    chev: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>',
+    copy: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
+    bulb: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.2 1 2V17h6v-.3c0-.8.4-1.5 1-2A7 7 0 0 0 12 2z"/></svg>',
+    warn: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+    refresh: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="eamx-btn__refresh"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>',
+    arrowRight: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>',
+    bigCheck: '<svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>'
+  };
 
   const JOB_URL_PATTERNS = [
     /\/empleo\/oferta\//i,
@@ -86,6 +110,7 @@
   let lastJob = null;
   let lastDraft = null;
   let lastUrl = location.href;
+  let regenCount = 1; // counts versions shown for current panel session
 
   // =========================================================================
   // Detection & extraction
@@ -394,8 +419,95 @@
   // Side panel
   // =========================================================================
 
-  function openPanel({ job, draft, partial }) {
+  // -------- Tip-strip storage helpers ----------
+  function readTipState() {
+    return new Promise((resolve) => {
+      try {
+        if (!chrome?.storage?.local) return resolve({ shown: 0, dismissed: false });
+        chrome.storage.local.get([TIP_STORAGE_KEY, TIP_DISMISS_KEY], (data) => {
+          resolve({
+            shown: Number(data?.[TIP_STORAGE_KEY] || 0),
+            dismissed: !!data?.[TIP_DISMISS_KEY]
+          });
+        });
+      } catch (_) { resolve({ shown: 0, dismissed: false }); }
+    });
+  }
+  function writeTipState(patch) {
+    try { chrome?.storage?.local?.set(patch, () => {}); } catch (_) {}
+  }
+
+  // -------- DOM helpers ----------
+  function el(tag, attrs, ...children) {
+    const e = document.createElement(tag);
+    if (attrs) {
+      for (const [k, v] of Object.entries(attrs)) {
+        if (v == null || v === false) continue;
+        if (k === "class") e.className = v;
+        else if (k === "html") e.innerHTML = v;
+        else if (k === "text") e.textContent = v;
+        else if (k.startsWith("on") && typeof v === "function") e.addEventListener(k.slice(2).toLowerCase(), v);
+        else e.setAttribute(k, v === true ? "" : String(v));
+      }
+    }
+    for (const c of children) {
+      if (c == null || c === false) continue;
+      e.appendChild(typeof c === "string" ? document.createTextNode(c) : c);
+    }
+    return e;
+  }
+
+  function placeholderChip(label, iconHtml) {
+    const c = el("span", { class: "eamx-panel__chip eamx-panel__chip--placeholder", html: iconHtml });
+    c.appendChild(document.createTextNode(label));
+    return c;
+  }
+
+  function makeChip(text, iconHtml) {
+    const c = el("span", { class: "eamx-panel__chip", html: iconHtml });
+    c.appendChild(document.createTextNode(text));
+    return c;
+  }
+
+  function wordStats(text) {
+    const trimmed = (text || "").trim();
+    if (!trimmed) return { words: 0, mins: 0 };
+    const words = trimmed.split(/\s+/).filter(Boolean).length;
+    const mins = Math.max(1, Math.round(words / 220));
+    return { words, mins };
+  }
+
+  function flashCopy(btn) {
+    const orig = btn.innerHTML;
+    btn.classList.add("eamx-mini-btn--ok");
+    btn.innerHTML = `${ICONS.check}<span>Copiado</span>`;
+    setTimeout(() => {
+      btn.classList.remove("eamx-mini-btn--ok");
+      btn.innerHTML = orig;
+    }, 1500);
+  }
+
+  function setRegenCounter(n) {
+    if (!panelEl) return;
+    const counter = panelEl.querySelector("[data-regen-counter]");
+    if (counter) counter.textContent = `Versión ${Math.min(n, REGEN_CAP)}/${REGEN_CAP}`;
+  }
+
+  function updateWordCount() {
+    if (!panelEl) return;
+    const ta = panelEl.querySelector("#eamx-cover-letter");
+    const out = panelEl.querySelector("[data-word-count]");
+    if (!ta || !out) return;
+    const { words, mins } = wordStats(ta.value);
+    out.textContent = words === 0
+      ? "0 palabras"
+      : `${words} palabras · ~${mins} min de lectura`;
+  }
+
+  // -------- Build & open panel ----------
+  async function openPanel({ job, draft, partial }) {
     closePanel();
+    regenCount = 1;
     panelEl = document.createElement("aside");
     panelEl.className = "eamx-panel";
     panelEl.setAttribute("role", "dialog");
@@ -403,52 +515,238 @@
 
     const cover = draft?.coverLetter || "";
     const answers = draft?.suggestedAnswers || {};
+    const tipState = await readTipState();
+    const showTip = !tipState.dismissed && tipState.shown < TIP_MAX_SHOWS;
 
-    panelEl.innerHTML = `
-      <header class="eamx-panel__header">
-        <div class="eamx-panel__title"></div>
-        <div class="eamx-panel__company"></div>
-      </header>
-      <div class="eamx-panel__body">
-        ${partial ? `<div class="eamx-panel__warning">No pude extraer todo de la vacante — revisa la carta con más detalle.</div>` : ""}
-        <label for="eamx-cover-letter"><strong>Carta de presentación</strong></label>
-        <textarea id="eamx-cover-letter" class="eamx-textarea" rows="14"></textarea>
-        <div class="eamx-answers"></div>
-      </div>
-      <footer class="eamx-panel__footer">
-        <button type="button" class="eamx-btn eamx-btn--primary" data-action="approve">Aprobar y llenar formulario</button>
-        <button type="button" class="eamx-btn eamx-btn--secondary" data-action="regen">Re-generar</button>
-        <button type="button" class="eamx-btn eamx-btn--ghost" data-action="cancel">Cancelar</button>
-      </footer>`;
+    // ---- Header ----
+    const header = el("header", { class: "eamx-panel__header" },
+      el("p", { class: "eamx-panel__eyebrow" }, "Paso 2 de 3 · Revisa la carta"),
+      el("h1", { class: "eamx-panel__title", text: job.title || "(vacante sin título)" }),
+      buildCompanyRow(job),
+      buildMetaRow(job)
+    );
+    const closeBtn = el("button", {
+      type: "button",
+      class: "eamx-panel__close",
+      "aria-label": "Cerrar panel",
+      "data-action": "cancel",
+      html: ICONS.close
+    });
+    header.appendChild(closeBtn);
 
-    panelEl.querySelector(".eamx-panel__title").textContent = job.title || "(vacante)";
-    panelEl.querySelector(".eamx-panel__company").textContent = job.company || "";
-    panelEl.querySelector("#eamx-cover-letter").value = cover;
+    // ---- Body ----
+    const body = el("div", { class: "eamx-panel__body" });
+    if (showTip) body.appendChild(buildTipStrip());
+    if (partial) body.appendChild(buildWarning());
+    body.appendChild(buildCoverSection(cover));
+    const answersSection = buildAnswersSection(answers);
+    if (answersSection) body.appendChild(answersSection);
 
-    const host = panelEl.querySelector(".eamx-answers");
-    const keys = Object.keys(answers);
-    if (keys.length) {
-      const h = document.createElement("div");
-      h.innerHTML = "<strong>Respuestas sugeridas</strong>";
-      h.style.marginTop = "16px";
-      host.appendChild(h);
-      for (const k of keys) {
-        const wrap = document.createElement("div"); wrap.className = "eamx-answer";
-        const lbl = document.createElement("div"); lbl.className = "eamx-answer__label"; lbl.textContent = k;
-        const val = document.createElement("div"); val.className = "eamx-answer__value";
-        val.textContent = answers[k]; val.tabIndex = 0; val.title = "Clic para copiar";
-        val.addEventListener("click", () => {
-          navigator.clipboard?.writeText(answers[k])
-            .then(() => toast("Copiado.", "success"))
-            .catch(() => toast("No se pudo copiar.", "error"));
-        });
-        wrap.append(lbl, val); host.appendChild(wrap);
-      }
-    }
+    // ---- Footer ----
+    const footer = buildFooter();
+
+    panelEl.appendChild(header);
+    panelEl.appendChild(body);
+    panelEl.appendChild(footer);
 
     panelEl.addEventListener("click", onPanelClick);
+    panelEl.addEventListener("input", (e) => {
+      if (e.target && e.target.id === "eamx-cover-letter") updateWordCount();
+    });
     document.body.appendChild(panelEl);
     requestAnimationFrame(() => panelEl.classList.add("eamx-panel--open"));
+
+    // Set initial word count.
+    updateWordCount();
+
+    // Track tip impression.
+    if (showTip) writeTipState({ [TIP_STORAGE_KEY]: tipState.shown + 1 });
+  }
+
+  function buildCompanyRow(job) {
+    const row = el("div", { class: "eamx-panel__company-row", html: ICONS.building });
+    const isPlaceholder = !job.company || job.company === "(empresa desconocida)";
+    if (isPlaceholder) {
+      row.appendChild(el("span", { class: "eamx-panel__company eamx-panel__company--placeholder", text: "— sin dato —" }));
+    } else {
+      row.appendChild(el("span", { class: "eamx-panel__company", text: job.company }));
+      const verified = el("span", { class: "eamx-panel__verified", "aria-label": "Empresa verificada", title: "Empresa verificada", html: ICONS.check });
+      row.appendChild(verified);
+    }
+    return row;
+  }
+
+  function buildMetaRow(job) {
+    const row = el("div", { class: "eamx-panel__meta" });
+    // Location
+    if (job.location && job.location.trim()) {
+      row.appendChild(makeChip(job.location, ICONS.pin));
+    } else {
+      row.appendChild(placeholderChip("ubicación — sin dato —", ICONS.pin));
+    }
+    // Salary
+    if (job.salary && String(job.salary).trim()) {
+      row.appendChild(makeChip(String(job.salary), ICONS.money));
+    } else {
+      row.appendChild(placeholderChip("sueldo — sin dato —", ICONS.money));
+    }
+    // Modality
+    if (job.modality) {
+      row.appendChild(makeChip(job.modality, ICONS.laptop));
+    } else {
+      row.appendChild(placeholderChip("modalidad — sin dato —", ICONS.laptop));
+    }
+    return row;
+  }
+
+  function buildTipStrip() {
+    const strip = el("div", { class: "eamx-tipstrip" });
+    strip.innerHTML = `
+      <span class="eamx-tipstrip__icon">${ICONS.bulb}</span>
+      <div class="eamx-tipstrip__text"><strong>Tip:</strong> revisa la carta y edítala si quieres. Tú das el último clic en <em>Enviar</em> dentro del portal — nosotros nunca enviamos por ti.</div>
+      <button type="button" class="eamx-tipstrip__close" aria-label="No volver a mostrar este tip" data-action="dismiss-tip">×</button>
+    `;
+    return strip;
+  }
+
+  function buildWarning() {
+    const w = el("div", { class: "eamx-panel__warning", role: "status" });
+    w.innerHTML = `
+      <span class="eamx-panel__warning-icon">${ICONS.warn}</span>
+      <div class="eamx-panel__warning-text"><strong>Lectura parcial de la vacante.</strong> No pude extraer todos los detalles. Revisa la carta y agrégale lo que haga falta antes de aprobar.</div>
+      <button type="button" class="eamx-panel__warning-close" aria-label="Cerrar aviso" data-action="dismiss-warning">×</button>
+    `;
+    return w;
+  }
+
+  function buildCoverSection(coverText) {
+    const section = el("div", { class: "eamx-section eamx-cover" });
+    const head = el("div", { class: "eamx-section__head" },
+      (() => {
+        const t = el("div", { class: "eamx-section__title", html: ICONS.sparkles });
+        t.appendChild(el("label", { for: "eamx-cover-letter", text: "Carta de presentación" }));
+        return t;
+      })(),
+      (() => {
+        const h = el("div", { class: "eamx-section__hint" });
+        h.innerHTML = `Generada con IA · editable · <span data-regen-counter>Versión 1/${REGEN_CAP}</span>`;
+        return h;
+      })()
+    );
+    section.appendChild(head);
+
+    const fieldWrap = el("div", { class: "eamx-cover__field" });
+    const ta = el("textarea", {
+      id: "eamx-cover-letter",
+      class: "eamx-textarea",
+      rows: "12",
+      "aria-label": "Carta de presentación editable"
+    });
+    ta.value = coverText;
+    fieldWrap.appendChild(ta);
+    fieldWrap.appendChild(el("div", { class: "eamx-cover__overlay" },
+      el("div", { class: "eamx-cover__spinner" }),
+      el("span", { text: "Generando nueva versión…" })
+    ));
+    section.appendChild(fieldWrap);
+
+    const footer = el("div", { class: "eamx-cover__footer" });
+    footer.appendChild(el("span", { class: "eamx-cover__count", "data-word-count": "true", text: "0 palabras" }));
+    const copyBtn = el("button", {
+      type: "button",
+      class: "eamx-mini-btn",
+      "data-action": "copy-cover",
+      title: "Copiar carta al portapapeles"
+    });
+    copyBtn.innerHTML = `${ICONS.copy}<span>Copiar</span>`;
+    footer.appendChild(copyBtn);
+    section.appendChild(footer);
+
+    return section;
+  }
+
+  function buildAnswersSection(answers) {
+    const keys = Object.keys(answers || {});
+    if (!keys.length) return null;
+    const section = el("div", { class: "eamx-section eamx-section--answers" });
+    section.appendChild(el("div", { class: "eamx-section__head" },
+      (() => {
+        const t = el("div", { class: "eamx-section__title", html: ICONS.list });
+        t.appendChild(el("span", { text: "Respuestas sugeridas" }));
+        return t;
+      })(),
+      el("div", { class: "eamx-section__hint", text: "Clic para expandir y copiar" })
+    ));
+
+    const list = el("div", { class: "eamx-answers" });
+    for (const k of keys) {
+      const card = el("div", { class: "eamx-answer" });
+      const summary = el("button", {
+        type: "button",
+        class: "eamx-answer__summary",
+        "aria-expanded": "false"
+      });
+      summary.appendChild(el("span", { class: "eamx-answer__label", text: k }));
+      const chev = el("span", { class: "eamx-answer__chev", html: ICONS.chev });
+      summary.appendChild(chev);
+      summary.addEventListener("click", () => {
+        const open = card.classList.toggle("eamx-answer--open");
+        summary.setAttribute("aria-expanded", String(open));
+      });
+      const body = el("div", { class: "eamx-answer__body" });
+      const ta = el("textarea", { class: "eamx-answer__value", rows: "3" });
+      ta.value = String(answers[k] || "");
+      body.appendChild(ta);
+      const actions = el("div", { class: "eamx-answer__actions" });
+      const copy = el("button", {
+        type: "button",
+        class: "eamx-mini-btn",
+        title: "Copiar respuesta"
+      });
+      copy.innerHTML = `${ICONS.copy}<span>Copiar</span>`;
+      copy.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        navigator.clipboard?.writeText(ta.value)
+          .then(() => flashCopy(copy))
+          .catch(() => toast("No se pudo copiar.", "error"));
+      });
+      actions.appendChild(copy);
+      body.appendChild(actions);
+      card.append(summary, body);
+      list.appendChild(card);
+    }
+    section.appendChild(list);
+    return section;
+  }
+
+  function buildFooter() {
+    const footer = el("footer", { class: "eamx-panel__footer" });
+    const actions = el("div", { class: "eamx-panel__actions" });
+    const primary = el("button", {
+      type: "button",
+      class: "eamx-btn eamx-btn--primary",
+      "data-action": "approve"
+    });
+    primary.innerHTML = `<span>Aprobar y postular</span>${ICONS.arrowRight}<span class="eamx-btn__step">Paso 2/3</span>`;
+    const secondary = el("button", {
+      type: "button",
+      class: "eamx-btn eamx-btn--secondary",
+      "data-action": "regen"
+    });
+    secondary.innerHTML = `${ICONS.refresh}<span>Re-generar</span>`;
+    const ghost = el("button", {
+      type: "button",
+      class: "eamx-btn eamx-btn--ghost",
+      "data-action": "cancel",
+      text: "Cancelar"
+    });
+    actions.append(primary, secondary, ghost);
+    footer.appendChild(actions);
+    footer.appendChild(el("p", {
+      class: "eamx-panel__microcopy",
+      html: `Al aprobar: llenamos el formulario por ti. Tú das el clic final en <strong>Enviar</strong> dentro de ${PORTAL_LABEL}.`
+    }));
+    return footer;
   }
 
   function closePanel() { panelEl?.parentNode?.removeChild(panelEl); panelEl = null; }
@@ -460,6 +758,9 @@
     if (action === "cancel") return handleCancel();
     if (action === "regen") return handleRegen();
     if (action === "approve") return handleApprove();
+    if (action === "copy-cover") return handleCopyCover(btn);
+    if (action === "dismiss-tip") return handleDismissTip(btn);
+    if (action === "dismiss-warning") return handleDismissWarning(btn);
   }
 
   async function handleCancel() {
@@ -468,22 +769,60 @@
     closePanel(); setFabBusy(false);
   }
 
+  function handleCopyCover(btn) {
+    const ta = panelEl?.querySelector("#eamx-cover-letter");
+    if (!ta) return;
+    navigator.clipboard?.writeText(ta.value || "")
+      .then(() => flashCopy(btn))
+      .catch(() => toast("No se pudo copiar.", "error"));
+  }
+
+  function handleDismissTip(btn) {
+    writeTipState({ [TIP_DISMISS_KEY]: true });
+    const strip = btn.closest(".eamx-tipstrip");
+    if (strip) strip.remove();
+  }
+
+  function handleDismissWarning(btn) {
+    const w = btn.closest(".eamx-panel__warning");
+    if (w) w.remove();
+  }
+
   async function handleRegen() {
     if (!lastJob) return;
+    if (regenCount >= REGEN_CAP) {
+      toast(`Llegaste al límite de ${REGEN_CAP} versiones para esta vacante.`, "info");
+      return;
+    }
     const btns = panelEl ? panelEl.querySelectorAll("button[data-action]") : [];
+    const regenBtn = panelEl?.querySelector("[data-action='regen']");
+    const fieldWrap = panelEl?.querySelector(".eamx-cover__field");
     btns.forEach((b) => (b.disabled = true));
+    if (regenBtn) regenBtn.setAttribute("data-loading", "true");
+    if (fieldWrap) fieldWrap.classList.add("eamx-cover__field--regenerating");
     try {
       const res = await sendMsg({ type: MSG.GENERATE_DRAFT, job: lastJob, regenerate: true });
       if (!res || !res.ok) { showBackendFailure(res); return; }
       activeDraftId = res.draftId || res.draft?.id || null;
       lastDraft = res.draft || null;
       const ta = panelEl?.querySelector("#eamx-cover-letter");
-      if (ta && lastDraft) ta.value = lastDraft.coverLetter || "";
+      if (ta && lastDraft) {
+        ta.value = lastDraft.coverLetter || "";
+        ta.classList.remove("eamx-textarea--pulse");
+        // Force reflow to restart animation
+        void ta.offsetWidth;
+        ta.classList.add("eamx-textarea--pulse");
+        updateWordCount();
+      }
+      regenCount = Math.min(REGEN_CAP, regenCount + 1);
+      setRegenCounter(regenCount);
       toast("Borrador regenerado.", "success");
     } catch (err) {
       toast(humanizeError(err), "error");
     } finally {
       btns.forEach((b) => (b.disabled = false));
+      if (regenBtn) regenBtn.removeAttribute("data-loading");
+      if (fieldWrap) fieldWrap.classList.remove("eamx-cover__field--regenerating");
     }
   }
 
@@ -501,15 +840,30 @@
       const fields = (res.fields && typeof res.fields === "object") ? { ...res.fields } : {};
       if (!fields.coverLetter) fields.coverLetter = coverLetter;
       fillForm(fields);
-      closePanel();
       highlightSubmitButton();
+      // Show in-panel success state for ~2s, then auto-close.
+      showApproveSuccess();
       toast("Listo — revisa y da click a 'Enviar' cuando estés conforme.", "success");
+      setTimeout(() => { closePanel(); setFabBusy(false); }, 2200);
     } catch (err) {
       toast(humanizeError(err), "error");
-    } finally {
       btns.forEach((b) => (b.disabled = false));
       setFabBusy(false);
     }
+  }
+
+  function showApproveSuccess() {
+    if (!panelEl) return;
+    const body = panelEl.querySelector(".eamx-panel__body");
+    if (!body) return;
+    body.style.position = "relative";
+    const overlay = el("div", { class: "eamx-panel__success", role: "status" });
+    const iconWrap = el("div", { class: "eamx-panel__success-icon", html: ICONS.bigCheck });
+    const title = el("p", { class: "eamx-panel__success-title", text: "Listo. Llenamos el formulario." });
+    const text = el("p", { class: "eamx-panel__success-text" });
+    text.innerHTML = `Busca el botón de <strong>Enviar</strong> resaltado en dorado y dale clic cuando estés conforme.`;
+    overlay.append(iconWrap, title, text);
+    body.appendChild(overlay);
   }
 
   // =========================================================================
