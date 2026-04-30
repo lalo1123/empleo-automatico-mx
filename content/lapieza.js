@@ -32,8 +32,10 @@
   const ERR = { UNAUTHORIZED: "UNAUTHORIZED", PLAN_LIMIT_EXCEEDED: "PLAN_LIMIT_EXCEEDED", INVALID_INPUT: "INVALID_INPUT", SERVER_ERROR: "SERVER_ERROR" };
   const BILLING_URL = "https://empleo.skybrandmx.com/account/billing";
 
-  // TODO(dom): verify against real LaPieza URLs. Confirmed pattern:
-  // /vacancy/<uuid>. Speculative: /vacante/, /jobs/, /empleos/, /puesto/.
+  // Confirmed via live test: vacancy page is /vacancy/<uuid>, apply page is
+  // /apply/<uuid> (same UUID — LaPieza preserves the job id across the route
+  // change). Apply pages don't have JSON-LD or detailed metadata, so we
+  // restore the cached job from chrome.storage.session keyed by that UUID.
   const JOB_URL_PATTERNS = [
     /\/vacancy\/[a-f0-9-]{8,}/i,
     /\/vacante\/[a-f0-9-]{8,}/i,
@@ -43,6 +45,23 @@
     /\/empleos\/[^/?#]+/i,
     /\/puesto\/[^/?#]+/i
   ];
+
+  // Apply-form URL patterns. When we're on these, the FAB+panel must mount,
+  // and we expect to restore lastJob from session storage (cached when the
+  // user was previously on /vacancy/<same-uuid>). If no cache exists we still
+  // mount: extractJob will pull whatever metadata it can from the apply
+  // sidebar (title + company are usually shown there).
+  const APPLY_URL_PATTERNS = [
+    /\/apply\/[a-f0-9-]{8,}/i,
+    /\/apply\/[^/?#]+/i,
+    /\/postular\/[^/?#]+/i,
+    /\/postularse\/[^/?#]+/i,
+    /\/aplicar\/[^/?#]+/i,
+    /\/postulacion\/[^/?#]+/i,
+    /\/application\/[^/?#]+/i
+  ];
+
+  const JOB_CACHE_PREFIX = "eamx:lapieza:job:";
 
   // Dynamic import of shared schemas (same pattern as occ.js/bumeran.js).
   // MV3 content scripts can't declare ES imports via manifest; runtime dynamic
@@ -115,11 +134,20 @@
   // Detection & extraction
   // =========================================================================
 
+  function isApplyPage() {
+    return APPLY_URL_PATTERNS.some((re) => re.test(location.href));
+  }
+
   function isJobDetailPage() {
     // LaPieza index/list paths must NOT trigger.
     const href = location.href;
     const path = location.pathname || "";
     if (/\/(vacancy|vacante|jobs|empleos|puesto)\/?$/i.test(path)) return false;
+
+    // Apply pages always count — the user wants the panel here even though
+    // the page has no JSON-LD or job description: we already cached the job
+    // on /vacancy/<uuid> and we'll restore it from session storage.
+    if (isApplyPage()) return true;
 
     const urlMatches = JOB_URL_PATTERNS.some((re) => re.test(href));
     // TODO(dom): verify against live LaPieza DOM
@@ -138,6 +166,39 @@
     });
     const hasJsonLd = !!findJobPostingJsonLd();
     return (urlMatches && hasHeading) || hasJsonLd || (hasHeading && hasApply);
+  }
+
+  // Persist the job extracted from /vacancy/<uuid> so we can restore it on
+  // /apply/<same-uuid>. We use chrome.storage.session because:
+  //   - it's automatically cleared when the browser closes (no stale data)
+  //   - it's per-extension, not exposed to the page
+  //   - it survives SPA navigation and even hard reloads within a session
+  //
+  // Both reads/writes are best-effort: if storage isn't available the flow
+  // still works (FAB just falls back to whatever extractJob can read off
+  // the apply page).
+  function jobCacheKey(url) {
+    const id = idFromUrl(url || location.href);
+    return JOB_CACHE_PREFIX + id;
+  }
+  function persistJobToSession(job) {
+    if (!job || !chrome?.storage?.session) return;
+    try {
+      const key = jobCacheKey(job.url || location.href);
+      chrome.storage.session.set({ [key]: job });
+    } catch (_) { /* ignore */ }
+  }
+  async function restoreJobFromSession() {
+    if (!chrome?.storage?.session) return null;
+    try {
+      const key = jobCacheKey(location.href);
+      const obj = await new Promise((resolve) => {
+        chrome.storage.session.get([key], (r) => resolve(r || {}));
+      });
+      const job = obj && obj[key];
+      if (job && typeof job === "object" && job.title) return job;
+    } catch (_) { /* ignore */ }
+    return null;
   }
 
   function findJobPostingJsonLd() {
@@ -212,8 +273,12 @@
   function idFromUrl(url) {
     try {
       const u = new URL(url);
-      // 1) UUID in /vacancy/<uuid> or /vacante/<uuid>
-      const uuidMatch = u.pathname.match(/\/(?:vacancy|vacante|jobs|empleos|puesto)\/([a-f0-9][a-f0-9-]{7,})/i);
+      // 1) UUID in /vacancy/<uuid>, /apply/<uuid>, /postular/<uuid>, etc.
+      // Critical: vacancy and apply MUST resolve to the same id so the
+      // session-storage cache key matches across the navigation.
+      const uuidMatch = u.pathname.match(
+        /\/(?:vacancy|vacante|jobs|empleos|puesto|apply|postular|postularse|aplicar|postulacion|application)\/([a-f0-9][a-f0-9-]{7,})/i
+      );
       if (uuidMatch) return uuidMatch[1];
       // 2) Query string id
       const qid = u.searchParams.get("id") || u.searchParams.get("vacancy") || u.searchParams.get("vacante");
@@ -480,6 +545,22 @@
       '<span class="eamx-fab__label">Postular con IA</span>';
     fabEl.addEventListener("click", onFabClick);
     document.body.appendChild(fabEl);
+
+    // Side effect: when mounting on a vacancy page, eagerly extract & cache
+    // the job so it survives the navigation to /apply/<uuid>. We run after
+    // a short delay to let the page settle (LaPieza renders JSON-LD late
+    // on some routes). On apply pages we do nothing — the FAB click will
+    // restore from cache.
+    if (!isApplyPage()) {
+      setTimeout(() => {
+        try {
+          const { job, partial } = extractJob();
+          if (!partial && job && job.title && job.title !== "(sin título)") {
+            persistJobToSession(job);
+          }
+        } catch (_) { /* ignore */ }
+      }, 1500);
+    }
   }
   function unmountFab() { fabEl?.parentNode?.removeChild(fabEl); fabEl = null; }
   function setFabBusy(b) {
@@ -492,10 +573,27 @@
 
   async function onFabClick() {
     if (!fabEl || fabEl.disabled) return;
-    const { job, partial } = extractJob();
+    let { job, partial } = extractJob();
+
+    // If we're on the apply form, the page has no job description — we
+    // need the cached job from when the user was on /vacancy/<uuid>. If
+    // there's no cache (e.g. user landed straight on /apply/ via shared
+    // link), we still let the request through with whatever metadata we
+    // could pull off the apply sidebar; the backend will surface the
+    // 422 thin-payload error if it's truly empty.
+    if (isApplyPage()) {
+      const cached = await restoreJobFromSession();
+      if (cached) {
+        job = cached;
+        partial = false;
+      }
+    }
+
     lastJob = job;
+    persistJobToSession(job);
+
     if (partial && job.title === "(sin título)" && job.company === "(empresa desconocida)") {
-      toast("No pudimos leer esta vacante automáticamente. Cópiala o postula manualmente.", "info");
+      toast("Abre primero la vacante (página /vacancy/...) para que la IA la lea, luego dale a Postular.", "info");
       return;
     }
     setFabBusy(true);
