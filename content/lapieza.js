@@ -62,6 +62,15 @@
   let lastDraft = null;
   let lastUrl = location.href;
 
+  // In-flow assistant state. After the user approves the draft we keep watching
+  // the page and offer contextual help on the portal's apply form (CV upload,
+  // cover-letter textarea, multiple-choice questions, final submit button).
+  let flowActive = false;
+  let flowObserver = null;
+  let flowDebounceTimer = null;
+  const FLOW_PROCESSED = new WeakSet(); // elements we've already attached to
+  const FLOW_TIPS_SHOWN = new Set();    // dedupe tip-keys for one-shot toasts
+
   // =========================================================================
   // Detection & extraction
   // =========================================================================
@@ -394,6 +403,7 @@
   async function handleCancel() {
     try { if (activeDraftId) await sendMsg({ type: MSG.REJECT_DRAFT, draftId: activeDraftId }); } catch (_) {}
     activeDraftId = null; lastDraft = null;
+    stopFlowAssistant();
     closePanel(); setFabBusy(false);
   }
 
@@ -427,8 +437,15 @@
       if (!res || !res.ok) { toast(res?.error || "No se pudo aprobar.", "error"); return; }
       const fields = (res.fields && typeof res.fields === "object") ? { ...res.fields } : {};
       if (!fields.coverLetter) fields.coverLetter = coverLetter;
+      // Persist the (possibly edited) cover letter so the in-flow assistant
+      // pastes the latest text when it finds a textarea later in the funnel.
+      if (lastDraft) lastDraft.coverLetter = coverLetter;
       fillForm(fields);
       closePanel();
+      // Adaptive in-flow guidance: keep watching the page after approval so
+      // we can light up file inputs, textareas, questions, and the final
+      // submit button as the portal's apply flow progresses.
+      startFlowAssistant();
       highlightSubmitButton();
       toast("Listo — revisa y da click a 'Enviar' cuando estés conforme.", "success");
     } catch (err) {
@@ -619,6 +636,353 @@
   }
 
   // =========================================================================
+  // In-flow adaptive assistant
+  // =========================================================================
+  // Lifecycle: armed by handleApprove(), torn down by handleCancel() or any
+  // SPA URL change. While armed, a single MutationObserver (debounced 250ms)
+  // re-runs the detector functions over the live DOM. Each detector guards
+  // against double-attach via FLOW_PROCESSED (WeakSet) and one-shot tip-keys
+  // via FLOW_TIPS_SHOWN (Set). HITL preserved everywhere — we never auto-
+  // submit and never overwrite user-typed text without a confirm.
+
+  function startFlowAssistant() {
+    if (flowActive) return;
+    flowActive = true;
+    FLOW_TIPS_SHOWN.clear();
+    runFlowDetectors();
+    flowObserver = new MutationObserver(() => {
+      if (flowDebounceTimer) return;
+      flowDebounceTimer = setTimeout(() => {
+        flowDebounceTimer = null;
+        if (flowActive) runFlowDetectors();
+      }, 250);
+    });
+    try { flowObserver.observe(document.body, { childList: true, subtree: true }); }
+    catch (_) { /* body may be missing in edge cases */ }
+  }
+
+  function stopFlowAssistant() {
+    flowActive = false;
+    if (flowObserver) { try { flowObserver.disconnect(); } catch (_) {} flowObserver = null; }
+    if (flowDebounceTimer) { clearTimeout(flowDebounceTimer); flowDebounceTimer = null; }
+    // Remove any lingering helper UI we attached.
+    document.querySelectorAll(
+      ".eamx-flow-tooltip, .eamx-flow-paste-btn, .eamx-flow-hint"
+    ).forEach((el) => { try { el.remove(); } catch (_) {} });
+    FLOW_TIPS_SHOWN.clear();
+  }
+
+  function runFlowDetectors() {
+    try {
+      detectFileInputs();
+      detectCoverLetterTextarea();
+      detectQuestions();
+      detectFinalSubmit();
+    } catch (err) {
+      console.warn("[EmpleoAutomatico] flow detector error", err);
+    }
+  }
+
+  // Visibility check — element is rendered and inside the viewport-eligible
+  // tree. Skips display:none/hidden ancestors and zero-area elements.
+  function isVisible(el) {
+    if (!el || !(el instanceof Element)) return false;
+    if (el.offsetParent === null && el.tagName !== "BODY") {
+      // file inputs are commonly visually hidden but still useful;
+      // however we still want them to have non-zero rect.
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 && r.height === 0) return false;
+    }
+    const r = el.getBoundingClientRect();
+    return r.width > 0 || r.height > 0;
+  }
+
+  // Walk up the DOM looking for descriptive text (label, fieldset legend,
+  // aria-label, surrounding paragraphs). Used to classify questions.
+  function nearbyText(el, depth = 4) {
+    const parts = [];
+    parts.push(el.getAttribute("aria-label") || "");
+    parts.push(el.getAttribute("placeholder") || "");
+    parts.push(el.name || "");
+    parts.push(el.id || "");
+    if (el.id) {
+      const lbl = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+      if (lbl) parts.push(lbl.textContent || "");
+    }
+    let p = el.parentElement;
+    let i = 0;
+    while (p && i < depth) {
+      if (p.tagName === "LABEL") parts.push(p.textContent || "");
+      if (p.tagName === "FIELDSET") {
+        const lg = p.querySelector("legend");
+        if (lg) parts.push(lg.textContent || "");
+      }
+      // Capture sibling headings/paragraphs as question text.
+      const prev = p.previousElementSibling;
+      if (prev && /^(P|H[1-6]|SPAN|DIV|LEGEND)$/i.test(prev.tagName) && (prev.textContent || "").length < 240) {
+        parts.push(prev.textContent || "");
+      }
+      p = p.parentElement;
+      i++;
+    }
+    return parts.join(" ").replace(/\s+/g, " ").trim().toLowerCase();
+  }
+
+  // Position helper-UI relative to a target element. Returns a positioner
+  // function used by the helper to keep itself anchored on scroll/resize.
+  function anchorTo(host, target, placement) {
+    const reposition = () => {
+      const r = target.getBoundingClientRect();
+      if (r.width === 0 && r.height === 0) { host.style.display = "none"; return; }
+      host.style.display = "";
+      if (placement === "above-right") {
+        host.style.top = `${Math.max(8, r.top + window.scrollY - 40)}px`;
+        host.style.left = `${Math.max(8, r.right + window.scrollX - 140)}px`;
+      } else if (placement === "below") {
+        host.style.top = `${r.bottom + window.scrollY + 8}px`;
+        host.style.left = `${r.left + window.scrollX}px`;
+      } else { // "right" default
+        host.style.top = `${r.top + window.scrollY}px`;
+        host.style.left = `${r.right + window.scrollX + 10}px`;
+      }
+    };
+    reposition();
+    const onScroll = () => reposition();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll);
+    // Stash cleanup hook on the host so removeFlowHelper can release listeners.
+    host.__eamxCleanup = () => {
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onScroll);
+    };
+    return reposition;
+  }
+
+  function removeFlowHelper(host) {
+    if (!host) return;
+    try { host.__eamxCleanup?.(); } catch (_) {}
+    try { host.remove(); } catch (_) {}
+  }
+
+  // ---------------------------------------------------------------------------
+  // State 1 — File input for CV
+  // ---------------------------------------------------------------------------
+  function detectFileInputs() {
+    const inputs = Array.from(document.querySelectorAll("input[type='file']"));
+    for (const input of inputs) {
+      if (FLOW_PROCESSED.has(input)) continue;
+      // Skip irrelevant file inputs (e.g., images for cover photo). Heuristic
+      // by accept attribute and surrounding labels.
+      const accept = (input.getAttribute("accept") || "").toLowerCase();
+      const ctx = nearbyText(input);
+      const cvHint = /cv|curriculum|currículum|resume|hoja de vida/i.test(ctx);
+      const acceptHint = /pdf|doc|application/.test(accept);
+      // Either hint is enough; some LaPieza inputs have generic accept.
+      const looksLikeCv = cvHint || acceptHint || /upload|adjuntar|subir/i.test(ctx);
+      if (!looksLikeCv) continue;
+
+      // file inputs are often visually hidden; anchor on the closest visible
+      // wrapper (the label or styled button that proxies the click).
+      const anchor = findFileInputAnchor(input);
+      if (!anchor || !isVisible(anchor)) continue;
+
+      FLOW_PROCESSED.add(input);
+      attachFileInputTip(anchor);
+    }
+  }
+
+  function findFileInputAnchor(input) {
+    // 1) Associated <label for="">
+    if (input.id) {
+      const lbl = document.querySelector(`label[for="${CSS.escape(input.id)}"]`);
+      if (lbl && isVisible(lbl)) return lbl;
+    }
+    // 2) Wrapping label
+    const wrap = input.closest("label");
+    if (wrap && isVisible(wrap)) return wrap;
+    // 3) Visible parent with rect
+    let p = input.parentElement;
+    for (let i = 0; i < 5 && p; i++) {
+      if (isVisible(p)) return p;
+      p = p.parentElement;
+    }
+    return input;
+  }
+
+  function attachFileInputTip(anchor) {
+    const tip = document.createElement("div");
+    tip.className = "eamx-flow-tooltip eamx-flow-tooltip--file";
+    tip.setAttribute("role", "status");
+    tip.innerHTML =
+      '<span class="eamx-flow-tooltip__icon" aria-hidden="true">📎</span>' +
+      '<span class="eamx-flow-tooltip__text">Aquí va tu CV. Si ya lo subiste antes en LaPieza, solo selecciónalo del listado.</span>' +
+      '<button type="button" class="eamx-flow-tooltip__close" aria-label="Cerrar aviso">×</button>';
+    document.documentElement.appendChild(tip);
+    anchorTo(tip, anchor, "below");
+    tip.querySelector(".eamx-flow-tooltip__close").addEventListener("click", () => removeFlowHelper(tip));
+    // Auto-dismiss after 6s (per spec).
+    setTimeout(() => removeFlowHelper(tip), 6000);
+  }
+
+  // ---------------------------------------------------------------------------
+  // State 2 — Cover-letter / message textarea
+  // ---------------------------------------------------------------------------
+  function detectCoverLetterTextarea() {
+    if (!lastDraft?.coverLetter) return; // nothing to paste
+    const candidates = Array.from(document.querySelectorAll("textarea"))
+      .filter((t) => isVisible(t) && !FLOW_PROCESSED.has(t));
+    if (!candidates.length) return;
+
+    // Prefer textareas whose surrounding text matches cover-letter keywords;
+    // fall back to the largest visible textarea on the page.
+    const rx = /carta|mensaje|presentaci(?:[oó])n|cover\s*letter|motivation|motivaci/i;
+    let target = candidates.find((t) => rx.test(nearbyText(t)));
+    if (!target) {
+      candidates.sort((a, b) => {
+        const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+        return (rb.width * rb.height) - (ra.width * ra.height);
+      });
+      target = candidates[0];
+    }
+    if (!target) return;
+    FLOW_PROCESSED.add(target);
+    attachPasteCoverButton(target);
+  }
+
+  function attachPasteCoverButton(textarea) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "eamx-flow-paste-btn";
+    btn.setAttribute("aria-label", "Pegar carta IA generada");
+    btn.innerHTML = '<span aria-hidden="true">✨</span><span>Pegar carta IA</span>';
+    document.documentElement.appendChild(btn);
+    anchorTo(btn, textarea, "above-right");
+
+    btn.addEventListener("click", () => {
+      const cover = lastDraft?.coverLetter || "";
+      if (!cover) { toast("No hay carta disponible.", "info"); return; }
+      const existing = (textarea.value || "").trim();
+      const hasUserText = existing.length > 50;
+      if (hasUserText) {
+        const ok = window.confirm("¿Reemplazar lo que escribiste con la carta IA?");
+        if (!ok) return;
+      }
+      try {
+        setNativeValue(textarea, cover);
+        textarea.dispatchEvent(new Event("input", { bubbles: true }));
+        textarea.dispatchEvent(new Event("change", { bubbles: true }));
+      } catch (_) {
+        textarea.value = cover;
+      }
+      // Quick success state on the button.
+      btn.classList.add("eamx-flow-paste-btn--ok");
+      btn.innerHTML = '<span aria-hidden="true">✓</span><span>Pegado</span>';
+      setTimeout(() => { btn.classList.add("eamx-flow-paste-btn--fade"); }, 1500);
+      setTimeout(() => removeFlowHelper(btn), 2000);
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // State 3 — Multiple-choice / radio / yes-no question hints
+  // ---------------------------------------------------------------------------
+  function detectQuestions() {
+    const answers = lastDraft?.suggestedAnswers;
+    if (!answers || typeof answers !== "object") return;
+    const keys = Object.keys(answers).filter((k) => answers[k]);
+    if (!keys.length) return;
+
+    // Group inputs by their nearest fieldset/group container so we attach a
+    // hint once per question, not once per radio option.
+    const inputs = Array.from(document.querySelectorAll(
+      "input[type='radio'], input[type='checkbox'], select, input[type='text']"
+    )).filter((el) => isVisible(el));
+
+    const groups = new Map(); // container -> {input, ctx}
+    for (const input of inputs) {
+      const container = input.closest("fieldset, [role='radiogroup'], [role='group'], .eamx-question, [data-question], div") || input.parentElement;
+      if (!container || groups.has(container)) continue;
+      groups.set(container, input);
+    }
+
+    for (const [container, input] of groups) {
+      if (FLOW_PROCESSED.has(container)) continue;
+      const ctx = nearbyText(input, 6);
+      if (!ctx || ctx.length < 4) continue;
+      const matchKey = keys.find((k) => {
+        const needle = k.toLowerCase().trim();
+        if (!needle) return false;
+        // Loose match: question text contains the answer key OR the key
+        // contains a meaningful chunk (>= 4 chars) of the question text.
+        if (ctx.includes(needle)) return true;
+        const tokens = needle.split(/\s+/).filter((t) => t.length >= 4);
+        return tokens.some((t) => ctx.includes(t));
+      });
+      if (!matchKey) continue;
+      FLOW_PROCESSED.add(container);
+      attachQuestionHint(container, matchKey, String(answers[matchKey]));
+    }
+  }
+
+  function attachQuestionHint(container, label, value) {
+    const hint = document.createElement("div");
+    hint.className = "eamx-flow-hint";
+    hint.setAttribute("role", "status");
+    const safe = (value || "").toString().slice(0, 240);
+    hint.innerHTML =
+      '<span class="eamx-flow-hint__badge">Sugerencia</span>' +
+      `<span class="eamx-flow-hint__text">${escapeHtml(safe)}</span>` +
+      '<button type="button" class="eamx-flow-hint__close" aria-label="Cerrar sugerencia">×</button>';
+    // Inline (in-flow): append directly into the container so it sits with
+    // the question instead of floating. This avoids anchoring math when the
+    // user tabs through fields.
+    try {
+      if (getComputedStyle(container).position === "static") {
+        container.style.position = "relative";
+      }
+      container.appendChild(hint);
+    } catch (_) {
+      document.documentElement.appendChild(hint);
+      anchorTo(hint, container, "below");
+    }
+    hint.querySelector(".eamx-flow-hint__close").addEventListener("click", () => removeFlowHelper(hint));
+  }
+
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+
+  // ---------------------------------------------------------------------------
+  // State 4 — Final submit button
+  // ---------------------------------------------------------------------------
+  // Final-step regex: matches the canonical "send application" copies in
+  // Spanish/English. Excludes "siguiente"/"continuar"/"next" which appear on
+  // intermediate wizard steps.
+  const FLOW_FINAL_RX = /enviar\s+postulaci[oó]n|enviar\s+aplicaci[oó]n|aplicar\s+ahora|finalizar(?:\s+postulaci[oó]n)?|submit\s+application|send\s+application/i;
+  const FLOW_NEXT_RX = /\b(siguiente|continuar|next|continue)\b/i;
+
+  function detectFinalSubmit() {
+    const buttons = Array.from(document.querySelectorAll("button, a[role='button'], input[type='submit']"));
+    for (const btn of buttons) {
+      if (FLOW_PROCESSED.has(btn)) continue;
+      if (!isVisible(btn)) continue;
+      const text = (btn.textContent || btn.value || "").trim();
+      if (!text) continue;
+      if (FLOW_NEXT_RX.test(text)) continue; // intermediate step
+      if (!FLOW_FINAL_RX.test(text)) continue;
+      FLOW_PROCESSED.add(btn);
+      try { btn.classList.add("eamx-submit-pulse"); } catch (_) {}
+      // Fire a one-shot toast (dedupe to avoid spam if multiple final
+      // buttons appear, e.g. sticky + footer).
+      if (!FLOW_TIPS_SHOWN.has("final-submit")) {
+        FLOW_TIPS_SHOWN.add("final-submit");
+        toast("Listo. Revisa todo y dale Enviar cuando estés conforme. Tú das el último clic.", "success");
+      }
+    }
+  }
+
+  // =========================================================================
   // SPA nav watching & bootstrap
   // =========================================================================
 
@@ -642,6 +1006,11 @@
       if (location.href !== lastUrl) {
         lastUrl = location.href;
         activeDraftId = null; lastDraft = null; lastJob = null;
+        // SPA route changed: tear down any in-flow helpers tied to the old
+        // page. The assistant will re-arm if the user approves on the new
+        // route. We clear the dedupe set so detectors can re-attach to
+        // freshly-rendered inputs/textareas/buttons.
+        stopFlowAssistant();
         setTimeout(detectAndMount, 300);
         setTimeout(detectAndMount, 1200);
       }

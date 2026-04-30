@@ -1158,6 +1158,211 @@
 }
 
 /* =============================================================================
+ * In-flow adaptive assistant (post-approval, on the portal's apply form)
+ * Floating tooltips, paste-button, question hints. All anchored absolutely
+ * to <html> so transformed ancestors don't break their position.
+ * ============================================================================= */
+
+.eamx-flow-tooltip,
+.eamx-flow-paste-btn,
+.eamx-flow-hint {
+  --eamx-c-brand-100: #d2f3ec;
+  --eamx-c-brand-200: #a8e6da;
+  --eamx-c-brand-300: #70d1c6;
+  --eamx-c-brand-500: #2a9c91;
+  --eamx-c-brand-600: #137e7a;
+  --eamx-c-brand-700: #105971;
+  --eamx-c-brand-800: #0d3f57;
+  --eamx-c-ink: #0f1d2c;
+  --eamx-c-ink-soft: #1f3447;
+  --eamx-c-ink-muted: #5b6e7e;
+  --eamx-c-border: #e2e8f0;
+  --eamx-c-surface: #ffffff;
+  --eamx-c-slate-100: #f1f5f9;
+  --eamx-c-slate-50: #f8fafc;
+  --eamx-r-sm: 8px;
+  --eamx-r-md: 10px;
+  --eamx-r-pill: 9999px;
+  --eamx-font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --eamx-t-fast: 120ms cubic-bezier(0.4, 0, 0.2, 1);
+  --eamx-t: 180ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* --- File-input tooltip ------------------------------------------------- */
+
+.eamx-flow-tooltip {
+  position: absolute;
+  z-index: 2147483650;
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: 320px;
+  padding: 10px 30px 10px 12px;
+  border-radius: var(--eamx-r-md);
+  background: linear-gradient(180deg, #ffffff 0%, var(--eamx-c-slate-50) 100%);
+  border: 1px solid var(--eamx-c-brand-200);
+  box-shadow: 0 12px 28px -10px rgba(16, 89, 113, 0.35), 0 1px 2px rgba(15, 23, 42, 0.06);
+  color: var(--eamx-c-ink);
+  font: 500 12.5px/1.45 var(--eamx-font-sans);
+  letter-spacing: 0.005em;
+  animation: eamx-flow-rise 220ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+.eamx-flow-tooltip__icon {
+  flex: 0 0 auto;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.eamx-flow-tooltip__text {
+  flex: 1 1 auto;
+  color: var(--eamx-c-ink-soft);
+}
+
+.eamx-flow-tooltip__close {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--eamx-r-sm);
+  background: transparent;
+  color: var(--eamx-c-ink-muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--eamx-t-fast), color var(--eamx-t-fast);
+}
+
+.eamx-flow-tooltip__close:hover {
+  background: var(--eamx-c-slate-100);
+  color: var(--eamx-c-ink);
+}
+
+/* --- Paste-cover-letter floating button -------------------------------- */
+
+.eamx-flow-paste-btn {
+  position: absolute;
+  z-index: 2147483650;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--eamx-r-pill);
+  background: linear-gradient(135deg, #137e7a 0%, #105971 100%);
+  color: #ffffff;
+  cursor: pointer;
+  font: 600 12.5px/1 var(--eamx-font-sans);
+  letter-spacing: 0.01em;
+  box-shadow: 0 8px 18px -6px rgba(16, 89, 113, 0.45),
+    0 1px 0 0 rgba(255, 255, 255, 0.14) inset;
+  transition: transform var(--eamx-t-fast), box-shadow var(--eamx-t),
+    background var(--eamx-t-fast), opacity 220ms ease;
+  animation: eamx-flow-rise 220ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+.eamx-flow-paste-btn:hover {
+  transform: translateY(-1px) scale(1.02);
+  box-shadow: 0 10px 22px -6px rgba(16, 89, 113, 0.55),
+    0 1px 0 0 rgba(255, 255, 255, 0.14) inset,
+    0 0 0 4px rgba(112, 209, 198, 0.18);
+}
+
+.eamx-flow-paste-btn:active {
+  transform: scale(0.97);
+}
+
+.eamx-flow-paste-btn:focus-visible {
+  outline: 2px solid #ffffff;
+  outline-offset: 2px;
+}
+
+.eamx-flow-paste-btn--ok {
+  background: linear-gradient(135deg, #2a9c91 0%, #137e7a 100%);
+  cursor: default;
+}
+
+.eamx-flow-paste-btn--fade {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* --- Question hint pill ------------------------------------------------ */
+
+.eamx-flow-hint {
+  position: relative;
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 8px 0 0;
+  padding: 8px 30px 8px 10px;
+  border-radius: var(--eamx-r-sm);
+  background: rgba(112, 209, 198, 0.12);
+  border: 1px solid rgba(112, 209, 198, 0.45);
+  color: var(--eamx-c-brand-800);
+  font: 500 12px/1.45 var(--eamx-font-sans);
+  max-width: 100%;
+  z-index: 2147483640;
+  animation: eamx-flow-rise 200ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+.eamx-flow-hint__badge {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: var(--eamx-r-pill);
+  background: var(--eamx-c-brand-600);
+  color: #ffffff;
+  font: 700 10px/1 var(--eamx-font-sans);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.eamx-flow-hint__text {
+  flex: 1 1 auto;
+  color: var(--eamx-c-brand-800);
+  word-break: break-word;
+}
+
+.eamx-flow-hint__close {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--eamx-r-sm);
+  background: transparent;
+  color: var(--eamx-c-brand-700);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--eamx-t-fast);
+}
+
+.eamx-flow-hint__close:hover {
+  background: rgba(112, 209, 198, 0.25);
+}
+
+@keyframes eamx-flow-rise {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* =============================================================================
  * Submit pulse highlight (gold) — preserved
  * ============================================================================= */
 
@@ -1187,7 +1392,10 @@
   .eamx-answer__value,
   .eamx-answer__chev,
   .eamx-mini-btn,
-  .eamx-panel__close {
+  .eamx-panel__close,
+  .eamx-flow-tooltip,
+  .eamx-flow-paste-btn,
+  .eamx-flow-hint {
     transition: none !important;
   }
   .eamx-fab,
@@ -1198,7 +1406,10 @@
   .eamx-btn__refresh,
   .eamx-textarea--pulse,
   .eamx-panel__success-icon,
-  .eamx-panel__success {
+  .eamx-panel__success,
+  .eamx-flow-tooltip,
+  .eamx-flow-paste-btn,
+  .eamx-flow-hint {
     animation: none !important;
   }
   .eamx-panel--open .eamx-panel__header,
