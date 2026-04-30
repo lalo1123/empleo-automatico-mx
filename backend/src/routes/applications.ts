@@ -11,7 +11,12 @@ import { loadEnv } from "../lib/env.js";
 import { HttpError, sendError } from "../lib/errors.js";
 import { authRequired } from "../middleware/auth.js";
 import { emailVerifiedRequired } from "../middleware/email-verified.js";
-import { generateCoverLetter, generateTailoredCv, parseCvText } from "../lib/gemini.js";
+import {
+  answerQuestions,
+  generateCoverLetter,
+  generateTailoredCv,
+  parseCvText
+} from "../lib/gemini.js";
 import { assertUnderLimit, incrementUsage } from "../lib/usage.js";
 import { getPlan } from "../lib/plans.js";
 
@@ -83,6 +88,24 @@ const generateSchema = z.object({
 
 const parseCvSchema = z.object({
   text: z.string().min(20, "El CV es demasiado corto").max(100_000, "El CV es demasiado largo")
+});
+
+// Answer-questions: 1-12 literal question strings, each 5-300 chars.
+// Cap of 12 sized for the worst-case form (Computrabajo questionnaires
+// usually max out around 8-10 questions); each window of 5-300 chars
+// drops obvious noise (single-char fields, paragraph dumps).
+const answerQuestionsSchema = z.object({
+  questions: z
+    .array(
+      z
+        .string()
+        .min(5, "Cada pregunta debe tener al menos 5 caracteres.")
+        .max(300, "Cada pregunta debe tener máximo 300 caracteres.")
+    )
+    .min(1, "Envía al menos una pregunta.")
+    .max(12, "Máximo 12 preguntas por solicitud."),
+  profile: profileSchema,
+  job: jobSchema
 });
 
 export const applicationsRoutes = new Hono<AppContext>();
@@ -216,6 +239,85 @@ applicationsRoutes.post(
         }
       });
     } catch (err) {
+      return sendError(c, err);
+    }
+  }
+);
+
+// /answer-questions generates one adaptive answer per question detected in
+// the application form by the extension.
+//
+// Quota model: charged as **0 units**. This endpoint exists to extend the
+// value of the single unit already billed by /generate (cover letter) for
+// the same application. We still gate on `assertUnderLimit` so users
+// already over quota cannot call this for free, but we never call
+// `incrementUsage` — using it does not consume any monthly allowance.
+applicationsRoutes.post(
+  "/answer-questions",
+  authRequired(),
+  emailVerifiedRequired(),
+  async (c) => {
+    try {
+      const body = await c.req.json().catch(() => null);
+      const parsed = answerQuestionsSchema.safeParse(body);
+      if (!parsed.success) {
+        throw new HttpError(
+          400,
+          "VALIDATION_ERROR",
+          parsed.error.issues[0]?.message ?? "Las preguntas o el perfil son inválidos."
+        );
+      }
+
+      // Same pre-flight as /generate-cv: a thin profile produces useless
+      // output. We reject before hitting Gemini so the user gets a clear
+      // 422 instead of a generic upstream failure.
+      const { profile, job, questions } = parsed.data;
+      if (!profile.experience || profile.experience.length === 0) {
+        throw new HttpError(
+          422,
+          "VALIDATION_ERROR",
+          "Tu perfil no tiene experiencia laboral. Completa tu CV antes de generar respuestas."
+        );
+      }
+      if (!profile.personal.fullName || !profile.personal.fullName.trim()) {
+        throw new HttpError(
+          422,
+          "VALIDATION_ERROR",
+          "Tu perfil no tiene nombre completo. Completa tu CV antes de generar respuestas."
+        );
+      }
+
+      const env = loadEnv();
+      const user = c.get("user");
+      // Gate on quota but DO NOT increment — see route comment above.
+      assertUnderLimit(user.id, user.plan);
+
+      const result = await answerQuestions({
+        apiKey: env.GEMINI_API_KEY,
+        model: env.GEMINI_MODEL,
+        profile,
+        job,
+        questions
+      });
+
+      // Log meta only — never log question text or generated answers
+      // (both can carry PII like salary expectations or personal stories).
+      console.log(
+        `[answer-questions] ok user=${user.id} plan=${user.plan} job=${job.source}:${job.id} questions=${questions.length}`
+      );
+
+      return c.json({
+        ok: true,
+        answers: result.answers
+      });
+    } catch (err) {
+      // Same error envelope as the other application routes.
+      const user = c.get("user");
+      if (user) {
+        console.log(
+          `[answer-questions] fail user=${user.id} plan=${user.plan}`
+        );
+      }
       return sendError(c, err);
     }
   }

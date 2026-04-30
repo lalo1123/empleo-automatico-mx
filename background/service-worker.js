@@ -322,6 +322,95 @@ async function handleOpenGeneratedCv(msg) {
   }
 }
 
+// ANSWER_QUESTIONS handler. The content script collected 1-12 open-ended
+// questions from the apply form (e.g. "¿Por qué eres la persona ideal para
+// este puesto?") and asks Gemini for matching answers. Mirrors GENERATE_DRAFT
+// gating: auth required, profile required, normalized job payload. The
+// backend does NOT charge quota — cover-letter generation already paid.
+//
+// Defensive: validate answers.length === questions.length before returning,
+// otherwise downstream paste logic would mis-align answers and questions.
+async function handleAnswerQuestions(msg) {
+  const job = msg && msg.job;
+  const questions = (msg && Array.isArray(msg.questions)) ? msg.questions : [];
+
+  if (!job) {
+    return { ok: false, error: ERROR_CODES.INVALID_INPUT, message: "Falta información de la vacante" };
+  }
+  if (!questions.length) {
+    return { ok: false, error: ERROR_CODES.INVALID_INPUT, message: "No hay preguntas que responder" };
+  }
+  // Defensive cap matching the backend contract (1-12). Truncate silently;
+  // the content script also caps at 10 for its own scan budget.
+  const trimmed = questions
+    .map((q) => (typeof q === "string" ? q.trim() : ""))
+    .filter(Boolean)
+    .slice(0, 12);
+  if (!trimmed.length) {
+    return { ok: false, error: ERROR_CODES.INVALID_INPUT, message: "Las preguntas están vacías" };
+  }
+
+  if (!(await auth.isLoggedIn())) {
+    return {
+      ok: false,
+      error: ERROR_CODES.UNAUTHORIZED,
+      message: "Inicia sesión en Opciones para responder preguntas con IA."
+    };
+  }
+
+  const profile = await storage.getProfile();
+  if (!profile) {
+    return {
+      ok: false,
+      error: ERROR_CODES.INVALID_INPUT,
+      message: "Sube tu CV en Opciones antes de responder preguntas con IA."
+    };
+  }
+
+  const normalizedJob = {
+    source: job.source || SOURCES.OCC,
+    url: job.url || "",
+    id: job.id || "",
+    title: job.title || "",
+    company: job.company || "",
+    location: job.location || "",
+    salary: job.salary == null ? null : job.salary,
+    modality: job.modality == null ? null : job.modality,
+    description: job.description || "",
+    requirements: Array.isArray(job.requirements) ? job.requirements : [],
+    extractedAt: job.extractedAt || nowISO()
+  };
+
+  let result;
+  try {
+    result = await backend.answerQuestions({ questions: trimmed, profile, job: normalizedJob });
+  } catch (e) {
+    if (e instanceof backend.PlanLimitError) {
+      return {
+        ok: false,
+        error: ERROR_CODES.PLAN_LIMIT_EXCEEDED,
+        message: "Llegaste al límite de tu plan. Upgrade en empleo.skybrandmx.com/account/billing"
+      };
+    }
+    // 422 PROFILE_TOO_THIN bubbles up via INVALID_INPUT — the content script
+    // branches on the message text to surface the "sube un CV más completo" copy.
+    return failFromError(e);
+  }
+
+  const answers = Array.isArray(result && result.answers) ? result.answers : [];
+  if (answers.length !== trimmed.length) {
+    // Treat length mismatch as a 502 — the paste logic relies on positional
+    // alignment with the originally detected questions.
+    return {
+      ok: false,
+      error: ERROR_CODES.SERVER_ERROR,
+      message: "El servicio de IA devolvió un número incorrecto de respuestas."
+    };
+  }
+
+  return { ok: true, answers };
+}
+
 // Inject `<script>setTimeout(() => window.print(), 800)</script>` right
 // before </body> if the HTML doesn't already trigger window.print(). The
 // guard checks for the marker we attach (`__eamxAutoPrint`) — this means the
@@ -471,6 +560,8 @@ onMessage(async (msg) => {
       return handleGenerateCv(msg);
     case MESSAGE_TYPES.OPEN_GENERATED_CV:
       return handleOpenGeneratedCv(msg);
+    case MESSAGE_TYPES.ANSWER_QUESTIONS:
+      return handleAnswerQuestions(msg);
     default:
       return {
         ok: false,

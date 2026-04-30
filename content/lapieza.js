@@ -26,9 +26,10 @@
     REJECT_DRAFT: "REJECT_DRAFT",
     OPEN_BILLING: "OPEN_BILLING",
     GENERATE_CV: "GENERATE_CV",
-    OPEN_GENERATED_CV: "OPEN_GENERATED_CV"
+    OPEN_GENERATED_CV: "OPEN_GENERATED_CV",
+    ANSWER_QUESTIONS: "ANSWER_QUESTIONS"
   };
-  const ERR = { UNAUTHORIZED: "UNAUTHORIZED", PLAN_LIMIT_EXCEEDED: "PLAN_LIMIT_EXCEEDED", INVALID_INPUT: "INVALID_INPUT" };
+  const ERR = { UNAUTHORIZED: "UNAUTHORIZED", PLAN_LIMIT_EXCEEDED: "PLAN_LIMIT_EXCEEDED", INVALID_INPUT: "INVALID_INPUT", SERVER_ERROR: "SERVER_ERROR" };
   const BILLING_URL = "https://empleo.skybrandmx.com/account/billing";
 
   // TODO(dom): verify against real LaPieza URLs. Confirmed pattern:
@@ -55,12 +56,14 @@
         REJECT_DRAFT: mod.MESSAGE_TYPES.REJECT_DRAFT,
         OPEN_BILLING: mod.MESSAGE_TYPES.OPEN_BILLING,
         GENERATE_CV: mod.MESSAGE_TYPES.GENERATE_CV,
-        OPEN_GENERATED_CV: mod.MESSAGE_TYPES.OPEN_GENERATED_CV
+        OPEN_GENERATED_CV: mod.MESSAGE_TYPES.OPEN_GENERATED_CV,
+        ANSWER_QUESTIONS: mod.MESSAGE_TYPES.ANSWER_QUESTIONS
       });
       if (mod && mod.ERROR_CODES) Object.assign(ERR, {
         UNAUTHORIZED: mod.ERROR_CODES.UNAUTHORIZED,
         PLAN_LIMIT_EXCEEDED: mod.ERROR_CODES.PLAN_LIMIT_EXCEEDED,
-        INVALID_INPUT: mod.ERROR_CODES.INVALID_INPUT
+        INVALID_INPUT: mod.ERROR_CODES.INVALID_INPUT,
+        SERVER_ERROR: mod.ERROR_CODES.SERVER_ERROR
       });
     } catch (_) { /* fall back to hardcoded */ }
   })();
@@ -82,6 +85,22 @@
   let cvHtml = "";
   let cvSummary = "";
   let cvError = "";
+
+  // Adaptive open-ended questions detected on the apply form. Mirrors the
+  // cvState pattern: module-scoped so panel re-renders preserve the cache.
+  // detectedQuestions: [{ el, question, fieldRef }] — el is a soft reference
+  // (DOM may be re-rendered by SPA so we always re-resolve via fieldRef when
+  // pasting). questionAnswers: string[] aligned by index with detectedQuestions.
+  // States: "idle" (none scanned yet) | "loading" (request in flight) |
+  // "success" (answers populated) | "error" (questionsError holds copy).
+  let detectedQuestions = [];
+  let questionAnswers = [];
+  let questionsState = "idle";
+  let questionsError = "";
+  // Auto-incrementing counter for the data-eamx-q-id attribute we stamp on
+  // fields without an id. Lives at module scope so we keep generating fresh
+  // refs if the user re-scans (SPA nav, regen).
+  let questionRefSeq = 0;
 
   // In-flow assistant state. After the user approves the draft we keep watching
   // the page and offer contextual help on the portal's apply form (CV upload,
@@ -303,6 +322,150 @@
   }
 
   // =========================================================================
+  // Adaptive question scanner
+  // =========================================================================
+  // LaPieza (and ATSes generally) inject the apply form with arbitrary
+  // open-ended question fields — e.g. "¿Por qué eres la persona ideal para
+  // este puesto?" or "Cuéntanos sobre tu experiencia con X". We can't enumerate
+  // these client-side, so we ship a heuristic scanner: walk all <textarea> and
+  // long <input type="text"> nodes, classify each by its surrounding text, and
+  // batch the survivors to the backend. Cap at 10 to bound Gemini cost.
+
+  // Question heuristic: text length > 25, ends in "?" or contains question
+  // words. Greedy on purpose — false positives waste a Gemini call but false
+  // negatives leave the user stuck typing manually.
+  const QUESTION_WORDS_RX = /\b(por\s*qu[eé]|qu[eé]|c[oó]mo|cu[aá]l|cu[aá]les|describe|explica|cu[eé]ntanos|comparte|dinos|platic[ae]nos|h[aá]blanos|qu[eé]\s+te|por\s*qu[eé])\b/i;
+  function looksLikeQuestion(text) {
+    if (!text) return false;
+    const t = text.trim();
+    if (t.length < 6) return false;
+    if (t.length > 25) return true;
+    if (/\?\s*$/.test(t)) return true;
+    if (QUESTION_WORDS_RX.test(t)) return true;
+    return false;
+  }
+
+  // Skip-list for fields that look like basic profile info — we already fill
+  // those via fillForm/buildFormFields. The match is deliberately broad: a
+  // single token hit is enough to skip the field.
+  const QUESTION_SKIP_RX = /\b(nombre|name|email|correo|phone|tel[eé]fono|celular|m[oó]vil|whats?app|ubicaci[oó]n|location|ciudad|direcci[oó]n|address|zip|postal|c[oó]digo\s*postal|edad|age|rfc|curp|fecha\s+de\s+nacimiento|birthdate|birth[- ]?date|date\s+of\s+birth|cv|curriculum|currículum|resume|hoja\s+de\s+vida|linkedin|website|sitio\s*web|portafolio|portfolio|salario|sueldo|expectativa|salary|password|contraseña|usuario|username)\b/i;
+
+  // Pull the most-likely question text for a given field. Priority:
+  //  1) <label for=fieldId> textContent (canonical)
+  //  2) wrapping <label>
+  //  3) the field's `placeholder`
+  //  4) the field's `aria-label`
+  //  5) a sibling/parent heading (h1-h4) within 4 DOM levels
+  // Returns trimmed text or "".
+  function questionTextFor(el) {
+    const tryText = (s) => (s || "").replace(/\s+/g, " ").trim();
+    // 1) Explicit label
+    if (el.id) {
+      try {
+        const lbl = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+        if (lbl) {
+          const t = tryText(lbl.textContent);
+          if (t) return t;
+        }
+      } catch (_) {}
+    }
+    // 2) Wrapping label
+    const wrap = el.closest("label");
+    if (wrap) {
+      // Strip the input's own value if any (rare but possible for label > input).
+      const t = tryText(wrap.textContent);
+      if (t) return t;
+    }
+    // 3) Placeholder
+    const ph = tryText(el.getAttribute("placeholder"));
+    if (ph) return ph;
+    // 4) aria-label
+    const al = tryText(el.getAttribute("aria-label"));
+    if (al) return al;
+    // 5) Walk ancestors looking for headings/legends within 4 levels.
+    let p = el.parentElement;
+    let depth = 0;
+    while (p && depth < 4) {
+      // Direct heading inside the parent
+      const h = p.querySelector("h1, h2, h3, h4, legend");
+      if (h && h.contains(el) === false) {
+        const t = tryText(h.textContent);
+        if (t && t.length < 280) return t;
+      }
+      // Previous sibling heading
+      const prev = p.previousElementSibling;
+      if (prev && /^(H[1-4]|LEGEND|P|DIV|SPAN)$/i.test(prev.tagName)) {
+        const t = tryText(prev.textContent);
+        if (t && t.length < 280) return t;
+      }
+      p = p.parentElement;
+      depth++;
+    }
+    return "";
+  }
+
+  // Stable identifier for a field so we can re-resolve it after the panel
+  // re-renders or after a brief SPA repaint. Prefer existing `id`; otherwise
+  // stamp a fresh data-eamx-q-id attribute.
+  function ensureFieldRef(el) {
+    if (el.id) return el.id;
+    const existing = el.getAttribute("data-eamx-q-id");
+    if (existing) return existing;
+    questionRefSeq += 1;
+    const ref = `eamx-q-${Date.now().toString(36)}-${questionRefSeq}`;
+    try { el.setAttribute("data-eamx-q-id", ref); } catch (_) {}
+    return ref;
+  }
+
+  // Resolve a fieldRef back to a live DOM node. Works whether the ref points
+  // at a real id or a stamped data-eamx-q-id attribute.
+  function resolveFieldRef(ref) {
+    if (!ref) return null;
+    try {
+      const byId = document.getElementById(ref);
+      if (byId) return byId;
+    } catch (_) {}
+    try {
+      const escaped = (typeof CSS !== "undefined" && CSS.escape) ? CSS.escape(ref) : ref.replace(/"/g, "\\\"");
+      return document.querySelector(`[data-eamx-q-id="${escaped}"]`);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // Scan the live DOM for open-ended question fields. Returns up to 10
+  // candidates ordered roughly by document order. Idempotent — does NOT
+  // mutate detectedQuestions; the caller decides when to commit.
+  function scanQuestionFields() {
+    const candidates = Array.from(document.querySelectorAll(
+      "textarea, input[type='text']"
+    ));
+    const out = [];
+    const seenRefs = new Set();
+    for (const el of candidates) {
+      if (out.length >= 10) break;
+      // Visibility: skip hidden/zero-area inputs.
+      if (!isVisible(el)) continue;
+      // Skip if disabled or read-only — user can't fill them anyway.
+      if (el.disabled || el.readOnly) continue;
+      // Pull question text from labels/placeholder/headings.
+      const question = questionTextFor(el);
+      if (!question) continue;
+      // Drop boring profile-info fields.
+      const ctxHay = `${question} ${el.name || ""} ${el.id || ""} ${el.getAttribute("placeholder") || ""}`;
+      if (QUESTION_SKIP_RX.test(ctxHay)) continue;
+      // Apply the question heuristic.
+      if (!looksLikeQuestion(question)) continue;
+      // Stamp/ensure ref + dedupe.
+      const fieldRef = ensureFieldRef(el);
+      if (seenRefs.has(fieldRef)) continue;
+      seenRefs.add(fieldRef);
+      out.push({ el, question, fieldRef });
+    }
+    return out;
+  }
+
+  // =========================================================================
   // FAB
   // =========================================================================
 
@@ -361,7 +524,12 @@
     panelEl.setAttribute("aria-label", "Borrador de postulación");
 
     const cover = draft?.coverLetter || "";
-    const answers = draft?.suggestedAnswers || {};
+
+    // The legacy `draft.suggestedAnswers` map is intentionally NOT rendered
+    // anymore — those keys were hard-coded and rarely matched real LaPieza
+    // questions. The new flow is adaptive: scanQuestionFields() reads the
+    // actual question labels off the DOM, batches them to /answer-questions,
+    // and renders one card per detected question. See renderQuestionsCard.
 
     panelEl.innerHTML = `
       <header class="eamx-panel__header">
@@ -372,7 +540,7 @@
         ${partial ? `<div class="eamx-panel__warning">No pude extraer todo de la vacante — revisa la carta con más detalle.</div>` : ""}
         <label for="eamx-cover-letter"><strong>Carta de presentación</strong></label>
         <textarea id="eamx-cover-letter" class="eamx-textarea" rows="14"></textarea>
-        <div class="eamx-answers"></div>
+        <section class="eamx-questions" data-eamx-questions hidden></section>
         <section class="eamx-cv-card" data-eamx-cv-card aria-label="CV personalizado para esta vacante">
           <div class="eamx-cv-card__head">
             <span class="eamx-cv-card__icon" aria-hidden="true">📄</span>
@@ -385,7 +553,7 @@
         </section>
       </div>
       <footer class="eamx-panel__footer">
-        <button type="button" class="eamx-btn eamx-btn--primary" data-action="approve">Aprobar y llenar formulario</button>
+        <button type="button" class="eamx-btn eamx-btn--primary" data-action="approve">Aprobar y llenar todo</button>
         <button type="button" class="eamx-btn eamx-btn--secondary" data-action="regen">Re-generar</button>
         <button type="button" class="eamx-btn eamx-btn--ghost" data-action="cancel">Cancelar</button>
       </footer>`;
@@ -394,26 +562,20 @@
     panelEl.querySelector(".eamx-panel__company").textContent = job.company || "";
     panelEl.querySelector("#eamx-cover-letter").value = cover;
 
-    const host = panelEl.querySelector(".eamx-answers");
-    const keys = Object.keys(answers);
-    if (keys.length) {
-      const h = document.createElement("div");
-      h.innerHTML = "<strong>Respuestas sugeridas</strong>";
-      h.style.marginTop = "16px";
-      host.appendChild(h);
-      for (const k of keys) {
-        const wrap = document.createElement("div"); wrap.className = "eamx-answer";
-        const lbl = document.createElement("div"); lbl.className = "eamx-answer__label"; lbl.textContent = k;
-        const val = document.createElement("div"); val.className = "eamx-answer__value";
-        val.textContent = answers[k]; val.tabIndex = 0; val.title = "Clic para copiar";
-        val.addEventListener("click", () => {
-          navigator.clipboard?.writeText(answers[k])
-            .then(() => toast("Copiado.", "success"))
-            .catch(() => toast("No se pudo copiar.", "error"));
-        });
-        wrap.append(lbl, val); host.appendChild(wrap);
+    // Best-effort: scan the page now so the panel surfaces detected questions
+    // immediately. Most LaPieza apply pages render the form server-side, so a
+    // synchronous scan catches them. The flow assistant re-scans later as the
+    // SPA mutates the DOM (see runFlowDetectors → detectAdaptiveQuestions).
+    if (questionsState === "idle" && !detectedQuestions.length) {
+      const scanned = scanQuestionFields();
+      if (scanned.length) {
+        detectedQuestions = scanned;
+        // Kick off the answer fetch in the background; the UI shows a loading
+        // state until answers arrive.
+        fetchAnswersForDetectedQuestions();
       }
     }
+    renderQuestionsCard();
 
     // Paint the tailored-CV card in whatever state we currently hold. If the
     // user re-opens the panel after a successful generation we want to keep
@@ -504,6 +666,226 @@
     renderCvCard();
   }
 
+  // =========================================================================
+  // Adaptive questions card — render + state machine
+  // =========================================================================
+
+  // Re-paint the eamx-questions section based on detectedQuestions /
+  // questionAnswers / questionsState. Idempotent. We render every time the
+  // panel opens AND every time the state transitions, so the user always
+  // sees the latest snapshot. Hidden (display:none via [hidden]) when there
+  // are no detected questions to keep the panel tidy.
+  function renderQuestionsCard() {
+    if (!panelEl) return;
+    const host = panelEl.querySelector("[data-eamx-questions]");
+    if (!host) return;
+
+    if (!detectedQuestions.length) {
+      host.hidden = true;
+      host.innerHTML = "";
+      return;
+    }
+    host.hidden = false;
+
+    const headerHtml =
+      '<div class="eamx-questions__head">' +
+        '<span class="eamx-questions__title">' +
+          '<span aria-hidden="true">💬</span> Preguntas detectadas en este formulario' +
+        '</span>' +
+        '<span class="eamx-questions__count">' +
+          escapeHtml(String(detectedQuestions.length)) +
+          (detectedQuestions.length === 1 ? ' pregunta' : ' preguntas') +
+        '</span>' +
+      '</div>';
+
+    if (questionsState === "loading") {
+      host.innerHTML = headerHtml +
+        '<div class="eamx-questions__status" role="status" aria-live="polite">' +
+          '<span class="eamx-cv-card__spinner" aria-hidden="true"></span>' +
+          '<span>Generando respuestas con IA…</span>' +
+        '</div>' +
+        // Show the questions even while loading so the user sees what's coming.
+        renderQuestionCardsHtml(/*answersReady*/ false);
+      return;
+    }
+
+    if (questionsState === "error") {
+      host.innerHTML = headerHtml +
+        '<div class="eamx-questions__error" role="alert">' +
+          escapeHtml(questionsError || "No se pudieron generar las respuestas.") +
+        '</div>' +
+        '<div class="eamx-questions__actions">' +
+          '<button type="button" class="eamx-mini-btn" data-action="questions-retry">Reintentar</button>' +
+        '</div>';
+      return;
+    }
+
+    // success or idle (with detected questions but no fetch yet)
+    host.innerHTML = headerHtml + renderQuestionCardsHtml(/*answersReady*/ questionsState === "success");
+  }
+
+  // Build the per-question card HTML. We always render textareas (even when
+  // empty / loading) so the layout is stable and the user can pre-edit while
+  // the backend works. Each card carries data-q-index pointing back into the
+  // detectedQuestions array.
+  function renderQuestionCardsHtml(answersReady) {
+    let out = "";
+    for (let i = 0; i < detectedQuestions.length; i++) {
+      const q = detectedQuestions[i];
+      const ans = answersReady ? (questionAnswers[i] || "") : "";
+      out +=
+        '<div class="eamx-question-card" data-q-index="' + i + '">' +
+          '<p class="eamx-question-label">' + escapeHtml(q.question) + '</p>' +
+          '<textarea class="eamx-question-answer" data-q-index="' + i + '" ' +
+            'placeholder="' + (answersReady ? '' : 'Generando respuesta…') + '" ' +
+            'rows="4">' + escapeHtml(ans) + '</textarea>' +
+          '<div class="eamx-question-card__actions">' +
+            '<button type="button" class="eamx-mini-btn" data-action="paste-question" ' +
+              'data-field-ref="' + escapeHtml(q.fieldRef) + '" data-q-index="' + i + '"' +
+              (answersReady ? '' : ' disabled') + '>' +
+              '<span aria-hidden="true">✨</span> Pegar en formulario' +
+            '</button>' +
+          '</div>' +
+        '</div>';
+    }
+    return out;
+  }
+
+  // Set state + repaint. Mirrors setCvState — single source of truth.
+  function setQuestionsState(next, patch) {
+    questionsState = next;
+    if (patch) {
+      if ("answers" in patch) questionAnswers = Array.isArray(patch.answers) ? patch.answers.slice() : [];
+      if ("error" in patch) questionsError = patch.error || "";
+    }
+    renderQuestionsCard();
+  }
+
+  // Kick off ANSWER_QUESTIONS for the currently detected list. Safe to call
+  // multiple times — re-entrant calls bail if already loading.
+  async function fetchAnswersForDetectedQuestions() {
+    if (!lastJob) return;
+    if (!detectedQuestions.length) return;
+    if (questionsState === "loading") return;
+    const questions = detectedQuestions.map((q) => q.question);
+    setQuestionsState("loading", { error: "" });
+    try {
+      const res = await sendMsg({
+        type: MSG.ANSWER_QUESTIONS,
+        questions,
+        job: lastJob
+      });
+      if (!res || !res.ok) {
+        handleQuestionsBackendFailure(res);
+        return;
+      }
+      const answers = Array.isArray(res.answers) ? res.answers : [];
+      // Defensive — backend guarantees length match but cheap to verify.
+      if (answers.length !== questions.length) {
+        setQuestionsState("error", {
+          answers: [],
+          error: "Servicio de IA temporalmente no disponible. Intenta de nuevo."
+        });
+        return;
+      }
+      setQuestionsState("success", { answers, error: "" });
+    } catch (err) {
+      setQuestionsState("error", { error: humanizeError(err) });
+    }
+  }
+
+  // Branch the panel UX on the typed error code surfaced by the service-worker.
+  function handleQuestionsBackendFailure(res) {
+    const code = res && res.error;
+    const msg = (res && res.message) || "";
+    if (code === ERR.UNAUTHORIZED) {
+      setQuestionsState("error", { error: "Inicia sesión para continuar." });
+      toast("Inicia sesión para continuar.", "error", {
+        label: "Inicia sesión",
+        onClick: () => openOptionsPage()
+      });
+      return;
+    }
+    if (code === ERR.PLAN_LIMIT_EXCEEDED) {
+      setQuestionsState("error", { error: "Llegaste al límite de tu plan." });
+      toast("Llegaste al límite.", "error", {
+        label: "Ver planes",
+        onClick: () => openBilling()
+      });
+      return;
+    }
+    // 422 PROFILE_TOO_THIN comes through as INVALID_INPUT — branch on the
+    // message text the same way we do in handleGenerateCv.
+    if (code === ERR.INVALID_INPUT && /perfil|cv|profile/i.test(msg)) {
+      setQuestionsState("error", {
+        error: "Sube un CV más completo en Opciones para que la IA tenga más contexto."
+      });
+      toast("Sube un CV más completo en Opciones.", "info", {
+        label: "Abrir Opciones",
+        onClick: () => openOptionsPage()
+      });
+      return;
+    }
+    if (code === ERR.SERVER_ERROR) {
+      setQuestionsState("error", {
+        error: "Servicio de IA temporalmente no disponible. Intenta de nuevo."
+      });
+      return;
+    }
+    // Catch-all: hide the section and log. The user can still answer manually.
+    console.warn("[EmpleoAutomatico] answer-questions failed", res);
+    detectedQuestions = [];
+    questionAnswers = [];
+    setQuestionsState("idle", { answers: [], error: "" });
+  }
+
+  // Paste the (possibly edited) answer for question index `i` into its
+  // resolved DOM field. Uses the same setNativeValue + input/change/blur
+  // sequence as the cover-letter paste, then highlights the field with a
+  // 1.5s outline pulse. Returns true if the field was found + filled.
+  function pasteQuestionAnswer(i) {
+    const q = detectedQuestions[i];
+    if (!q) return false;
+    // Read the latest user-edited value out of the textarea instead of using
+    // the cached questionAnswers — this lets the user tweak the text before
+    // pasting.
+    const card = panelEl?.querySelector(`.eamx-question-card[data-q-index="${i}"]`);
+    const ta = card?.querySelector(".eamx-question-answer");
+    const value = ta ? (ta.value || "") : (questionAnswers[i] || "");
+    if (!value.trim()) {
+      toast("La respuesta está vacía. Genérala o escríbela primero.", "info");
+      return false;
+    }
+    const target = resolveFieldRef(q.fieldRef);
+    if (!target) {
+      toast("No encontré el campo en el formulario. Recarga e inténtalo.", "error");
+      return false;
+    }
+    try {
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+        setNativeValue(target, value);
+      } else if (target.isContentEditable) {
+        target.textContent = value;
+      } else {
+        try { target.value = value; } catch (_) {}
+      }
+      target.dispatchEvent(new Event("input", { bubbles: true }));
+      target.dispatchEvent(new Event("change", { bubbles: true }));
+      try { target.dispatchEvent(new Event("blur", { bubbles: true })); } catch (_) {}
+    } catch (err) {
+      console.warn("[EmpleoAutomatico] paste-question failed", err);
+      toast("No se pudo pegar la respuesta.", "error");
+      return false;
+    }
+    // 1.5s outline pulse — class name is honored by occ.css with a reduced-
+    // motion override.
+    try {
+      target.classList.add("eamx-paste-success");
+      setTimeout(() => { try { target.classList.remove("eamx-paste-success"); } catch (_) {} }, 1500);
+    } catch (_) {}
+    return true;
+  }
+
   async function handleGenerateCv() {
     if (!lastJob) {
       // Defensive: panel only opens after extractJob succeeds, but a user
@@ -587,6 +969,15 @@
     if (action === "approve") return handleApprove();
     if (action === "cv-generate" || action === "cv-regen") return handleGenerateCv();
     if (action === "cv-open") return handleOpenCv();
+    if (action === "questions-retry") return fetchAnswersForDetectedQuestions();
+    if (action === "paste-question") {
+      const idx = parseInt(btn.getAttribute("data-q-index") || "-1", 10);
+      if (Number.isFinite(idx) && idx >= 0) {
+        const ok = pasteQuestionAnswer(idx);
+        if (ok) toast("Respuesta pegada.", "success");
+      }
+      return;
+    }
   }
 
   async function handleCancel() {
@@ -594,6 +985,9 @@
     activeDraftId = null; lastDraft = null;
     // Reset the tailored-CV cache so the next vacancy starts fresh.
     cvState = "idle"; cvHtml = ""; cvSummary = ""; cvError = "";
+    // Reset the adaptive-questions cache too — different vacancy = different
+    // questions, and stale fieldRefs from the prior page would resolve wrong.
+    detectedQuestions = []; questionAnswers = []; questionsState = "idle"; questionsError = "";
     stopFlowAssistant();
     closePanel(); setFabBusy(false);
   }
@@ -609,6 +1003,9 @@
       lastDraft = res.draft || null;
       const ta = panelEl?.querySelector("#eamx-cover-letter");
       if (ta && lastDraft) ta.value = lastDraft.coverLetter || "";
+      // Re-fetch question answers too — the regenerated draft may produce a
+      // different tone/voice for the same questions.
+      if (detectedQuestions.length) fetchAnswersForDetectedQuestions();
       toast("Borrador regenerado.", "success");
     } catch (err) {
       toast(humanizeError(err), "error");
@@ -632,13 +1029,27 @@
       // pastes the latest text when it finds a textarea later in the funnel.
       if (lastDraft) lastDraft.coverLetter = coverLetter;
       fillForm(fields);
+
+      // Adaptive questions: also paste each detected question's answer into
+      // its target field. Read straight from the panel textareas so the user
+      // gets the latest edited text, then fall back to questionAnswers cache.
+      let pastedCount = 0;
+      if (detectedQuestions.length && questionsState === "success") {
+        for (let i = 0; i < detectedQuestions.length; i++) {
+          if (pasteQuestionAnswer(i)) pastedCount++;
+        }
+      }
+
       closePanel();
       // Adaptive in-flow guidance: keep watching the page after approval so
       // we can light up file inputs, textareas, questions, and the final
       // submit button as the portal's apply flow progresses.
       startFlowAssistant();
       highlightSubmitButton();
-      toast("Listo — revisa y da click a 'Enviar' cuando estés conforme.", "success");
+      const tail = pastedCount > 0
+        ? ` Respondí ${pastedCount} pregunta${pastedCount === 1 ? "" : "s"} también.`
+        : "";
+      toast("Listo — revisa y da click a 'Enviar' cuando estés conforme." + tail, "success");
     } catch (err) {
       toast(humanizeError(err), "error");
     } finally {
@@ -868,10 +1279,56 @@
       detectFileInputs();
       detectCoverLetterTextarea();
       detectQuestions();
+      detectAdaptiveQuestions();
       detectFinalSubmit();
     } catch (err) {
       console.warn("[EmpleoAutomatico] flow detector error", err);
     }
+  }
+
+  // Adaptive in-flow question detection. Called from runFlowDetectors so it
+  // re-runs as the SPA mutates the apply form. If we find new questions on a
+  // page where we don't have them yet (e.g. user approved on the listing
+  // page and LaPieza navigates to a multi-step form), scan + fetch + show
+  // a toast pointing the user back at the panel.
+  // Idempotent: bails if a fetch is already in flight or if the page hasn't
+  // surfaced any new questions since the last scan.
+  function detectAdaptiveQuestions() {
+    if (questionsState === "loading") return;
+    const scanned = scanQuestionFields();
+    if (!scanned.length) return;
+    // Compare to detectedQuestions by fieldRef set — if the set hasn't
+    // changed, the SPA mutation didn't add anything new.
+    const oldRefs = new Set(detectedQuestions.map((q) => q.fieldRef));
+    const newRefs = new Set(scanned.map((q) => q.fieldRef));
+    let same = oldRefs.size === newRefs.size;
+    if (same) {
+      for (const r of newRefs) { if (!oldRefs.has(r)) { same = false; break; } }
+    }
+    if (same && questionsState !== "idle") return;
+
+    detectedQuestions = scanned;
+    // Surface a one-shot toast so the user knows we found something new.
+    if (!FLOW_TIPS_SHOWN.has("adaptive-questions")) {
+      FLOW_TIPS_SHOWN.add("adaptive-questions");
+      toast(
+        "Detecté " + scanned.length + " pregunta" + (scanned.length === 1 ? "" : "s") +
+        " en este formulario. Genera respuestas con IA.",
+        "info",
+        {
+          label: "Generar respuestas",
+          onClick: () => {
+            // Re-open panel if it's been closed, else just kick off the fetch.
+            if (!panelEl && lastJob && lastDraft) {
+              openPanel({ job: lastJob, draft: lastDraft, partial: false });
+            }
+            fetchAnswersForDetectedQuestions();
+          }
+        }
+      );
+    }
+    // Repaint the panel if it's open right now so the new section is visible.
+    renderQuestionsCard();
   }
 
   // Visibility check — element is rendered and inside the viewport-eligible
@@ -1202,6 +1659,10 @@
         activeDraftId = null; lastDraft = null; lastJob = null;
         // Tailored CV cache is per-vacancy — drop on SPA route change.
         cvState = "idle"; cvHtml = ""; cvSummary = ""; cvError = "";
+        // Adaptive questions cache is per-page — drop on SPA route change.
+        // The detector re-runs on the new route; old fieldRefs would resolve
+        // to nothing once the form unmounts.
+        detectedQuestions = []; questionAnswers = []; questionsState = "idle"; questionsError = "";
         // SPA route changed: tear down any in-flow helpers tied to the old
         // page. The assistant will re-arm if the user approves on the new
         // route. We clear the dedupe set so detectors can re-attach to

@@ -28,6 +28,37 @@ const PARSE_CV_SYSTEM =
 // existing content with the vacancy's keywords. Output is full HTML ready to
 // be rendered/printed as A4 PDF (single column, no tables for layout, no
 // external resources, inline <style>).
+// Adaptive answers system prompt.
+// The extension sends the literal question text from each form field; Gemini
+// must answer each one anchored in the candidate's profile + the vacancy.
+// Hard rules: no invention, fixed length (60-150 words), same array length
+// and order as the input.
+const ANSWER_QUESTIONS_SYSTEM =
+  "Eres un experto en redacción de respuestas para formularios de aplicación " +
+  "a vacantes en México.\n" +
+  "Recibes una lista de preguntas (cada una literal del formulario que el " +
+  "candidato está llenando) y debes responder cada una de forma específica, " +
+  "anclada en el perfil del candidato y la vacante.\n\n" +
+  "Reglas:\n" +
+  "1. NUNCA inventes experiencia, fechas, números o títulos que no estén en " +
+  "el perfil.\n" +
+  "2. Cada respuesta: 60-150 palabras, español MX, profesional pero humano, " +
+  "primera persona.\n" +
+  "3. Si la pregunta es de \"fit/motivación/por qué eres ideal\" → conecta " +
+  "2-3 puntos del perfil con requisitos de la vacante.\n" +
+  "4. Si es \"disponibilidad\" → directa y breve (1-2 frases, mencionando " +
+  "la empresa).\n" +
+  "5. Si es \"expectativa salarial\" → si la vacante muestra rango, alinea; " +
+  "si no, usa lenguaje flexible (\"dentro del rango competitivo del mercado " +
+  "para...\").\n" +
+  "6. Si es \"experiencia relevante\" → top 2-3 logros del perfil que " +
+  "matcheen la vacante.\n" +
+  "7. Si es una pregunta atípica (ej. \"¿qué te apasiona?\", \"¿qué harías " +
+  "en los primeros 90 días?\") → responde anclado en el perfil, sin " +
+  "clichés.\n" +
+  "8. Devuelve un array de respuestas EN EL MISMO ORDEN que las preguntas. " +
+  "Mismo length.";
+
 const TAILORED_CV_SYSTEM =
   "Eres un experto en redacción de CVs optimizados para ATS (Applicant " +
   "Tracking Systems).\n\n" +
@@ -78,6 +109,14 @@ const TAILORED_CV_SCHEMA = {
     summary: { type: "string" }
   },
   required: ["html", "summary"]
+} as const;
+
+const ANSWER_QUESTIONS_SCHEMA = {
+  type: "object",
+  properties: {
+    answers: { type: "array", items: { type: "string" } }
+  },
+  required: ["answers"]
 } as const;
 
 const PARSE_CV_SCHEMA = {
@@ -419,4 +458,92 @@ export async function generateTailoredCv(
     : "CV adaptado a la vacante.";
 
   return { html, summary };
+}
+
+// ---------------------------------------------------------------------------
+// Adaptive form answers
+// ---------------------------------------------------------------------------
+
+export interface AnswerQuestionsArgs {
+  apiKey: string;
+  model: string;
+  profile: UserProfile;
+  job: JobPosting;
+  /** 1-12 literal question strings as captured from the application form. */
+  questions: string[];
+}
+
+export interface AnswerQuestionsResult {
+  /** Same length and order as `questions`. */
+  answers: string[];
+}
+
+/**
+ * Generates one adaptive answer per question detected in the application form.
+ *
+ * Quota model: this endpoint exists to make the *single* unit billed by
+ * `/generate` (cover letter) more useful, so it is **not** charged. The route
+ * still gates on `assertUnderLimit` to prevent free abuse, but never calls
+ * `incrementUsage`. See routes/applications.ts for the wiring.
+ *
+ * Output validation:
+ * - `answers` must be an array of the same length as `questions`. Otherwise
+ *   we throw 502 UPSTREAM_ERROR (no fallback — the model failed at the
+ *   contract level).
+ * - Empty/whitespace strings inside the array are replaced with a generic
+ *   per-slot fallback so partial failures don't take the whole call down.
+ */
+export async function answerQuestions(
+  args: AnswerQuestionsArgs
+): Promise<AnswerQuestionsResult> {
+  const { apiKey, model, profile, job, questions } = args;
+  if (!apiKey) throw new HttpError(500, "INTERNAL_ERROR", "Configuración del servicio incompleta.");
+  if (!profile) throw new HttpError(400, "VALIDATION_ERROR", "Falta el perfil del candidato.");
+  if (!job) throw new HttpError(400, "VALIDATION_ERROR", "Falta la información de la vacante.");
+  if (!Array.isArray(questions) || questions.length === 0) {
+    throw new HttpError(400, "VALIDATION_ERROR", "No hay preguntas para responder.");
+  }
+
+  const userText =
+    `Vacante (JSON):\n${JSON.stringify(job, null, 2)}\n\n` +
+    `Perfil del candidato (JSON):\n${JSON.stringify(profile, null, 2)}\n\n` +
+    `Preguntas detectadas en el formulario (en orden):\n` +
+    `${JSON.stringify(questions, null, 2)}\n\n` +
+    `Responde cada pregunta siguiendo las reglas. Devuelve un array ` +
+    `"answers" con el MISMO número de elementos y EN EL MISMO ORDEN que las ` +
+    `preguntas.`;
+
+  const body = {
+    systemInstruction: { parts: [{ text: ANSWER_QUESTIONS_SYSTEM }] },
+    contents: [{ role: "user", parts: [{ text: userText }] }],
+    generationConfig: {
+      // Some flexibility for varied phrasings, not too creative.
+      temperature: 0.6,
+      // Worst case: 12 questions × ~300 tokens each.
+      maxOutputTokens: 4000,
+      thinkingConfig: { thinkingBudget: 0 },
+      responseMimeType: "application/json",
+      responseJsonSchema: ANSWER_QUESTIONS_SCHEMA
+    }
+  };
+
+  const res = await callGenerate(apiKey, model, body);
+  const out = extractJson<{ answers?: unknown }>(res);
+
+  if (!Array.isArray(out.answers)) {
+    throw new HttpError(502, "UPSTREAM_ERROR", "La IA no respondió todas las preguntas.");
+  }
+  if (out.answers.length !== questions.length) {
+    throw new HttpError(502, "UPSTREAM_ERROR", "La IA no respondió todas las preguntas.");
+  }
+
+  const answers: string[] = out.answers.map((a) => {
+    if (typeof a !== "string") return "[respuesta no disponible — reformula la pregunta]";
+    const trimmed = a.trim();
+    return trimmed.length > 0
+      ? trimmed
+      : "[respuesta no disponible — reformula la pregunta]";
+  });
+
+  return { answers };
 }
