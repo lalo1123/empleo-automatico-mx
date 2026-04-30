@@ -60,7 +60,7 @@ const profileSchema = z.object({
 });
 
 const jobSchema = z.object({
-  source: z.enum(["occ", "computrabajo", "linkedin", "bumeran"]),
+  source: z.enum(["occ", "computrabajo", "linkedin", "bumeran", "indeed", "lapieza"]),
   url: z.string(),
   id: z.string(),
   title: z.string(),
