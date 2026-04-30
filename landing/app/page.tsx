@@ -52,7 +52,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "¿En qué portales funciona?",
-    a: "En los 5 principales del mercado mexicano: OCC Mundial, Computrabajo, Bumeran, Indeed México y LinkedIn (Easy Apply, con límite responsable de 15 cartas al día para proteger tu cuenta). Todos activos desde el primer día.",
+    a: "En los 6 principales del mercado mexicano: OCC Mundial, Computrabajo, Bumeran, LaPieza, Indeed México y LinkedIn (Easy Apply, con límite responsable de 15 cartas al día para proteger tu cuenta). Todos activos desde el primer día.",
   },
   {
     q: "¿Necesito una API key de Google Gemini?",
@@ -434,8 +434,8 @@ export default function LandingPage() {
                 }
               />
               <FeatureCard
-                title="5 portales mexicanos"
-                description="OCC, Computrabajo, Bumeran, Indeed e LinkedIn (Easy Apply, con límite responsable)."
+                title="6 portales mexicanos"
+                description="OCC, Computrabajo, Bumeran, LaPieza, Indeed e LinkedIn (Easy Apply, con límite responsable)."
                 icon={
                   <svg
                     viewBox="0 0 24 24"

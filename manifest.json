@@ -15,6 +15,8 @@
     "https://computrabajo.com.mx/*",
     "https://www.bumeran.com.mx/*",
     "https://bumeran.com.mx/*",
+    "https://lapieza.io/*",
+    "https://www.lapieza.io/*",
     "https://mx.indeed.com/*",
     "https://www.linkedin.com/*",
     "https://api.empleo.skybrandmx.com/*",
@@ -49,6 +51,15 @@
         "https://bumeran.com.mx/*"
       ],
       "js": ["content/bumeran.js"],
+      "css": ["content/occ.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://lapieza.io/*",
+        "https://www.lapieza.io/*"
+      ],
+      "js": ["content/lapieza.js"],
       "css": ["content/occ.css"],
       "run_at": "document_idle"
     },

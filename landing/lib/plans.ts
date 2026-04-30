@@ -29,7 +29,7 @@ export const PLANS: Record<PlanId, Plan> = {
     features: [
       "3 postulaciones al mes",
       "Cartas generadas con IA",
-      "5 portales: OCC, Computrabajo, Bumeran, Indeed, LinkedIn",
+      "6 portales: OCC, Computrabajo, Bumeran, LaPieza, Indeed, LinkedIn",
       "Soporte por email",
     ],
   },
@@ -45,7 +45,7 @@ export const PLANS: Record<PlanId, Plan> = {
     features: [
       "100 postulaciones al mes",
       "Cartas personalizadas ilimitadas",
-      "5 portales: OCC, Computrabajo, Bumeran, Indeed, LinkedIn",
+      "6 portales: OCC, Computrabajo, Bumeran, LaPieza, Indeed, LinkedIn",
       "Historial de postulaciones",
       "Soporte prioritario",
     ],
@@ -61,7 +61,7 @@ export const PLANS: Record<PlanId, Plan> = {
     features: [
       "Postulaciones ilimitadas",
       "Cartas personalizadas ilimitadas",
-      "5 portales con prioridad y nuevas integraciones",
+      "6 portales con prioridad y nuevas integraciones",
       "Historial de postulaciones",
       "Soporte prioritario 24h",
       "Acceso anticipado a nuevas funciones",
