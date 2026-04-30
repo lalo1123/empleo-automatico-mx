@@ -133,7 +133,7 @@ export interface UserProfile {
 }
 
 export interface JobPosting {
-  source: "occ" | "computrabajo" | "linkedin" | "bumeran";
+  source: "occ" | "computrabajo" | "linkedin" | "bumeran" | "indeed" | "lapieza";
   url: string;
   id: string;
   title: string;
