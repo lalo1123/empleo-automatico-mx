@@ -20,8 +20,15 @@
   "use strict";
 
   const SOURCE = "lapieza";
-  const MSG = { GENERATE_DRAFT: "GENERATE_DRAFT", APPROVE_DRAFT: "APPROVE_DRAFT", REJECT_DRAFT: "REJECT_DRAFT", OPEN_BILLING: "OPEN_BILLING" };
-  const ERR = { UNAUTHORIZED: "UNAUTHORIZED", PLAN_LIMIT_EXCEEDED: "PLAN_LIMIT_EXCEEDED" };
+  const MSG = {
+    GENERATE_DRAFT: "GENERATE_DRAFT",
+    APPROVE_DRAFT: "APPROVE_DRAFT",
+    REJECT_DRAFT: "REJECT_DRAFT",
+    OPEN_BILLING: "OPEN_BILLING",
+    GENERATE_CV: "GENERATE_CV",
+    OPEN_GENERATED_CV: "OPEN_GENERATED_CV"
+  };
+  const ERR = { UNAUTHORIZED: "UNAUTHORIZED", PLAN_LIMIT_EXCEEDED: "PLAN_LIMIT_EXCEEDED", INVALID_INPUT: "INVALID_INPUT" };
   const BILLING_URL = "https://empleo.skybrandmx.com/account/billing";
 
   // TODO(dom): verify against real LaPieza URLs. Confirmed pattern:
@@ -46,11 +53,14 @@
         GENERATE_DRAFT: mod.MESSAGE_TYPES.GENERATE_DRAFT,
         APPROVE_DRAFT: mod.MESSAGE_TYPES.APPROVE_DRAFT,
         REJECT_DRAFT: mod.MESSAGE_TYPES.REJECT_DRAFT,
-        OPEN_BILLING: mod.MESSAGE_TYPES.OPEN_BILLING
+        OPEN_BILLING: mod.MESSAGE_TYPES.OPEN_BILLING,
+        GENERATE_CV: mod.MESSAGE_TYPES.GENERATE_CV,
+        OPEN_GENERATED_CV: mod.MESSAGE_TYPES.OPEN_GENERATED_CV
       });
       if (mod && mod.ERROR_CODES) Object.assign(ERR, {
         UNAUTHORIZED: mod.ERROR_CODES.UNAUTHORIZED,
-        PLAN_LIMIT_EXCEEDED: mod.ERROR_CODES.PLAN_LIMIT_EXCEEDED
+        PLAN_LIMIT_EXCEEDED: mod.ERROR_CODES.PLAN_LIMIT_EXCEEDED,
+        INVALID_INPUT: mod.ERROR_CODES.INVALID_INPUT
       });
     } catch (_) { /* fall back to hardcoded */ }
   })();
@@ -61,6 +71,17 @@
   let lastJob = null;
   let lastDraft = null;
   let lastUrl = location.href;
+
+  // Tailored-CV state machine. Lives at module scope (not inside the panel)
+  // so re-rendering the panel doesn't lose the cached HTML. States:
+  //   "idle"       — initial, button visible, nothing generated yet
+  //   "loading"    — request in flight, spinner shown
+  //   "success"    — html in cvHtml, summary in cvSummary, action buttons shown
+  //   "error"      — cvError holds a user-facing message, retry available
+  let cvState = "idle";
+  let cvHtml = "";
+  let cvSummary = "";
+  let cvError = "";
 
   // In-flow assistant state. After the user approves the draft we keep watching
   // the page and offer contextual help on the portal's apply form (CV upload,
@@ -352,6 +373,16 @@
         <label for="eamx-cover-letter"><strong>Carta de presentación</strong></label>
         <textarea id="eamx-cover-letter" class="eamx-textarea" rows="14"></textarea>
         <div class="eamx-answers"></div>
+        <section class="eamx-cv-card" data-eamx-cv-card aria-label="CV personalizado para esta vacante">
+          <div class="eamx-cv-card__head">
+            <span class="eamx-cv-card__icon" aria-hidden="true">📄</span>
+            <div>
+              <div class="eamx-cv-card__title">CV personalizado para esta vacante</div>
+              <div class="eamx-cv-card__sub">La IA reordena tu CV resaltando los skills que esta vacante pide. Mismas experiencias, mismas fechas — solo mejor estructurado.</div>
+            </div>
+          </div>
+          <div class="eamx-cv-card__body" data-eamx-cv-body></div>
+        </section>
       </div>
       <footer class="eamx-panel__footer">
         <button type="button" class="eamx-btn eamx-btn--primary" data-action="approve">Aprobar y llenar formulario</button>
@@ -384,12 +415,168 @@
       }
     }
 
+    // Paint the tailored-CV card in whatever state we currently hold. If the
+    // user re-opens the panel after a successful generation we want to keep
+    // the cached html and surface the "Abrir y descargar PDF" action.
+    renderCvCard();
+
     panelEl.addEventListener("click", onPanelClick);
     document.body.appendChild(panelEl);
     requestAnimationFrame(() => panelEl.classList.add("eamx-panel--open"));
   }
 
   function closePanel() { panelEl?.parentNode?.removeChild(panelEl); panelEl = null; }
+
+  // =========================================================================
+  // Tailored CV card — render + state machine
+  // =========================================================================
+
+  // renderCvCard re-paints the body of the eamx-cv-card section based on the
+  // module-level cvState. Idempotent — safe to call after every state change.
+  // We replace innerHTML rather than diffing because the card is small and
+  // re-attaching the click delegation costs nothing (delegation lives on the
+  // panel root, not the card).
+  function renderCvCard() {
+    if (!panelEl) return;
+    const body = panelEl.querySelector("[data-eamx-cv-body]");
+    if (!body) return;
+
+    if (cvState === "loading") {
+      body.innerHTML =
+        '<div class="eamx-cv-card__status" role="status" aria-live="polite">' +
+          '<span class="eamx-cv-card__spinner" aria-hidden="true"></span>' +
+          '<span>Generando CV (puede tardar 15s)…</span>' +
+        '</div>';
+      return;
+    }
+
+    if (cvState === "success") {
+      const headline = [lastJob?.company, lastJob?.title]
+        .map((s) => (s || "").trim())
+        .filter(Boolean)
+        .join(" · ");
+      body.innerHTML =
+        '<div class="eamx-cv-card__success">' +
+          '<span class="eamx-cv-card__check" aria-hidden="true">✓</span>' +
+          '<span>CV generado' + (headline ? ' — ' + escapeHtml(headline) : '') + '</span>' +
+        '</div>' +
+        (cvSummary
+          ? '<p class="eamx-cv-card__summary">' + escapeHtml(cvSummary) + '</p>'
+          : '') +
+        '<div class="eamx-cv-card__actions">' +
+          '<button type="button" class="eamx-btn eamx-btn--primary eamx-cv-card__primary" data-action="cv-open">' +
+            '<span aria-hidden="true">📄</span> Abrir y descargar PDF' +
+          '</button>' +
+          '<button type="button" class="eamx-btn eamx-btn--ghost" data-action="cv-regen">Re-generar</button>' +
+        '</div>';
+      return;
+    }
+
+    if (cvState === "error") {
+      body.innerHTML =
+        '<div class="eamx-cv-card__error" role="alert">' +
+          escapeHtml(cvError || "No se pudo generar el CV.") +
+        '</div>' +
+        '<div class="eamx-cv-card__actions">' +
+          '<button type="button" class="eamx-btn eamx-btn--primary eamx-cv-card__primary" data-action="cv-generate">Reintentar</button>' +
+        '</div>';
+      return;
+    }
+
+    // idle (default)
+    body.innerHTML =
+      '<div class="eamx-cv-card__actions">' +
+        '<button type="button" class="eamx-btn eamx-btn--primary eamx-cv-card__primary" data-action="cv-generate">' +
+          '<span aria-hidden="true">✨</span> Generar CV personalizado' +
+        '</button>' +
+      '</div>';
+  }
+
+  // Set state + repaint. Always go through this so the UI never drifts from
+  // the cvState/cvHtml/cvSummary/cvError tuple.
+  function setCvState(next, patch) {
+    cvState = next;
+    if (patch) {
+      if ("html" in patch) cvHtml = patch.html || "";
+      if ("summary" in patch) cvSummary = patch.summary || "";
+      if ("error" in patch) cvError = patch.error || "";
+    }
+    renderCvCard();
+  }
+
+  async function handleGenerateCv() {
+    if (!lastJob) {
+      // Defensive: panel only opens after extractJob succeeds, but a user
+      // could click after an SPA route change while the card is stale.
+      toast("No tengo la vacante. Vuelve a abrir el panel.", "info");
+      return;
+    }
+    setCvState("loading");
+    try {
+      const res = await sendMsg({ type: MSG.GENERATE_CV, job: lastJob });
+      if (!res || !res.ok) {
+        const code = res?.error;
+        if (code === ERR.PLAN_LIMIT_EXCEEDED) {
+          setCvState("error", { error: "Llegaste al límite de tu plan. Sube de plan para seguir generando." });
+          // Mirror the cover-letter UX: also fire a toast with a CTA.
+          toast("Llegaste al límite de tu plan.", "error", {
+            label: "Ver planes",
+            onClick: () => openBilling()
+          });
+          return;
+        }
+        if (code === ERR.UNAUTHORIZED) {
+          setCvState("error", { error: "Tu sesión expiró. Inicia sesión en Opciones para continuar." });
+          toast("Tu sesión expiró.", "error", {
+            label: "Inicia sesión",
+            onClick: () => openOptionsPage()
+          });
+          return;
+        }
+        // 422 PROFILE_TOO_THIN comes through as INVALID_INPUT. The backend
+        // message is fine but we override with a clearer "next step" line.
+        if (code === ERR.INVALID_INPUT && /perfil|cv|profile/i.test(res?.message || "")) {
+          setCvState("error", {
+            error: "Sube un CV más detallado en Opciones para que la IA tenga más contexto."
+          });
+          return;
+        }
+        setCvState("error", { error: res?.message || "No se pudo generar el CV." });
+        return;
+      }
+      setCvState("success", {
+        html: res.html || "",
+        summary: res.summary || "",
+        error: ""
+      });
+    } catch (err) {
+      setCvState("error", { error: humanizeError(err) });
+    }
+  }
+
+  // Open the cached HTML in a new tab via the service worker. We try blob:
+  // first; if the runtime returns an error suggesting the URL was blocked
+  // (rare on Chromium MV3 but possible on some forks), we retry with a
+  // data: URL. The HTML is auto-printed ~800ms after first paint by a
+  // bootstrap script the service worker injects if absent.
+  async function handleOpenCv() {
+    if (!cvHtml) {
+      toast("Genera el CV primero.", "info");
+      return;
+    }
+    try {
+      let res = await sendMsg({ type: MSG.OPEN_GENERATED_CV, html: cvHtml });
+      if (!res || !res.ok) {
+        // Retry with data: URL fallback before surfacing the error.
+        res = await sendMsg({ type: MSG.OPEN_GENERATED_CV, html: cvHtml, useDataUrl: true });
+      }
+      if (!res || !res.ok) {
+        toast(res?.message || "No se pudo abrir el CV.", "error");
+      }
+    } catch (err) {
+      toast(humanizeError(err), "error");
+    }
+  }
 
   async function onPanelClick(e) {
     const btn = e.target.closest("[data-action]");
@@ -398,11 +585,15 @@
     if (action === "cancel") return handleCancel();
     if (action === "regen") return handleRegen();
     if (action === "approve") return handleApprove();
+    if (action === "cv-generate" || action === "cv-regen") return handleGenerateCv();
+    if (action === "cv-open") return handleOpenCv();
   }
 
   async function handleCancel() {
     try { if (activeDraftId) await sendMsg({ type: MSG.REJECT_DRAFT, draftId: activeDraftId }); } catch (_) {}
     activeDraftId = null; lastDraft = null;
+    // Reset the tailored-CV cache so the next vacancy starts fresh.
+    cvState = "idle"; cvHtml = ""; cvSummary = ""; cvError = "";
     stopFlowAssistant();
     closePanel(); setFabBusy(false);
   }
@@ -813,15 +1004,18 @@
     const tip = document.createElement("div");
     tip.className = "eamx-flow-tooltip eamx-flow-tooltip--file";
     tip.setAttribute("role", "status");
+    // Copy nudges the user toward our tailored CV. Browsers don't allow
+    // programmatic file-input fill (security), so this is the strongest
+    // affordance we have.
     tip.innerHTML =
       '<span class="eamx-flow-tooltip__icon" aria-hidden="true">📎</span>' +
-      '<span class="eamx-flow-tooltip__text">Aquí va tu CV. Si ya lo subiste antes en LaPieza, solo selecciónalo del listado.</span>' +
+      '<span class="eamx-flow-tooltip__text">¿Ya tienes el CV personalizado? Súbelo aquí. Si no, regrésate y dale clic a <strong>“Generar CV personalizado”</strong> en el panel de Empleo Automático.</span>' +
       '<button type="button" class="eamx-flow-tooltip__close" aria-label="Cerrar aviso">×</button>';
     document.documentElement.appendChild(tip);
     anchorTo(tip, anchor, "below");
     tip.querySelector(".eamx-flow-tooltip__close").addEventListener("click", () => removeFlowHelper(tip));
-    // Auto-dismiss after 6s (per spec).
-    setTimeout(() => removeFlowHelper(tip), 6000);
+    // Auto-dismiss after 8s — this copy is longer than the previous one.
+    setTimeout(() => removeFlowHelper(tip), 8000);
   }
 
   // ---------------------------------------------------------------------------
@@ -1006,6 +1200,8 @@
       if (location.href !== lastUrl) {
         lastUrl = location.href;
         activeDraftId = null; lastDraft = null; lastJob = null;
+        // Tailored CV cache is per-vacancy — drop on SPA route change.
+        cvState = "idle"; cvHtml = ""; cvSummary = ""; cvError = "";
         // SPA route changed: tear down any in-flow helpers tied to the old
         // page. The assistant will re-arm if the user approves on the new
         // route. We clear the dedupe set so detectors can re-attach to

@@ -207,6 +207,142 @@ async function handleRejectDraft(msg) {
 }
 
 // ---------------------------------------------------------------------------
+// Tailored CV — generation + open-in-tab
+// ---------------------------------------------------------------------------
+
+// GENERATE_CV mirrors GENERATE_DRAFT's structure: gate on auth + profile,
+// normalize the job payload, hit the backend, and surface plan/422 errors
+// back to the content script with a typed code so the panel can branch.
+async function handleGenerateCv(msg) {
+  const job = msg && msg.job;
+  if (!job) {
+    return { ok: false, error: ERROR_CODES.INVALID_INPUT, message: "Falta información de la vacante" };
+  }
+
+  if (!(await auth.isLoggedIn())) {
+    return {
+      ok: false,
+      error: ERROR_CODES.UNAUTHORIZED,
+      message: "Inicia sesión en Opciones para generar tu CV personalizado."
+    };
+  }
+
+  const profile = await storage.getProfile();
+  if (!profile) {
+    return {
+      ok: false,
+      error: ERROR_CODES.INVALID_INPUT,
+      message: "Sube tu CV en Opciones antes de generar la versión personalizada."
+    };
+  }
+
+  const normalizedJob = {
+    source: job.source || SOURCES.OCC,
+    url: job.url || "",
+    id: job.id || "",
+    title: job.title || "",
+    company: job.company || "",
+    location: job.location || "",
+    salary: job.salary == null ? null : job.salary,
+    modality: job.modality == null ? null : job.modality,
+    description: job.description || "",
+    requirements: Array.isArray(job.requirements) ? job.requirements : [],
+    extractedAt: job.extractedAt || nowISO()
+  };
+
+  let result;
+  try {
+    result = await backend.generateTailoredCv({ profile, job: normalizedJob });
+  } catch (e) {
+    if (e instanceof backend.PlanLimitError) {
+      return {
+        ok: false,
+        error: ERROR_CODES.PLAN_LIMIT_EXCEEDED,
+        message: "Llegaste al límite de tu plan. Upgrade en empleo.skybrandmx.com/account/billing"
+      };
+    }
+    // 422 PROFILE_TOO_THIN bubbles up via the generic INVALID_INPUT code.
+    // The content script branches on the message text/code to show the
+    // "sube un CV más detallado" copy.
+    return failFromError(e);
+  }
+
+  // Cache fresh usage on the user record so popup/options reflect it.
+  if (result.usage && result.usage.current != null) {
+    const current = await auth.getUser();
+    if (current) await auth.setUser({ ...current, usage: result.usage });
+  }
+
+  return {
+    ok: true,
+    html: result.html || "",
+    summary: result.summary || "",
+    usage: result.usage || null
+  };
+}
+
+// OPEN_GENERATED_CV opens the supplied HTML in a fresh tab. Content scripts
+// can't call chrome.tabs.create from MV3, so they relay the HTML through this
+// handler. We try a blob: URL first (preferred — survives large payloads and
+// renders identically to a real .html file); if the browser refuses that,
+// the caller can fall back to data: URL by setting useDataUrl=true.
+//
+// We inject a small auto-print bootstrap before opening so the print dialog
+// fires ~800ms after first paint. The backend's HTML may already include the
+// same bootstrap; the inject is idempotent (a guarded eamx_printed flag) so
+// double-firing is safe.
+async function handleOpenGeneratedCv(msg) {
+  const html = msg && msg.html;
+  const useDataUrl = !!(msg && msg.useDataUrl);
+  if (typeof html !== "string" || !html.trim()) {
+    return { ok: false, error: ERROR_CODES.INVALID_INPUT, message: "Falta el HTML del CV." };
+  }
+
+  const finalHtml = ensureAutoPrint(html);
+
+  try {
+    let url;
+    if (useDataUrl) {
+      url = `data:text/html;charset=utf-8,${encodeURIComponent(finalHtml)}`;
+    } else {
+      // Blob URLs created in MV3 service workers are navigable via
+      // chrome.tabs.create on Chrome 102+. They survive multi-MB payloads
+      // (data: URLs hit ~2MB practical limits in some Chromium builds).
+      const blob = new Blob([finalHtml], { type: "text/html;charset=utf-8" });
+      url = URL.createObjectURL(blob);
+    }
+    await chrome.tabs.create({ url, active: true });
+    return { ok: true };
+  } catch (e) {
+    return {
+      ok: false,
+      error: ERROR_CODES.SERVER_ERROR,
+      message: (e && e.message) || "No se pudo abrir el CV en una pestaña nueva."
+    };
+  }
+}
+
+// Inject `<script>setTimeout(() => window.print(), 800)</script>` right
+// before </body> if the HTML doesn't already trigger window.print(). The
+// guard checks for the marker we attach (`__eamxAutoPrint`) — this means the
+// backend can opt out by setting that variable, and we never double-inject.
+function ensureAutoPrint(html) {
+  if (typeof html !== "string") return "";
+  if (html.includes("__eamxAutoPrint")) return html;
+  const snippet =
+    "<script>window.__eamxAutoPrint=true;" +
+    "setTimeout(function(){try{window.print();}catch(e){}},800);" +
+    "</script>";
+  // Insert before </body> case-insensitively; if absent, append at the end.
+  const m = html.match(/<\/body\s*>/i);
+  if (m) {
+    const idx = m.index;
+    return html.slice(0, idx) + snippet + html.slice(idx);
+  }
+  return html + snippet;
+}
+
+// ---------------------------------------------------------------------------
 // Auth handlers
 // ---------------------------------------------------------------------------
 
@@ -331,6 +467,10 @@ onMessage(async (msg) => {
       return handleOpenBilling();
     case MESSAGE_TYPES.ADMIN_SET_PLAN:
       return handleAdminSetPlan(msg);
+    case MESSAGE_TYPES.GENERATE_CV:
+      return handleGenerateCv(msg);
+    case MESSAGE_TYPES.OPEN_GENERATED_CV:
+      return handleOpenGeneratedCv(msg);
     default:
       return {
         ok: false,

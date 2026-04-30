@@ -8,7 +8,8 @@
 
 .eamx-fab,
 .eamx-panel,
-.eamx-toast {
+.eamx-toast,
+.eamx-cv-card {
   /* Brand */
   --eamx-c-brand-50: #ecfaf7;
   --eamx-c-brand-100: #d2f3ec;
@@ -830,6 +831,153 @@
 .eamx-mini-btn svg { flex: 0 0 14px; }
 
 /* =============================================================================
+ * Tailored-CV card (in panel body, after the cover-letter section)
+ * ============================================================================= */
+
+.eamx-cv-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 14px 14px;
+  border: 1px solid var(--eamx-c-border);
+  border-radius: var(--eamx-r-md);
+  background:
+    linear-gradient(180deg, rgba(112, 209, 198, 0.08) 0%, rgba(112, 209, 198, 0.0) 60%),
+    #ffffff;
+  box-shadow: var(--eamx-sh-soft);
+  margin-top: 4px;
+}
+
+.eamx-cv-card__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.eamx-cv-card__icon {
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--eamx-r-md);
+  background: linear-gradient(135deg, rgba(112, 209, 198, 0.22) 0%, rgba(19, 126, 122, 0.18) 100%);
+  color: var(--eamx-c-brand-700);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.eamx-cv-card__title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--eamx-c-ink);
+  letter-spacing: 0.005em;
+  margin: 0 0 2px;
+}
+
+.eamx-cv-card__sub {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--eamx-c-ink-muted);
+}
+
+.eamx-cv-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.eamx-cv-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+/* Constrain the primary CTA inside the card so it doesn't stretch full
+ * width like the footer buttons — visually balances with the ghost action. */
+.eamx-cv-card__primary {
+  flex: 1 1 auto;
+  height: 40px;
+  font-size: 13.5px;
+}
+
+.eamx-cv-card .eamx-btn--ghost {
+  height: 40px;
+}
+
+.eamx-cv-card__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--eamx-r-sm);
+  background: var(--eamx-c-slate-50);
+  border: 1px solid var(--eamx-c-border);
+  font-size: 12.5px;
+  color: var(--eamx-c-ink-soft);
+  font-weight: 500;
+}
+
+.eamx-cv-card__spinner {
+  width: 16px;
+  height: 16px;
+  border-radius: var(--eamx-r-pill);
+  border: 2px solid var(--eamx-c-slate-300);
+  border-top-color: var(--eamx-c-brand-600);
+  animation: eamx-spin 0.9s linear infinite;
+  flex: 0 0 16px;
+}
+
+.eamx-cv-card__success {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: var(--eamx-r-sm);
+  background: var(--eamx-c-brand-50);
+  border: 1px solid var(--eamx-c-brand-200);
+  color: var(--eamx-c-brand-800);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.005em;
+}
+
+.eamx-cv-card__check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--eamx-r-pill);
+  background: var(--eamx-c-brand-600);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  flex: 0 0 18px;
+}
+
+.eamx-cv-card__summary {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--eamx-c-ink-muted);
+  font-style: italic;
+}
+
+.eamx-cv-card__error {
+  padding: 10px 12px;
+  border-radius: var(--eamx-r-sm);
+  background: var(--eamx-c-danger-soft);
+  border: 1px solid var(--eamx-c-danger-border);
+  color: var(--eamx-c-danger);
+  font-size: 12.5px;
+  line-height: 1.5;
+  font-weight: 500;
+}
+
+/* =============================================================================
  * Footer with action buttons (sticky)
  * ============================================================================= */
 
@@ -1403,6 +1551,7 @@
   .eamx-submit-pulse,
   .eamx-skeleton__line,
   .eamx-cover__spinner,
+  .eamx-cv-card__spinner,
   .eamx-btn__refresh,
   .eamx-textarea--pulse,
   .eamx-panel__success-icon,

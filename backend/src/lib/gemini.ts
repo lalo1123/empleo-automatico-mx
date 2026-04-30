@@ -23,6 +23,41 @@ const PARSE_CV_SYSTEM =
   "actual, usa null en endDate. En languages.level usa uno de: básico, " +
   "intermedio, avanzado, nativo.";
 
+// ATS-tailored CV system prompt.
+// Hard rules: never invent experience/dates/numbers; only reorder + rephrase
+// existing content with the vacancy's keywords. Output is full HTML ready to
+// be rendered/printed as A4 PDF (single column, no tables for layout, no
+// external resources, inline <style>).
+const TAILORED_CV_SYSTEM =
+  "Eres un experto en redacción de CVs optimizados para ATS (Applicant " +
+  "Tracking Systems).\n\n" +
+  "Reglas absolutas:\n" +
+  "1. NUNCA inventes experiencia, títulos, empresas o fechas que no estén " +
+  "en el CV original.\n" +
+  "2. NUNCA exageres logros (ej. \"incrementé 50%\" si no está en el " +
+  "original).\n" +
+  "3. SÍ puedes: reordenar experiencias por relevancia a la vacante, " +
+  "reescribir bullets para usar las palabras clave de la vacante, ajustar " +
+  "el resumen profesional para enfatizar match.\n" +
+  "4. Output: HTML completo (con <!doctype html>, <html>, <head> con " +
+  "estilos inline en <style>, <body>). Listo para imprimir como PDF en " +
+  "formato A4.\n" +
+  "5. Diseño: limpio, profesional, una página si es posible (dos máximo). " +
+  "Usa secciones: Header con nombre + contacto, Resumen profesional " +
+  "(3-4 líneas), Experiencia (orden inverso cronológico), Educación, " +
+  "Skills.\n" +
+  "6. Tipografía: system-ui, sans-serif, 10-11pt body, 14-18pt headings. " +
+  "Colores: navy #0f1d2c texto, cyan #137e7a accents, blanco fondo.\n" +
+  "7. ATS-friendly: NO uses tablas para layout (los ATS no las leen), NO " +
+  "uses imágenes/iconos, NO columnas múltiples (single column linear " +
+  "flow), incluye keywords de la vacante de forma natural en bullets.\n" +
+  "8. El HTML debe incluir @page { size: A4; margin: 18mm; } y reglas " +
+  "@media print con -webkit-print-color-adjust: exact y print-color-adjust: " +
+  "exact para que el color se respete al imprimir.\n" +
+  "9. NO cargues recursos externos (sin Google Fonts, sin imágenes, sin " +
+  "scripts). Todo debe ser autocontenido.\n" +
+  "10. Idioma: español MX.";
+
 // JSON Schemas passed to Gemini. Shape must match what the extension expects.
 const COVER_LETTER_SCHEMA = {
   type: "object",
@@ -34,6 +69,15 @@ const COVER_LETTER_SCHEMA = {
     }
   },
   required: ["coverLetter"]
+} as const;
+
+const TAILORED_CV_SCHEMA = {
+  type: "object",
+  properties: {
+    html: { type: "string" },
+    summary: { type: "string" }
+  },
+  required: ["html", "summary"]
 } as const;
 
 const PARSE_CV_SCHEMA = {
@@ -291,4 +335,88 @@ export async function parseCvText(args: ParseCvArgs): Promise<ParseCvResult> {
     skills: Array.isArray(out.skills) ? out.skills : [],
     languages: Array.isArray(out.languages) ? out.languages : []
   };
+}
+
+// ---------------------------------------------------------------------------
+// Tailored CV (ATS-optimized HTML, per-vacancy)
+// ---------------------------------------------------------------------------
+
+export interface GenerateTailoredCvArgs {
+  apiKey: string;
+  model: string;
+  profile: UserProfile;
+  job: JobPosting;
+}
+
+export interface GenerateTailoredCvResult {
+  /** Full HTML document (`<!doctype html>...`), self-contained, A4 print-ready. */
+  html: string;
+  /** Short Spanish-MX summary of what was reordered/rephrased to match the job. */
+  summary: string;
+}
+
+/**
+ * Produces an ATS-optimized HTML CV tailored to a specific vacancy.
+ *
+ * Same retry/error semantics as `generateCoverLetter`: a successful Gemini
+ * response with a non-empty `html` string is required, otherwise we throw
+ * UPSTREAM_ERROR. Gemini is constrained via responseJsonSchema so the model
+ * cannot drift off-shape.
+ *
+ * Cost note: this call is ~2.5x heavier than a cover letter (longer prompt,
+ * longer output). For pricing fairness we still count it as 1 quota unit —
+ * see comment on `/v1/applications/generate-cv` in routes/applications.ts.
+ */
+export async function generateTailoredCv(
+  args: GenerateTailoredCvArgs
+): Promise<GenerateTailoredCvResult> {
+  const { apiKey, model, profile, job } = args;
+  if (!apiKey) throw new HttpError(500, "INTERNAL_ERROR", "Configuración del servicio incompleta.");
+  if (!profile) throw new HttpError(400, "VALIDATION_ERROR", "Falta el perfil del candidato.");
+  if (!job) throw new HttpError(400, "VALIDATION_ERROR", "Falta la información de la vacante.");
+
+  const userText =
+    `Vacante (JSON):\n${JSON.stringify(job, null, 2)}\n\n` +
+    `Perfil del candidato (JSON):\n${JSON.stringify(profile, null, 2)}\n\n` +
+    `Genera un CV completo en HTML optimizado para ATS, adaptado a esta ` +
+    `vacante. Reordena la experiencia por relevancia a la vacante, ` +
+    `reescribe bullets para incluir las palabras clave del puesto sin ` +
+    `inventar nada, y ajusta el resumen profesional para enfatizar el ` +
+    `match. Devuelve también un "summary" breve (1-2 frases en español MX) ` +
+    `explicando qué reordenaste o reformulaste para alinear con la vacante.`;
+
+  const body = {
+    systemInstruction: { parts: [{ text: TAILORED_CV_SYSTEM }] },
+    contents: [{ role: "user", parts: [{ text: userText }] }],
+    generationConfig: {
+      // Conservative creativity: enough flexibility to rephrase bullets, not
+      // enough to invent facts.
+      temperature: 0.4,
+      // HTML can be long with many bullets; size for a 2-page CV worst-case.
+      maxOutputTokens: 6000,
+      thinkingConfig: { thinkingBudget: 0 },
+      responseMimeType: "application/json",
+      responseJsonSchema: TAILORED_CV_SCHEMA
+    }
+  };
+
+  const res = await callGenerate(apiKey, model, body);
+  const out = extractJson<{ html?: string; summary?: string }>(res);
+
+  const html = typeof out.html === "string" ? out.html.trim() : "";
+  if (!html) {
+    throw new HttpError(502, "UPSTREAM_ERROR", "La IA no devolvió un CV válido.");
+  }
+  // Sanity check: the prompt forces an HTML document; reject anything that
+  // doesn't at least start with a doctype/<html> so we don't ship garbage.
+  const head = html.slice(0, 400).toLowerCase();
+  if (!head.includes("<!doctype") && !head.includes("<html")) {
+    throw new HttpError(502, "UPSTREAM_ERROR", "La IA no devolvió HTML válido.");
+  }
+
+  const summary = typeof out.summary === "string" && out.summary.trim()
+    ? out.summary.trim()
+    : "CV adaptado a la vacante.";
+
+  return { html, summary };
 }

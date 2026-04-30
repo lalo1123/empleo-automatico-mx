@@ -1,5 +1,8 @@
 // /v1/applications/* - Gemini-backed endpoints with plan metering.
-// parse-cv is FREE (one-time onboarding flow); generate consumes 1 quota unit.
+// parse-cv is FREE (one-time onboarding flow). Both /generate (cover letter)
+// and /generate-cv (ATS-tailored CV HTML) consume 1 quota unit each. /generate-cv
+// costs ~2.5x more in Gemini tokens but we keep the unit price uniform — see
+// comment on the route.
 
 import { Hono } from "hono";
 import { z } from "zod";
@@ -8,7 +11,7 @@ import { loadEnv } from "../lib/env.js";
 import { HttpError, sendError } from "../lib/errors.js";
 import { authRequired } from "../middleware/auth.js";
 import { emailVerifiedRequired } from "../middleware/email-verified.js";
-import { generateCoverLetter, parseCvText } from "../lib/gemini.js";
+import { generateCoverLetter, generateTailoredCv, parseCvText } from "../lib/gemini.js";
 import { assertUnderLimit, incrementUsage } from "../lib/usage.js";
 import { getPlan } from "../lib/plans.js";
 
@@ -132,6 +135,91 @@ applicationsRoutes.post("/generate", authRequired(), emailVerifiedRequired(), as
     return sendError(c, err);
   }
 });
+
+// /generate-cv produces an ATS-optimized, vacancy-tailored CV in HTML.
+//
+// Quota model: charged as 1 unit (same as cover letter) even though the
+// upstream Gemini cost is roughly 2.5x — we keep the unit price simple and
+// uniform across application artifacts. Free users (3/mes) can mix and match
+// across /generate, /generate-cv and any future application endpoints. If
+// the cost mix shifts dramatically we'll revisit; for now the margin
+// (~98% on Pro) absorbs it comfortably.
+applicationsRoutes.post(
+  "/generate-cv",
+  authRequired(),
+  emailVerifiedRequired(),
+  async (c) => {
+    try {
+      const body = await c.req.json().catch(() => null);
+      const parsed = generateSchema.safeParse(body);
+      if (!parsed.success) {
+        throw new HttpError(
+          400,
+          "VALIDATION_ERROR",
+          parsed.error.issues[0]?.message ?? "Perfil o vacante invalidos"
+        );
+      }
+
+      // Reject thin payloads early — Gemini will produce garbage from an
+      // empty profile and we'd still bill the user a quota unit. 422 ==
+      // "syntactically valid but semantically not enough to act on".
+      const { profile, job } = parsed.data;
+      if (!profile.experience || profile.experience.length === 0) {
+        throw new HttpError(
+          422,
+          "VALIDATION_ERROR",
+          "Tu perfil no tiene experiencia laboral. Súbela primero para generar un CV."
+        );
+      }
+      if (!profile.personal.fullName || !profile.personal.fullName.trim()) {
+        throw new HttpError(
+          422,
+          "VALIDATION_ERROR",
+          "Tu perfil no tiene nombre completo. Complétalo antes de generar un CV."
+        );
+      }
+      if (!job.title || !job.title.trim() || !job.description || !job.description.trim()) {
+        throw new HttpError(
+          422,
+          "VALIDATION_ERROR",
+          "La vacante no tiene título o descripción suficientes."
+        );
+      }
+
+      const env = loadEnv();
+      const user = c.get("user");
+      assertUnderLimit(user.id, user.plan);
+
+      const result = await generateTailoredCv({
+        apiKey: env.GEMINI_API_KEY,
+        model: env.GEMINI_MODEL,
+        profile,
+        job
+      });
+
+      // Only increment once Gemini returned a valid response.
+      const newCount = incrementUsage(user.id);
+      const plan = getPlan(user.plan);
+
+      // Log meta only, never content (CVs include PII).
+      console.log(
+        `[generate-cv] ok user=${user.id} plan=${user.plan} job=${job.source}:${job.id} usage=${newCount}/${plan.monthlyLimit}`
+      );
+
+      return c.json({
+        ok: true,
+        html: result.html,
+        summary: result.summary,
+        usage: {
+          current: newCount,
+          limit: plan.monthlyLimit
+        }
+      });
+    } catch (err) {
+      return sendError(c, err);
+    }
+  }
+);
 
 // parse-cv is intentionally free (one-time per user in the onboarding flow).
 applicationsRoutes.post("/parse-cv", authRequired(), async (c) => {
