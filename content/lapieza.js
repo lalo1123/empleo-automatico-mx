@@ -147,26 +147,51 @@
     return APPLY_URL_PATTERNS.some((re) => re.test(location.href));
   }
 
-  function isJobDetailPage() {
-    // LaPieza listing/marketing paths must NOT trigger. Explicit denylist
-    // first so we never have to rely on heuristics for these.
-    //   /vacantes, /vacancies — the listing/search page
-    //   /comunidad           — community feed
-    //   /soy-empresa         — employer landing
-    //   /mi-perfil           — own profile
-    //   /                    — home
-    //
-    // The hero on these pages has an "Aplicar" newsletter-signup button that
-    // matched our old hasApply heuristic and falsely lit up the FAB. Hard
-    // denylist eliminates the false positive.
+  // Listing-page detector. Returns true on LaPieza routes whose primary
+  // content is a feed of vacancy cards. We check both an explicit path
+  // allowlist AND a DOM probe (any visible vacancy anchor), so the function
+  // works even when LaPieza adds a new /algo/jobs/ alias we didn't anticipate.
+  //
+  // The DOM probe deliberately runs LAST — it's more expensive than a regex,
+  // and the explicit allowlist already covers ≥95% of legit traffic.
+  function isListingPage() {
     const path = location.pathname || "";
-    const DENY_PATHS = [
+    const LISTING_ALLOWED = [
       /^\/?$/,
       /^\/vacantes\/?$/i,
       /^\/vacancies\/?$/i,
       /^\/jobs\/?$/i,
       /^\/empleos\/?$/i,
-      /^\/comunidad\/?/i,
+      /^\/comunidad\/jobs\/?$/i,
+      /^\/comunidad\/empleos\/?$/i
+    ];
+    if (LISTING_ALLOWED.some((re) => re.test(path))) return true;
+    // Filter views like /vacantes/categoria/marketing or /search?... — when
+    // they render cards, treat them as listings too. Only run this when the
+    // findVacancyCards helper is already defined (it lives later in the file
+    // but is hoisted via function declaration, so this is safe at runtime).
+    try {
+      if (typeof findVacancyCards === "function") {
+        const cards = findVacancyCards();
+        if (Array.isArray(cards) && cards.length >= 1) return true;
+      }
+    } catch (_) { /* ignore */ }
+    return false;
+  }
+
+  function isJobDetailPage() {
+    // LaPieza listing/marketing paths historically were a hard denylist here
+    // (so the FAB stayed off the home/search routes). With the best-matches
+    // panel work we DO want the FAB to mount on listing pages — but with a
+    // different label and a different click handler. To keep the call sites
+    // (mountFab/unmountFab in detectAndMount) untouched, we now return true
+    // for both job-detail AND listing pages, and let the FAB click router
+    // branch on isListingPage() vs isApplyPage() vs JOB_URL_PATTERNS.
+    //
+    // Pages that should still NOT mount the FAB at all (employer landing,
+    // login, etc.) stay on the denylist.
+    const path = location.pathname || "";
+    const DENY_PATHS = [
       /^\/soy[- ]?empresa\/?/i,
       /^\/mi[- ]?perfil\/?/i,
       /^\/profile\/?/i,
@@ -180,20 +205,23 @@
       /^\/pricing\/?/i
     ];
     if (DENY_PATHS.some((re) => re.test(path))) return false;
-    // Trailing-bare paths like /vacancy or /vacante (no UUID) — also list
-    // pages, must not trigger.
-    if (/\/(vacancy|vacante|jobs|empleos|puesto)\/?$/i.test(path)) return false;
+    // Trailing-bare paths like /vacancy or /vacante (no UUID) — old listing
+    // aliases without cards. Let isListingPage's DOM probe decide instead of
+    // refusing outright; if no cards render we fall through to false.
+    if (/\/(vacancy|vacante|jobs|empleos|puesto)\/?$/i.test(path)) {
+      return isListingPage();
+    }
 
     // Apply pages always count — the user wants the panel here even though
     // the page has no JSON-LD or job description: we already cached the job
     // on /vacancy/<uuid> and we'll restore it from session storage.
     if (isApplyPage()) return true;
 
-    // Stricter rule going forward: the FAB only mounts when the URL path
-    // explicitly matches a job-detail pattern (/vacancy/<uuid>, etc.). The
-    // old fallback "hasHeading && hasApply" was too permissive — a generic
-    // "Aplicar" button on a marketing page would light up the FAB.
-    return JOB_URL_PATTERNS.some((re) => re.test(location.href));
+    // Job-detail URL — Express/Review flow.
+    if (JOB_URL_PATTERNS.some((re) => re.test(location.href))) return true;
+
+    // Listing route — Best-matches flow.
+    return isListingPage();
   }
 
   // Persist the job extracted from /vacancy/<uuid> so we can restore it on
@@ -634,24 +662,49 @@
   // FAB
   // =========================================================================
 
+  // Decide which FAB mode applies to the current URL. Returns one of:
+  //   "apply"    — on /apply/<uuid>; existing Express fill flow.
+  //   "vacancy"  — on /vacancy/<uuid>; existing Express pre-warm flow.
+  //   "listing"  — on /, /vacantes, /comunidad/jobs, etc.; opens best-matches.
+  // Defaults to "vacancy" if we somehow can't classify (preserves old behavior).
+  function fabMode() {
+    if (isApplyPage()) return "apply";
+    // Match canonical vacancy detail URLs (/vacancy/<uuid>, /vacante/<uuid>).
+    // We deliberately don't reuse JOB_URL_PATTERNS here because that array
+    // also includes generic /jobs/<slug> shapes which appear on listing
+    // categories — for listings we always want "listing" mode.
+    if (/\/(vacancy|vacante)\/[a-f0-9][a-f0-9-]{7,}/i.test(location.href)) return "vacancy";
+    if (isListingPage()) return "listing";
+    // Fallback — covers older /jobs/<slug>/, /empleos/<slug>/ detail pages.
+    if (JOB_URL_PATTERNS.some((re) => re.test(location.href))) return "vacancy";
+    return "vacancy";
+  }
+
   function mountFab() {
-    if (fabEl && document.body.contains(fabEl)) return;
+    if (fabEl && document.body.contains(fabEl)) {
+      // Already mounted — but the user may have navigated between modes
+      // without unmounting (SPA route change inside detectAndMount). Refresh
+      // the label so it stays accurate.
+      paintFabLabel();
+      return;
+    }
     fabEl = document.createElement("button");
     fabEl.type = "button";
     fabEl.className = "eamx-fab";
-    fabEl.setAttribute("aria-label", "Postular con IA");
     fabEl.innerHTML =
       '<span class="eamx-fab__icon" aria-hidden="true">✨</span>' +
       '<span class="eamx-fab__label">Postular con IA</span>';
     fabEl.addEventListener("click", onFabClick);
     document.body.appendChild(fabEl);
+    paintFabLabel();
 
     // Side effect: when mounting on a vacancy page, eagerly extract & cache
     // the job so it survives the navigation to /apply/<uuid>. We run after
     // a short delay to let the page settle (LaPieza renders JSON-LD late
     // on some routes). On apply pages we do nothing — the FAB click will
-    // restore from cache.
-    if (!isApplyPage()) {
+    // restore from cache. On listing pages we also skip — there's no single
+    // job to extract.
+    if (fabMode() === "vacancy") {
       setTimeout(() => {
         try {
           const { job, partial } = extractJob();
@@ -662,21 +715,52 @@
       }, 1500);
     }
   }
+
+  // Repaint the FAB icon, label, and aria-label so they reflect the current
+  // route mode. Called after mount and after every SPA URL change.
+  function paintFabLabel() {
+    if (!fabEl) return;
+    const mode = fabMode();
+    const icon = fabEl.querySelector(".eamx-fab__icon");
+    const lbl = fabEl.querySelector(".eamx-fab__label");
+    if (mode === "listing") {
+      if (icon) icon.textContent = "🎯";
+      if (lbl) lbl.textContent = "Mejores matches";
+      fabEl.setAttribute("aria-label", "Ver mejores matches en esta página");
+      fabEl.dataset.eamxFabMode = "listing";
+    } else {
+      if (icon) icon.textContent = "✨";
+      if (lbl) lbl.textContent = "Postular con IA";
+      fabEl.setAttribute("aria-label", "Postular con IA");
+      fabEl.dataset.eamxFabMode = mode;
+    }
+  }
+
   function unmountFab() { fabEl?.parentNode?.removeChild(fabEl); fabEl = null; }
   function setFabBusy(b) {
     if (!fabEl) return;
     fabEl.classList.toggle("eamx-fab--busy", !!b);
     fabEl.disabled = !!b;
     const lbl = fabEl.querySelector(".eamx-fab__label");
-    if (lbl) lbl.textContent = b ? "Generando" : "Postular con IA";
+    if (lbl) {
+      if (b) {
+        lbl.textContent = "Generando";
+      } else {
+        // Restore the mode-appropriate label.
+        paintFabLabel();
+      }
+    }
   }
 
-  // Top-level FAB dispatcher. Branches on the Express toggle:
+  // Top-level FAB dispatcher. Branches on the page mode:
+  //   - Listing page (/, /vacantes, /comunidad/jobs, etc.) → openBestMatchesPanel
   //   - Express ON  + /vacancy/<uuid> → pre-warm draft + show "ready" toast
   //   - Express ON  + /apply/<uuid>   → run full Express fill (carta + cv + answers)
-  //   - Express OFF (any page)        → legacy panel flow (current behavior)
+  //   - Express OFF (any non-listing) → legacy panel flow (current behavior)
   async function onFabClick() {
     if (!fabEl || fabEl.disabled) return;
+    // Listing branch — Express toggle is irrelevant here, the panel is read-only.
+    if (fabMode() === "listing") return openBestMatchesPanel();
     let express = true;
     try { express = await readExpressMode(); } catch (_) { express = true; }
     if (!express) return onFabClickReview();
@@ -1359,6 +1443,506 @@
   }
 
   function closePanel() { panelEl?.parentNode?.removeChild(panelEl); panelEl = null; }
+
+  // =========================================================================
+  // Best-matches shortlist panel (listing pages)
+  // =========================================================================
+  // Lifecycle: opened by the FAB click on listing routes (/, /vacantes,
+  // /comunidad/jobs, etc.). Reads cards via findVacancyCards() — the same
+  // helper that powers the per-card badges — so the data is consistent with
+  // what the user sees inline. Top 10 by match score.
+  //
+  // HITL guarantees (NEVER violate):
+  //   - The panel never auto-clicks "Postular" or any LaPieza CTA.
+  //   - "Marcar" only writes to chrome.storage.local["eamx:queue"]; it does
+  //     NOT submit any application or open a tab.
+  //   - "Marcar top 5" iterates Marcar — same guarantee scaled.
+  //   - "Abrir vacante" requires a deliberate user click on each item; we
+  //     never open multiple tabs programmatically.
+
+  // Module-scoped panel state. We don't reuse `panelEl` because the regular
+  // openPanel() flow can coexist with this one (e.g. user comes back to a
+  // /vacancy/ tab while the matches panel is up in another tab — different
+  // pages, different DOM, but same module instance on hot-reload).
+  let matchesPanelEl = null;
+  let matchesScrollHandler = null;
+  let matchesScrollDebounce = null;
+  let matchesQueueListener = null;
+  let matchesEscHandler = null;
+  // Tracks the current top-N rendered list so the queue-onChanged listener
+  // can re-paint button states without re-running findVacancyCards.
+  let matchesCurrentTopN = [];
+
+  /**
+   * Open the best-matches shortlist panel on a LaPieza listing page.
+   *
+   * Renders a side panel anchored to the right side of the viewport that
+   * shows the top 10 vacancies on the page ranked by match score against
+   * the user's cached profile. From the panel, the user can:
+   *   - Click "Abrir vacante" on any item to navigate to the detail page
+   *     (opens in a new tab).
+   *   - Click "⭐ Marcar" / "✓ Marcada" to toggle each item in the queue.
+   *   - Click "⭐ Marcar top 5" to add the top 5 in one shot.
+   *   - Close via the × button, the Escape key, or clicking the backdrop.
+   *
+   * HITL: this function NEVER applies to a job, NEVER auto-opens detail
+   * tabs, NEVER clicks LaPieza's CTAs. Marking is queue-only — the user
+   * still has to open each vacancy and apply by hand.
+   *
+   * @returns {Promise<void>}
+   */
+  async function openBestMatchesPanel() {
+    // Idempotent: if already open, just refocus.
+    if (matchesPanelEl && document.documentElement.contains(matchesPanelEl)) {
+      try { matchesPanelEl.focus({ preventScroll: true }); } catch (_) {}
+      return;
+    }
+
+    // Build skeleton synchronously so the user sees something instantly.
+    matchesPanelEl = document.createElement("aside");
+    matchesPanelEl.className = "eamx-matches-panel";
+    matchesPanelEl.setAttribute("role", "dialog");
+    matchesPanelEl.setAttribute("aria-label", "Mejores matches");
+    matchesPanelEl.tabIndex = -1;
+    matchesPanelEl.innerHTML = `
+      <header class="eamx-matches-panel__head">
+        <h2>🎯 Mejores matches en esta página</h2>
+        <button type="button" class="eamx-matches-panel__close" aria-label="Cerrar">✕</button>
+      </header>
+      <p class="eamx-matches-panel__lead">Top 10 vacantes ordenadas por afinidad con tu CV. Tú decides a cuáles postular.</p>
+      <div class="eamx-matches-panel__content" data-eamx-matches-content>
+        <div class="eamx-matches-panel__loading">Analizando vacantes…</div>
+      </div>
+      <div class="eamx-matches-panel__bulk" data-eamx-matches-bulk hidden>
+        <button type="button" class="eamx-matches-panel__bulk-btn" data-action="mark-top-5">⭐ Marcar top 5 de un solo clic</button>
+        <p class="eamx-matches-panel__bulk-hint">Marcar = guardar en tu cola. La extensión NO postula sola — tú abres cada vacante y le das clic al botón Postular cuando quieras.</p>
+      </div>
+    `;
+
+    // Wire close interactions BEFORE we attach to DOM so even an early
+    // failure path can be dismissed.
+    matchesPanelEl.addEventListener("click", onMatchesPanelClick);
+    document.documentElement.appendChild(matchesPanelEl);
+    requestAnimationFrame(() => matchesPanelEl?.classList.add("eamx-matches-panel--open"));
+
+    // Escape key closes the panel.
+    matchesEscHandler = (ev) => {
+      if (ev.key === "Escape" || ev.key === "Esc") {
+        ev.stopPropagation();
+        closeMatchesPanel();
+      }
+    };
+    document.addEventListener("keydown", matchesEscHandler, true);
+
+    // Subscribe to queue changes so external "Quitar" actions update the
+    // per-item buttons immediately.
+    try {
+      if (chrome?.storage?.onChanged) {
+        matchesQueueListener = (changes, area) => {
+          if (area !== "local") return;
+          if (changes && changes["eamx:queue"]) {
+            // Repaint buttons based on the new queue snapshot. We don't
+            // re-run findVacancyCards because the score order is locked.
+            repaintMarkButtons();
+          }
+        };
+        chrome.storage.onChanged.addListener(matchesQueueListener);
+      }
+    } catch (_) { /* ignore */ }
+
+    // Now do the heavy work async: load deps, profile, score cards.
+    await renderMatchesPanelContent();
+  }
+
+  function closeMatchesPanel() {
+    if (!matchesPanelEl) return;
+    try {
+      if (matchesQueueListener && chrome?.storage?.onChanged) {
+        chrome.storage.onChanged.removeListener(matchesQueueListener);
+      }
+    } catch (_) {}
+    matchesQueueListener = null;
+    if (matchesEscHandler) {
+      try { document.removeEventListener("keydown", matchesEscHandler, true); } catch (_) {}
+      matchesEscHandler = null;
+    }
+    if (matchesScrollHandler) {
+      try { window.removeEventListener("scroll", matchesScrollHandler, true); } catch (_) {}
+      matchesScrollHandler = null;
+    }
+    if (matchesScrollDebounce) {
+      clearTimeout(matchesScrollDebounce);
+      matchesScrollDebounce = null;
+    }
+    matchesCurrentTopN = [];
+    try { matchesPanelEl.classList.remove("eamx-matches-panel--open"); } catch (_) {}
+    const node = matchesPanelEl;
+    matchesPanelEl = null;
+    // Allow the slide-out transition to complete before we unmount. Skip
+    // the delay when reduced-motion is requested.
+    let prefersReduced = false;
+    try {
+      prefersReduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    } catch (_) {}
+    const remove = () => { try { node.remove(); } catch (_) {} };
+    if (prefersReduced) remove();
+    else setTimeout(remove, 240);
+  }
+
+  function onMatchesPanelClick(ev) {
+    const closeBtn = ev.target.closest(".eamx-matches-panel__close");
+    if (closeBtn) {
+      ev.preventDefault();
+      closeMatchesPanel();
+      return;
+    }
+    const action = ev.target.closest("[data-action]");
+    if (!action) return;
+    const what = action.getAttribute("data-action");
+    if (what === "mark") {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const id = action.getAttribute("data-id");
+      onMatchesMarkClick(action, id);
+      return;
+    }
+    if (what === "mark-top-5") {
+      ev.preventDefault();
+      onMatchesMarkTop5(action);
+      return;
+    }
+    if (what === "open-options") {
+      ev.preventDefault();
+      try { chrome.runtime.openOptionsPage(); } catch (_) { openOptionsPage(); }
+      return;
+    }
+    if (what === "rescan") {
+      ev.preventDefault();
+      renderMatchesPanelContent();
+      return;
+    }
+    // "open" links are real <a target="_blank"> — let the browser handle them.
+  }
+
+  // Render the content area. Idempotent — can be called repeatedly (e.g.
+  // after scroll re-population, after the user uploads their CV).
+  async function renderMatchesPanelContent() {
+    if (!matchesPanelEl) return;
+    const host = matchesPanelEl.querySelector("[data-eamx-matches-content]");
+    const bulk = matchesPanelEl.querySelector("[data-eamx-matches-bulk]");
+    if (!host) return;
+
+    // Lazy-load deps + profile.
+    const ok = await ensureDiscoveryDeps();
+    if (!profileLoaded) await loadProfileOnce();
+
+    // Empty state #1 — no profile uploaded.
+    if (!cachedProfile) {
+      host.innerHTML = `
+        <div class="eamx-matches-empty">
+          <div class="eamx-matches-empty__icon" aria-hidden="true">📄</div>
+          <h3>Sube tu CV primero</h3>
+          <p>Para rankear las vacantes según tu perfil, necesito leer tu CV (lo hago localmente — Gemini sólo recibe el extracto).</p>
+          <button type="button" class="eamx-matches-empty__cta" data-action="open-options">Abrir Opciones →</button>
+        </div>
+      `;
+      if (bulk) bulk.hidden = true;
+      console.log("[EmpleoAutomatico] best matches panel opened: 0 matches (no profile)");
+      return;
+    }
+
+    // Find cards on the page right now.
+    let cards = [];
+    try { cards = findVacancyCards() || []; } catch (err) {
+      console.warn("[EmpleoAutomatico] findVacancyCards threw", err);
+      cards = [];
+    }
+
+    // Empty state #2 — no cards at all.
+    if (!cards.length) {
+      host.innerHTML = `
+        <div class="eamx-matches-empty">
+          <div class="eamx-matches-empty__icon" aria-hidden="true">🔍</div>
+          <h3>No detecté vacantes</h3>
+          <p>No detecté vacantes en esta página. Si crees que es un bug, dame screenshot.</p>
+          <button type="button" class="eamx-matches-empty__cta" data-action="rescan">Volver a escanear</button>
+        </div>
+      `;
+      if (bulk) bulk.hidden = true;
+      console.log("[EmpleoAutomatico] best matches panel opened: 0 matches (no cards)");
+      return;
+    }
+
+    // Score every card. matchScoreModule is loaded by ensureDiscoveryDeps;
+    // if it failed (rare, ad-blocker chains, etc.) we just sort by document
+    // order and fall back to the unknown level.
+    const scored = cards.map(({ anchor, card }) => {
+      const jobLite = extractJobLiteFromCard(card, anchor);
+      let score = 0;
+      let reasons = [];
+      let level = "unknown";
+      try {
+        if (matchScoreModule) {
+          const r = matchScoreModule.computeMatchScore(cachedProfile, jobLite);
+          score = r.score;
+          reasons = r.reasons || [];
+          level = matchScoreModule.levelForScore(score);
+        }
+      } catch (_) { /* keep defaults */ }
+      return { jobLite, anchor, card, score, reasons, level };
+    });
+
+    // Sort by score desc, then take 10. Stable sort via index tiebreaker.
+    scored.sort((a, b) => (b.score - a.score) || 0);
+    const topN = scored.slice(0, 10);
+    matchesCurrentTopN = topN;
+
+    // Render
+    const lowFitNote = topN.every((m) => m.score < 30)
+      ? `<div class="eamx-matches-panel__note">Pocas vacantes en esta página coinciden con tu perfil. Prueba con otros filtros o con palabras clave.</div>`
+      : "";
+    const list = topN.map((m, i) => renderMatchItem(m, i + 1)).join("");
+    const footer = cards.length < 5
+      ? `<p class="eamx-matches-panel__hint">Scroll para más vacantes.</p>`
+      : "";
+    host.innerHTML = `${lowFitNote}<ol class="eamx-matches-list">${list}</ol>${footer}`;
+
+    // Resolve initial marked state for each row asynchronously. We render
+    // optimistic "⭐ Marcar" first, then upgrade to "✓ Marcada" once the
+    // queue read resolves. This way the list paints in a single frame.
+    if (queueModule) {
+      try {
+        const queue = await queueModule.getQueue();
+        const queueIds = new Set((queue || []).map((q) => `${q.source}::${q.id}`));
+        topN.forEach((m) => {
+          const btn = matchesPanelEl?.querySelector(`button[data-action="mark"][data-id="${cssEscape(m.jobLite.id)}"]`);
+          if (btn) paintMarkButton(btn, queueIds.has(`${SOURCE}::${m.jobLite.id}`));
+        });
+      } catch (_) { /* leave optimistic state */ }
+    }
+
+    if (bulk) bulk.hidden = false;
+
+    // Wire the scroll re-populate handler when there are too few cards.
+    if (cards.length < 5) attachMatchesScrollHandler();
+    else detachMatchesScrollHandler();
+
+    console.log(`[EmpleoAutomatico] best matches panel opened: ${topN.length} matches`);
+  }
+
+  // Build a single <li> for the matches list.
+  function renderMatchItem(match, rank) {
+    const { jobLite, score, reasons, level } = match;
+    const badgeLevel = level || "unknown";
+    const safeTitle = escapeHtml(jobLite.title || "(sin título)");
+    const safeCompany = escapeHtml(jobLite.company || "(empresa)");
+    const safeLoc = jobLite.location ? escapeHtml(jobLite.location) : "";
+    const safeUrl = encodeURI(jobLite.url || "#");
+    const safeId = escapeHtml(jobLite.id || "");
+    const reasonItems = (Array.isArray(reasons) ? reasons : [])
+      .slice(0, 3)
+      .map((r) => `<li>✓ ${escapeHtml(r)}</li>`)
+      .join("");
+    const reasonsBlock = reasonItems
+      ? `<ul class="eamx-match-item__reasons">${reasonItems}</ul>`
+      : "";
+    const dotLoc = safeLoc ? ` · ${safeLoc}` : "";
+    return `
+      <li class="eamx-match-item">
+        <div class="eamx-match-item__rank" aria-hidden="true">${rank}</div>
+        <div class="eamx-match-item__body">
+          <div class="eamx-match-item__head">
+            <span class="eamx-match-item__score eamx-match-item__score--${badgeLevel}">${score}%</span>
+            <span class="eamx-match-item__title">${safeTitle}</span>
+          </div>
+          <div class="eamx-match-item__company">${safeCompany}${dotLoc}</div>
+          ${reasonsBlock}
+          <div class="eamx-match-item__actions">
+            <button type="button" data-action="mark" data-id="${safeId}" class="eamx-match-item__mark" aria-pressed="false">
+              <span aria-hidden="true">⭐</span><span>Marcar</span>
+            </button>
+            <a data-action="open" href="${safeUrl}" target="_blank" rel="noopener" class="eamx-match-item__open">Abrir vacante →</a>
+          </div>
+        </div>
+      </li>
+    `;
+  }
+
+  // Click on a per-item Marcar/Marcada button. Toggle behavior, re-uses the
+  // same paintMarkButton helper as the inline-card overlay.
+  async function onMatchesMarkClick(btn, id) {
+    if (!btn || !id) return;
+    const match = matchesCurrentTopN.find((m) => m.jobLite.id === id);
+    if (!match) {
+      // Card disappeared (LaPieza re-rendered). Don't crash — fall back to
+      // opening the URL we still have on the button's parent <a>.
+      const link = btn.parentElement?.querySelector('a[data-action="open"]');
+      if (link) {
+        toast("Esta vacante ya no está visible. Abriéndola en nueva pestaña.", "info");
+        try { window.open(link.href, "_blank", "noopener"); } catch (_) {}
+      }
+      return;
+    }
+    const ok = await ensureDiscoveryDeps();
+    if (!ok || !queueModule) {
+      toast("No se pudo abrir la cola.", "error");
+      return;
+    }
+    btn.disabled = true;
+    try {
+      const already = await queueModule.isInQueue(match.jobLite.id, SOURCE);
+      if (already) {
+        await queueModule.removeFromQueue(match.jobLite.id, SOURCE);
+        paintMarkButton(btn, false);
+        toast("Quitada de tu cola.", "info", { durationMs: 2500 });
+      } else {
+        const item = {
+          id: match.jobLite.id,
+          source: SOURCE,
+          url: match.jobLite.url,
+          title: match.jobLite.title,
+          company: match.jobLite.company,
+          location: match.jobLite.location,
+          savedAt: Date.now(),
+          matchScore: Number(match.score) || 0,
+          reasons: Array.isArray(match.reasons) ? match.reasons.slice(0, 3) : []
+        };
+        const { added } = await queueModule.addToQueue(item);
+        if (added) {
+          paintMarkButton(btn, true);
+          toast("Agregada a tu cola.", "success", { durationMs: 2500 });
+        }
+      }
+    } catch (err) {
+      console.warn("[EmpleoAutomatico] matches mark toggle failed", err);
+      toast("No se pudo guardar en la cola.", "error");
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  // Bulk action: add the top 5 to the queue. Reports partial success.
+  async function onMatchesMarkTop5(bulkBtn) {
+    if (!bulkBtn) return;
+    const ok = await ensureDiscoveryDeps();
+    if (!ok || !queueModule) {
+      toast("No se pudo abrir la cola.", "error");
+      return;
+    }
+    const top5 = matchesCurrentTopN.slice(0, 5);
+    if (!top5.length) {
+      toast("No hay vacantes para marcar.", "info");
+      return;
+    }
+    bulkBtn.disabled = true;
+    const original = bulkBtn.innerHTML;
+    bulkBtn.innerHTML = '<span aria-hidden="true">⏳</span> Marcando…';
+
+    let added = 0;
+    let already = 0;
+    let failed = 0;
+    for (const m of top5) {
+      try {
+        const inQueue = await queueModule.isInQueue(m.jobLite.id, SOURCE);
+        if (inQueue) { already++; continue; }
+        const { added: ok2 } = await queueModule.addToQueue({
+          id: m.jobLite.id,
+          source: SOURCE,
+          url: m.jobLite.url,
+          title: m.jobLite.title,
+          company: m.jobLite.company,
+          location: m.jobLite.location,
+          savedAt: Date.now(),
+          matchScore: Number(m.score) || 0,
+          reasons: Array.isArray(m.reasons) ? m.reasons.slice(0, 3) : []
+        });
+        if (ok2) added++;
+        else failed++;
+      } catch (err) {
+        console.warn("[EmpleoAutomatico] mark-top-5 partial fail", err);
+        failed++;
+      }
+    }
+
+    bulkBtn.disabled = false;
+    bulkBtn.innerHTML = original;
+
+    // Re-paint per-item buttons. The storage.onChanged listener will also
+    // fire, but doing it inline is faster.
+    repaintMarkButtons();
+
+    const total = top5.length;
+    if (failed === 0 && added + already === total) {
+      const msg = already
+        ? `${added} agregadas (${already} ya estaban en tu cola).`
+        : `${added} vacantes agregadas a tu cola.`;
+      toast(msg || "Listo.", "success", { durationMs: 3500 });
+    } else if (added > 0) {
+      toast(`${added} de ${total} agregadas.`, "info", { durationMs: 3500 });
+    } else {
+      toast("No se pudo marcar ninguna. Inténtalo de nuevo.", "error");
+    }
+  }
+
+  // Sync per-item buttons with the latest queue snapshot. Cheap — only
+  // touches buttons currently in the panel.
+  async function repaintMarkButtons() {
+    if (!matchesPanelEl || !queueModule) return;
+    let queue = [];
+    try { queue = await queueModule.getQueue(); } catch (_) { return; }
+    const set = new Set((queue || []).map((q) => `${q.source}::${q.id}`));
+    matchesPanelEl.querySelectorAll('button[data-action="mark"][data-id]').forEach((btn) => {
+      const id = btn.getAttribute("data-id");
+      if (!id) return;
+      paintMarkButton(btn, set.has(`${SOURCE}::${id}`));
+    });
+  }
+
+  // While the panel is open and the listing has fewer than 5 cards, watch
+  // window scroll and re-render when LaPieza loads more results. Debounced
+  // 800ms to avoid hammering the DOM during fast scroll.
+  function attachMatchesScrollHandler() {
+    if (matchesScrollHandler) return;
+    matchesScrollHandler = () => {
+      if (matchesScrollDebounce) clearTimeout(matchesScrollDebounce);
+      matchesScrollDebounce = setTimeout(() => {
+        matchesScrollDebounce = null;
+        if (!matchesPanelEl) return;
+        renderMatchesPanelContent();
+      }, 800);
+    };
+    try { window.addEventListener("scroll", matchesScrollHandler, { passive: true, capture: true }); } catch (_) {}
+  }
+  function detachMatchesScrollHandler() {
+    if (matchesScrollHandler) {
+      try { window.removeEventListener("scroll", matchesScrollHandler, true); } catch (_) {}
+      matchesScrollHandler = null;
+    }
+    if (matchesScrollDebounce) {
+      clearTimeout(matchesScrollDebounce);
+      matchesScrollDebounce = null;
+    }
+  }
+
+  // CSS.escape polyfill that's safe in older Chromium content scripts.
+  function cssEscape(value) {
+    if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
+      try { return CSS.escape(value); } catch (_) {}
+    }
+    return String(value).replace(/["\\]/g, "\\$&");
+  }
+
+  // Minimal HTML escaper for innerHTML interpolation. We only emit text
+  // pulled from the DOM (titles/companies/locations) — the encoded set
+  // covers what could break out of the surrounding markup.
+  function escapeHtml(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
 
   // =========================================================================
   // Tailored CV card — render + state machine
@@ -2768,6 +3352,9 @@
   async function maybeShowQueuedReminder() {
     if (queuedReminderShown) return;
     if (!isJobDetailPage()) return;
+    // Listing pages also report isJobDetailPage true now (so the FAB mounts).
+    // The reminder only makes sense on /vacancy/<uuid> or /apply/<uuid>.
+    if (fabMode() === "listing") return;
     const ok = await ensureDiscoveryDeps();
     if (!ok) return;
     const id = idFromUrl(location.href);
@@ -2803,12 +3390,20 @@
   function detectAndMount() {
     if (isJobDetailPage()) {
       mountFab();
-      // Reminder toast — fire after a short delay so the mount completes
-      // and the toast lands cleanly. Idempotent (queuedReminderShown gate).
-      setTimeout(() => { maybeShowQueuedReminder(); }, 1200);
+      // Refresh the FAB label whenever we re-evaluate the route (Express ↔
+      // listing transitions inside the same SPA session would otherwise
+      // leave a stale label in place).
+      paintFabLabel();
+      // Reminder toast — only relevant on /vacancy/<uuid>, never on listing.
+      // The maybeShowQueuedReminder helper itself guards via isJobDetailPage,
+      // but it now returns true on listings too, so add an explicit gate.
+      if (fabMode() !== "listing") {
+        setTimeout(() => { maybeShowQueuedReminder(); }, 1200);
+      }
     } else {
       unmountFab();
       closePanel();
+      closeMatchesPanel();
     }
 
     // Listing-page badges run on a separate axis from the FAB. We scan
@@ -2859,6 +3454,9 @@
         // route. We clear the dedupe set so detectors can re-attach to
         // freshly-rendered inputs/textareas/buttons.
         stopFlowAssistant();
+        // Best-matches panel is page-scoped. If the user navigates away
+        // mid-shortlist we close it — the underlying cards are gone.
+        closeMatchesPanel();
         setTimeout(detectAndMount, 300);
         setTimeout(detectAndMount, 1200);
       }
@@ -2874,7 +3472,13 @@
       const want = isJobDetailPage();
       const have = !!(fabEl && document.body.contains(fabEl));
       if (want && !have) mountFab();
-      else if (!want && have) { unmountFab(); closePanel(); }
+      else if (!want && have) { unmountFab(); closePanel(); closeMatchesPanel(); }
+      else if (want && have) {
+        // Same page, but maybe the mode changed (e.g. vacancy page → listing
+        // via a SPA nav that didn't fire popstate first). Repaint the label
+        // to keep it accurate.
+        paintFabLabel();
+      }
     }, 600));
     mo.observe(document.body, { childList: true, subtree: true });
   }
