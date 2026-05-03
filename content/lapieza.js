@@ -3019,9 +3019,18 @@
   ];
 
   // The single most stable signal for "this is a vacancy card": an <a>
-  // whose href contains /vacancy/<uuid> (or the Spanish variant). UUIDs
-  // are loose (8+ hex/dashes) to tolerate truncation in the route.
-  const VACANCY_ANCHOR_RX = /\/(?:vacancy|vacante)\/([a-f0-9][a-f0-9-]{7,})/i;
+  // whose href contains /vacancy/ or /vacante/ followed by any segment.
+  //
+  // Live LaPieza DOM check (verified via the user's browser) confirmed two
+  // URL formats, both valid:
+  //   /vacancy/9726cb82-82cc-4061-b74d-854166a2ddbb   (canonical UUID — detail)
+  //   /vacante/director-de-ti-confidential-1f1a71    (slug-shorthex — listing)
+  // The previous regex required a hex-only start, so it missed the slug
+  // form on the listing page (cards begin with letters: "director-de-ti…").
+  // Result: matches panel said "No detecté vacantes" with 12 cards present.
+  // The relaxed regex captures any non-empty segment; the LaPieza-specific
+  // class selector .vacancy-card-link keeps false positives down.
+  const VACANCY_ANCHOR_RX = /\/(?:vacancy|vacante)\/([^/?#]+)/i;
 
   // Module-scoped lazy-loaded helpers. We dynamic-import lib/match-score.js
   // and lib/queue.js the same way we do schemas.js — content scripts can't
@@ -3153,16 +3162,38 @@
 
   // Find every vacancy anchor that's NOT already inside a card we've
   // overlaid. Returns the unique set of (anchor, cardRoot) tuples.
+  //
+  // Selector strategy: LaPieza-specific class first, generic href regex
+  // second. The class selector is the fast path; the regex is the safety
+  // net for variants we might not have seen (e.g. featured vacancies in
+  // /comunidad with a different wrapper class).
   function findVacancyCards() {
-    const anchors = Array.from(document.querySelectorAll("a[href]"))
-      .filter((a) => VACANCY_ANCHOR_RX.test(a.href || ""));
-    const seen = new WeakSet();
+    const seenAnchor = new WeakSet();
+    const anchors = [];
+    // Fast path: LaPieza emits <a class="vacancy-card-link">.
+    document.querySelectorAll("a.vacancy-card-link[href]").forEach((a) => {
+      if (!seenAnchor.has(a)) { seenAnchor.add(a); anchors.push(a); }
+    });
+    // Fallback: any <a> whose href matches the vacancy URL pattern.
+    document.querySelectorAll("a[href]").forEach((a) => {
+      if (seenAnchor.has(a)) return;
+      if (VACANCY_ANCHOR_RX.test(a.href || "")) {
+        seenAnchor.add(a);
+        anchors.push(a);
+      }
+    });
+
+    const seenCard = new WeakSet();
     const out = [];
     for (const a of anchors) {
-      const card = findCardRoot(a);
+      // For LaPieza the visible card is the wrapper div above the anchor,
+      // not the anchor itself (the anchor has the click handler but the
+      // wrapper has the grid spacing). findCardRoot walks up to find the
+      // wrapper; if it can't, fall back to the anchor itself.
+      const card = findCardRoot(a) || a;
       if (!card) continue;
-      if (seen.has(card)) continue;
-      seen.add(card);
+      if (seenCard.has(card)) continue;
+      seenCard.add(card);
       // Skip if already overlaid (idempotency).
       if (card.hasAttribute("data-eamx-card-overlay")) continue;
       out.push({ anchor: a, card });
