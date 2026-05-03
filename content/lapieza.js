@@ -148,9 +148,40 @@
   }
 
   function isJobDetailPage() {
-    // LaPieza index/list paths must NOT trigger.
-    const href = location.href;
+    // LaPieza listing/marketing paths must NOT trigger. Explicit denylist
+    // first so we never have to rely on heuristics for these.
+    //   /vacantes, /vacancies — the listing/search page
+    //   /comunidad           — community feed
+    //   /soy-empresa         — employer landing
+    //   /mi-perfil           — own profile
+    //   /                    — home
+    //
+    // The hero on these pages has an "Aplicar" newsletter-signup button that
+    // matched our old hasApply heuristic and falsely lit up the FAB. Hard
+    // denylist eliminates the false positive.
     const path = location.pathname || "";
+    const DENY_PATHS = [
+      /^\/?$/,
+      /^\/vacantes\/?$/i,
+      /^\/vacancies\/?$/i,
+      /^\/jobs\/?$/i,
+      /^\/empleos\/?$/i,
+      /^\/comunidad\/?/i,
+      /^\/soy[- ]?empresa\/?/i,
+      /^\/mi[- ]?perfil\/?/i,
+      /^\/profile\/?/i,
+      /^\/login\/?/i,
+      /^\/signup\/?/i,
+      /^\/registro\/?/i,
+      /^\/about\/?/i,
+      /^\/contacto\/?/i,
+      /^\/blog\/?/i,
+      /^\/precios\/?/i,
+      /^\/pricing\/?/i
+    ];
+    if (DENY_PATHS.some((re) => re.test(path))) return false;
+    // Trailing-bare paths like /vacancy or /vacante (no UUID) — also list
+    // pages, must not trigger.
     if (/\/(vacancy|vacante|jobs|empleos|puesto)\/?$/i.test(path)) return false;
 
     // Apply pages always count — the user wants the panel here even though
@@ -158,23 +189,11 @@
     // on /vacancy/<uuid> and we'll restore it from session storage.
     if (isApplyPage()) return true;
 
-    const urlMatches = JOB_URL_PATTERNS.some((re) => re.test(href));
-    // TODO(dom): verify against live LaPieza DOM
-    const hasHeading = !!document.querySelector(
-      "h1, [class*='vacancy' i] h1, [class*='vacante' i] h1, [class*='title' i], [data-testid*='title' i]"
-    );
-    // LaPieza copy: "Aplicar a esta vacante", "Postularme", "Aplicar".
-    const applyRx = /^(aplicar(\s+a\s+esta\s+vacante)?|postular(me)?|apply|aplicar ahora)$/i;
-    const looseApplyRx = /aplicar|postular|postularme|apply/i;
-    // TODO(dom): verify against live LaPieza DOM
-    const hasApply = Array.from(document.querySelectorAll(
-      "button, a[role='button'], a.btn, a[class*='apply' i], a[class*='postular' i], a[class*='aplicar' i]"
-    )).some((el) => {
-      const t = (el.textContent || "").trim();
-      return applyRx.test(t) || looseApplyRx.test(t);
-    });
-    const hasJsonLd = !!findJobPostingJsonLd();
-    return (urlMatches && hasHeading) || hasJsonLd || (hasHeading && hasApply);
+    // Stricter rule going forward: the FAB only mounts when the URL path
+    // explicitly matches a job-detail pattern (/vacancy/<uuid>, etc.). The
+    // old fallback "hasHeading && hasApply" was too permissive — a generic
+    // "Aplicar" button on a marketing page would light up the FAB.
+    return JOB_URL_PATTERNS.some((re) => re.test(location.href));
   }
 
   // Persist the job extracted from /vacancy/<uuid> so we can restore it on
