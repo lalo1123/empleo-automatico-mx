@@ -254,6 +254,78 @@
         </ol>
       </section>
 
+      <!-- ============ Card: Mis preferencias ============ -->
+      <!--
+        User-facing preferences for ranking listing-page vacancies.
+        Stored in chrome.storage.local under STORAGE_KEYS.PREFERENCES
+        (`eamx:preferences`). Read by the listing scanners (LaPieza first)
+        and passed to lib/match-score.js → computeMatchScore as the
+        third arg. Empty by default — when nothing is set we fall back
+        to the legacy scoring (no city/modality/salary bonus).
+        IMPORTANT: this is a ranking signal, NOT a hard filter — the user
+        still sees off-city vacancies, just lower in the list.
+      -->
+      <section class="card is-hidden" id="preferencesCard" aria-labelledby="preferencesHeading">
+        <div class="card__head">
+          <div class="card__eyebrow">Para tus listados</div>
+          <h2 id="preferencesHeading">&#9881;&#65039; Mis preferencias</h2>
+          <p class="card__sub">
+            La extensi&oacute;n usa estas preferencias para ordenar las vacantes que ves. <strong>No filtra &mdash; solo prioriza.</strong>
+          </p>
+        </div>
+
+        <div class="field">
+          <label class="field-label" for="prefCity">Ciudad ideal</label>
+          <input id="prefCity" type="text" autocomplete="address-level2" placeholder="ej. Ciudad de M&eacute;xico, Guadalajara" />
+          <div class="muted">Reconocemos variantes: CDMX, DF, GDL, MTY, etc.</div>
+        </div>
+
+        <div class="field">
+          <label class="field-label">Modalidad preferida</label>
+          <div class="mode-radio" role="radiogroup" aria-label="Modalidad preferida">
+            <label class="mode-option mode-option--compact">
+              <input type="radio" name="prefModality" id="prefModalityPresencial" value="presencial" />
+              <span class="mode-option__body">
+                <span class="mode-option__title"><span aria-hidden="true">&#127970;</span> Presencial</span>
+              </span>
+            </label>
+            <label class="mode-option mode-option--compact">
+              <input type="radio" name="prefModality" id="prefModalityRemoto" value="remoto" />
+              <span class="mode-option__body">
+                <span class="mode-option__title"><span aria-hidden="true">&#127968;</span> Remoto</span>
+              </span>
+            </label>
+            <label class="mode-option mode-option--compact">
+              <input type="radio" name="prefModality" id="prefModalityHibrido" value="hibrido" />
+              <span class="mode-option__body">
+                <span class="mode-option__title"><span aria-hidden="true">&#128338;</span> H&iacute;brido</span>
+              </span>
+            </label>
+            <label class="mode-option mode-option--compact">
+              <input type="radio" name="prefModality" id="prefModalityAny" value="any" checked />
+              <span class="mode-option__body">
+                <span class="mode-option__title"><span aria-hidden="true">&#9989;</span> Sin preferencia</span>
+              </span>
+            </label>
+          </div>
+        </div>
+
+        <div class="field">
+          <label class="field-label">Rango salarial mensual MXN</label>
+          <div class="pref-salary-row">
+            <input id="prefSalaryMin" type="number" min="0" max="1000000" step="1000" placeholder="Min (ej. 25000)" />
+            <span class="pref-salary-sep" aria-hidden="true">&mdash;</span>
+            <input id="prefSalaryMax" type="number" min="0" max="1000000" step="1000" placeholder="Max (ej. 60000)" />
+          </div>
+          <div class="muted">Ambos opcionales. Si la vacante no muestra salario, no afecta el score.</div>
+        </div>
+
+        <div class="actions">
+          <button type="button" class="btn btn--primary" id="savePreferences">Guardar preferencias</button>
+          <span id="preferencesStatus" class="status" role="status" aria-live="polite"></span>
+        </div>
+      </section>
+
       <!-- ============ Card: Mi cola de postulación ============ -->
       <!--
         Discovery / pre-selection queue. Populated by the listing-page

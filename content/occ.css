@@ -2431,11 +2431,48 @@
   border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
+/* Four-column variant — used when the Filtros stat is added to the strip
+   alongside Mejor / Promedio / Vistas. Slightly tighter padding so the
+   four cells don't push the panel content below the fold. */
+.eamx-matches-panel__stats--four {
+  grid-template-columns: 1fr 1fr 1fr 1fr;
+  padding: 10px 8px;
+  gap: 4px;
+}
+
 .eamx-matches-panel__stat {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 2px;
+  /* When .eamx-matches-panel__stat is rendered as a <button> (the Filtros
+     cell is interactive) we still want the same visuals as the static
+     <div> peers — strip the default button chrome. */
+  appearance: none;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+}
+
+/* Filtros cell — clickable to jump to Options. Subtle hover so the user
+   discovers the affordance without us shouting about it. */
+.eamx-matches-panel__stat--clickable {
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background 120ms ease, transform 120ms ease;
+}
+
+.eamx-matches-panel__stat--clickable:hover {
+  background: rgba(255, 255, 255, 0.06);
+  transform: translateY(-1px);
+}
+
+.eamx-matches-panel__stat--clickable:focus-visible {
+  outline: 2px solid #70d1c6;
+  outline-offset: 2px;
 }
 
 .eamx-matches-panel__stat-label {
@@ -2448,6 +2485,22 @@
 .eamx-matches-panel__stat-value {
   font: 700 19px/1 var(--eamx-font-mono, ui-monospace, "SF Mono", monospace);
   color: #f1f5f9;
+}
+
+/* Slightly tighter font for the Filtros cell so the icon row + "Sin
+   filtros" string don't overflow the column. */
+.eamx-matches-panel__stat--clickable .eamx-matches-panel__stat-value {
+  font-size: 14px;
+  line-height: 1.2;
+  text-align: center;
+}
+
+.eamx-matches-panel__stat-value--muted {
+  color: #94a3b8;
+  font-weight: 500;
+  font-size: 11.5px;
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .eamx-matches-panel__stat-value--high  { color: #4ade80; }
@@ -2487,6 +2540,18 @@
   font: 500 12.5px/1.3 inherit;
   color: #cbd5e1;
   margin-bottom: 10px;
+}
+
+/* One-line reasons under the top-1 banner — surfaces *why* this is the
+   best match (e.g. "3 skills coinciden · Ubicación: CDMX ✓"). Kept
+   single-line via overflow ellipsis so the banner stays compact. */
+.eamx-matches-panel__top1-reasons {
+  font: 500 12px/1.4 inherit;
+  color: #a7f3d0;
+  margin-bottom: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .eamx-matches-panel__top1-actions {
@@ -2550,6 +2615,16 @@
   cursor: progress;
 }
 
+/* Hint paragraph under the wider-search button — explains what the
+   button does without forcing the user to hover for a tooltip. Tiny so
+   it doesn't compete with the bulk action below. */
+.eamx-matches-panel__loadmore-hint {
+  margin: 8px 4px 0 4px;
+  font: 500 11.5px/1.4 inherit;
+  color: #94a3b8;
+  text-align: center;
+}
+
 .eamx-matches-panel__bulk-btn {
   appearance: none;
   display: inline-flex;
@@ -2590,6 +2665,12 @@
 @media (prefers-reduced-motion: reduce) {
   .eamx-matches-panel__bulk-btn { transition: none !important; }
   .eamx-matches-panel__bulk-btn:hover { transform: none !important; }
+  .eamx-matches-panel__stat--clickable {
+    transition: none !important;
+  }
+  .eamx-matches-panel__stat--clickable:hover {
+    transform: none !important;
+  }
 }
 
 .eamx-matches-panel__bulk-hint {

@@ -18,7 +18,7 @@ import {
   setQueue,
   QUEUE_STORAGE_KEY
 } from "../lib/queue.js";
-import { levelForScore } from "../lib/match-score.js";
+import { levelForScore, expandCitySynonyms } from "../lib/match-score.js";
 
 // ---------------------------------------------------------------------------
 // DOM shortcuts
@@ -94,6 +94,22 @@ const settingsStatus = $("settingsStatus");
 const expressModeOnInput = $("expressModeOn");
 const expressModeOffInput = $("expressModeOff");
 const expressModeStatus = $("expressModeStatus");
+
+// Preferences card refs. Stored in chrome.storage.local under
+// STORAGE_KEYS.PREFERENCES — listing-page scanners read this on every
+// scan so it must live in local (not the backend SETTINGS object).
+const preferencesCard = $("preferencesCard");
+const prefCityInput = $("prefCity");
+const prefSalaryMinInput = $("prefSalaryMin");
+const prefSalaryMaxInput = $("prefSalaryMax");
+const prefModalityInputs = [
+  $("prefModalityPresencial"),
+  $("prefModalityRemoto"),
+  $("prefModalityHibrido"),
+  $("prefModalityAny")
+].filter(Boolean);
+const savePreferencesBtn = $("savePreferences");
+const preferencesStatus = $("preferencesStatus");
 
 const exportBtn = $("exportProfile");
 const importBtn = $("importProfile");
@@ -605,6 +621,161 @@ if (expressModeOnInput) expressModeOnInput.addEventListener("change", onExpressM
 if (expressModeOffInput) expressModeOffInput.addEventListener("change", onExpressModeChange);
 
 // ---------------------------------------------------------------------------
+// Preferences (chrome.storage.local key: STORAGE_KEYS.PREFERENCES)
+//
+// Schema persisted (see lib/schemas.js → UserPreferences typedef):
+//   { city, citySynonyms, modality, salaryMin, salaryMax, updatedAt }
+//
+// Read by listing-page scanners (LaPieza first) and passed as the third
+// arg to computeMatchScore. Empty default = legacy scoring (no extra
+// bonus). citySynonyms is computed at save time via expandCitySynonyms
+// so the content script doesn't have to re-derive it on every scan.
+// ---------------------------------------------------------------------------
+
+// Plain numeric coercion that turns "" / undefined into null. Used so the
+// stored object only carries numbers when the user actually filled the
+// field, instead of carrying NaN / 0 / empty strings.
+function readSalaryNumber(input) {
+  if (!input) return null;
+  const raw = input.value;
+  if (raw === "" || raw == null) return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return null;
+  if (n < 0) return null;
+  if (n > 1_000_000) return null;
+  return Math.round(n);
+}
+
+function readPreferences() {
+  return new Promise((resolve) => {
+    try {
+      chrome.storage.local.get([STORAGE_KEYS.PREFERENCES], (r) => {
+        const v = r && r[STORAGE_KEYS.PREFERENCES];
+        if (v && typeof v === "object") resolve(v);
+        else resolve(null);
+      });
+    } catch (_) {
+      resolve(null);
+    }
+  });
+}
+
+function writePreferences(value) {
+  return new Promise((resolve) => {
+    try {
+      chrome.storage.local.set({ [STORAGE_KEYS.PREFERENCES]: value }, () => resolve());
+    } catch (_) {
+      resolve();
+    }
+  });
+}
+
+function paintPreferences(prefs) {
+  const p = prefs || {};
+  if (prefCityInput) prefCityInput.value = p.city || "";
+  if (prefSalaryMinInput) prefSalaryMinInput.value = Number.isFinite(p.salaryMin) ? String(p.salaryMin) : "";
+  if (prefSalaryMaxInput) prefSalaryMaxInput.value = Number.isFinite(p.salaryMax) ? String(p.salaryMax) : "";
+  const target = p.modality || "any";
+  for (const input of prefModalityInputs) {
+    input.checked = input.value === target;
+  }
+  // If nothing checked (defensive), force "any" — the radios should always
+  // have one selected so a click on Save persists a sensible default.
+  if (!prefModalityInputs.some((i) => i.checked)) {
+    const any = prefModalityInputs.find((i) => i.value === "any");
+    if (any) any.checked = true;
+  }
+}
+
+function readSelectedModality() {
+  for (const input of prefModalityInputs) {
+    if (input.checked) return input.value;
+  }
+  return "any";
+}
+
+if (savePreferencesBtn) {
+  savePreferencesBtn.addEventListener("click", async () => {
+    const city = (prefCityInput?.value || "").trim();
+    const salaryMin = readSalaryNumber(prefSalaryMinInput);
+    const salaryMax = readSalaryNumber(prefSalaryMaxInput);
+    const modality = readSelectedModality();
+
+    // Validation. We keep the rules permissive — the user might want to
+    // set just a min, or just a city, etc. The only hard rule is that
+    // when both salary bounds are set, min ≤ max.
+    if (salaryMin != null && salaryMax != null && salaryMin > salaryMax) {
+      setStatus(preferencesStatus, "err", "El salario mínimo no puede ser mayor que el máximo.");
+      return;
+    }
+
+    const next = {
+      modality,
+      updatedAt: Date.now()
+    };
+    if (city) {
+      next.city = city;
+      // Compute the synonym list once at save time so the content scripts
+      // can do an O(N) substring check per card without re-deriving the
+      // table on every scan.
+      try {
+        next.citySynonyms = expandCitySynonyms(city);
+      } catch (_) {
+        next.citySynonyms = [city.toLowerCase()];
+      }
+    }
+    if (salaryMin != null) next.salaryMin = salaryMin;
+    if (salaryMax != null) next.salaryMax = salaryMax;
+
+    savePreferencesBtn.disabled = true;
+    try {
+      await writePreferences(next);
+      setStatus(preferencesStatus, "ok", "Preferencias guardadas");
+      // Auto-clear after a few seconds so the green tick doesn't linger.
+      setTimeout(() => {
+        if (preferencesStatus && preferencesStatus.textContent === "Preferencias guardadas") {
+          setStatus(preferencesStatus, "", "");
+        }
+      }, 2500);
+    } catch (e) {
+      setStatus(preferencesStatus, "err", e?.message || "No se pudo guardar");
+    } finally {
+      savePreferencesBtn.disabled = false;
+    }
+  });
+}
+
+// Cross-tab sync: if the user updates preferences from another extension
+// page (e.g. LaPieza's "Filtros" stat opens this tab), keep the form in
+// sync without forcing them to refresh.
+try {
+  if (chrome?.storage?.onChanged) {
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area !== "local") return;
+      if (changes[STORAGE_KEYS.PREFERENCES]) {
+        paintPreferences(changes[STORAGE_KEYS.PREFERENCES].newValue);
+      }
+    });
+  }
+} catch (_) { /* ignore */ }
+
+// If the URL has #preferences, scroll the preferences card into view on
+// load. The LaPieza "Filtros" stat opens the options page that way.
+function maybeFocusPreferencesCard() {
+  if (!preferencesCard) return;
+  // Reveal the card unconditionally — it lives in the logged-in shell
+  // alongside the queue card, but the user can change preferences even
+  // before logging in (no backend dependency).
+  preferencesCard.classList.remove("is-hidden");
+  if (location.hash === "#preferences") {
+    try { preferencesCard.scrollIntoView({ behavior: "smooth", block: "start" }); } catch (_) {}
+    if (prefCityInput) {
+      try { prefCityInput.focus({ preventScroll: true }); } catch (_) {}
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // "Mi cola" — discovery queue rendered from chrome.storage.local["eamx:queue"]
 // Populated by content/lapieza.js → onMarkClick. We never write here except
 // for "Quitar" (single-item delete) and "Vaciar cola" (clear). Listens to
@@ -789,6 +960,13 @@ async function init() {
     // object — load it independently.
     const express = await readExpressMode();
     paintExpressMode(express);
+
+    // Preferences live in chrome.storage.local too. We paint them BEFORE
+    // refreshAuthState because the card is shown unconditionally (the
+    // user can configure preferences without being logged in).
+    const prefs = await readPreferences();
+    paintPreferences(prefs);
+    maybeFocusPreferencesCard();
 
     if (profile) updatePreviewFromProfile(profile);
     await refreshExistingBanner();

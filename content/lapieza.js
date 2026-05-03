@@ -1448,9 +1448,11 @@
   // Best-matches shortlist panel (listing pages)
   // =========================================================================
   // Lifecycle: opened by the FAB click on listing routes (/, /vacantes,
-  // /comunidad/jobs, etc.). Reads cards via findVacancyCards() — the same
-  // helper that powers the per-card badges — so the data is consistent with
-  // what the user sees inline. Top 10 by match score.
+  // /comunidad/jobs, etc.). Reads cards via findAllVacancyCards() — like
+  // findVacancyCards but WITHOUT the overlay-skip filter, so cards already
+  // overlaid by the inline-overlay path still get scored in the panel.
+  // Top 25 by match score, with optional preferences-aware bonuses
+  // (city / modality / salary) layered on top.
   //
   // HITL guarantees (NEVER violate):
   //   - The panel never auto-clicks "Postular" or any LaPieza CTA.
@@ -1514,7 +1516,8 @@
         <div class="eamx-matches-panel__loading">Analizando vacantes…</div>
       </div>
       <div class="eamx-matches-panel__loadmore" data-eamx-matches-loadmore hidden>
-        <button type="button" class="eamx-matches-panel__loadmore-btn" data-action="load-more">⬇ Cargar más vacantes de LaPieza</button>
+        <button type="button" class="eamx-matches-panel__loadmore-btn" data-action="wider-search">🔍 Buscar más amplio</button>
+        <p class="eamx-matches-panel__loadmore-hint">Carga hasta 100 vacantes de LaPieza y te muestra las mejores según tus preferencias y CV.</p>
       </div>
       <div class="eamx-matches-panel__bulk" data-eamx-matches-bulk hidden>
         <button type="button" class="eamx-matches-panel__bulk-btn" data-action="mark-top-5">⭐ Marcar top 5 de un solo clic</button>
@@ -1625,16 +1628,209 @@
       return;
     }
     if (what === "load-more") {
+      // Legacy single-shot load; kept as a fallback handler in case the
+      // skeleton is ever re-rendered by an older code path. Modern panels
+      // emit "wider-search" instead — see onMatchesWiderSearch.
       ev.preventDefault();
       onMatchesLoadMore(action);
+      return;
+    }
+    if (what === "wider-search") {
+      ev.preventDefault();
+      onMatchesWiderSearch(action);
+      return;
+    }
+    if (what === "open-preferences") {
+      // Click on the Filtros stat → jump to the Options page with the
+      // preferences card focused. We pass #preferences so options.js can
+      // scrollIntoView the right card.
+      ev.preventDefault();
+      try {
+        const url = chrome.runtime.getURL("options/options.html") + "#preferences";
+        window.open(url, "_blank", "noopener");
+      } catch (_) {
+        try { chrome.runtime.openOptionsPage(); } catch (_) { openOptionsPage(); }
+      }
       return;
     }
     // "open" links are real <a target="_blank"> — let the browser handle them.
   }
 
+  // Find every vacancy card on the page WITHOUT the overlay-skip filter
+  // that findVacancyCards applies. The overlay skip is correct for the
+  // inline-overlay path (we don't want to double-inject) but wrong for
+  // the matches panel path: once injectOverlay has stamped cards we'd
+  // hide them from the shortlist scoring. Returns the same shape as
+  // findVacancyCards: [{ anchor, card }]. WeakSet de-dupes by node so
+  // duplicate hrefs to the same card don't double-count.
+  function findAllVacancyCards() {
+    const seenAnchor = new WeakSet();
+    const anchors = [];
+    document.querySelectorAll("a.vacancy-card-link[href]").forEach((a) => {
+      if (!seenAnchor.has(a)) { seenAnchor.add(a); anchors.push(a); }
+    });
+    document.querySelectorAll("a[href]").forEach((a) => {
+      if (seenAnchor.has(a)) return;
+      if (VACANCY_ANCHOR_RX.test(a.href || "")) {
+        seenAnchor.add(a);
+        anchors.push(a);
+      }
+    });
+    const seenCard = new WeakSet();
+    const out = [];
+    for (const a of anchors) {
+      const card = findCardRoot(a) || a;
+      if (!card || seenCard.has(card)) continue;
+      seenCard.add(card);
+      out.push({ anchor: a, card });
+    }
+    return out;
+  }
+
+  // Cheap card count for the wider-search progress loop. Same set of
+  // anchors as findAllVacancyCards but skips the per-card walk because
+  // we only care about the total, not the (anchor, card) tuples.
+  function countAllVacancyAnchors() {
+    let n = 0;
+    const seen = new WeakSet();
+    document.querySelectorAll("a.vacancy-card-link[href]").forEach((a) => {
+      if (!seen.has(a)) { seen.add(a); n++; }
+    });
+    document.querySelectorAll("a[href]").forEach((a) => {
+      if (seen.has(a)) return;
+      if (VACANCY_ANCHOR_RX.test(a.href || "")) {
+        seen.add(a);
+        n++;
+      }
+    });
+    return n;
+  }
+
+  // Wider-search auto-load loop. Scrolls to the bottom of the listing
+  // page repeatedly to coax LaPieza's infinite scroll into hydrating more
+  // cards, then re-ranks against the user's profile + preferences. Caps
+  // at 100 cards or 5 iterations (whichever first) and bails early when
+  // two consecutive iterations don't grow the card count (LaPieza
+  // exhausted its result set).
+  //
+  // HITL note: this still doesn't do anything destructive — it only
+  // scrolls the host page (a normal user action LaPieza already supports)
+  // and re-renders our side panel. No requests are sent, no applications
+  // are submitted.
+  // Locate LaPieza's MUI Pagination "next page" button. Tries the official
+  // aria-label first ("Go to next page") with a Spanish fallback, then a
+  // structural fallback (last button in .MuiPagination-ul). Returns null
+  // when LaPieza's listing isn't paginated (single-page result, etc.).
+  function findLaPiezaNextPageButton() {
+    const tries = [
+      'button[aria-label="Go to next page"]',
+      'button[aria-label="next page"]',
+      'button[aria-label*="next" i]',
+      'button[aria-label*="siguiente" i]',
+      '.MuiPagination-ul li:last-child button',
+       '.MuiPagination-root button:not([aria-label*="page" i]):last-of-type'
+    ];
+    for (const sel of tries) {
+      try {
+        const el = document.querySelector(sel);
+        if (el && !el.disabled) return el;
+      } catch (_) { /* invalid selector — skip */ }
+    }
+    return null;
+  }
+
+  /**
+   * Wider-search loop — paginate through LaPieza's listing by clicking the
+   * MUI "Next page" button programmatically, polling for the new cards to
+   * hydrate, then re-ranking the cumulative set.
+   *
+   * Why click instead of scroll: LaPieza is NOT an infinite-scroll listing.
+   * Live DOM check confirmed it uses MUI Pagination buttons (no ?page=N URL,
+   * no auto-loading on scroll). The previous scroll-to-bottom approach did
+   * literally nothing on this site. Clicking the official "Next" button
+   * fires LaPieza's own state-update handler — same path a normal user
+   * takes — so it's behaviorally indistinguishable from a human paginating.
+   *
+   * The URL doesn't change while paginating (verified live), so the SPA
+   * route-change listener doesn't fire and the matches panel stays open.
+   *
+   * Caps: 5 pages × ~12 vacantes/page ≈ 60 candidatos. Inter-page delay of
+   * 800ms (human-paced) keeps us off any "too fast" detection.
+   */
+  async function onMatchesWiderSearch(btn) {
+    if (!btn || btn.disabled) return;
+    const original = btn.textContent;
+    btn.disabled = true;
+    const MAX_PAGES = 5;
+    const PER_PAGE_TIMEOUT_MS = 4000;
+    const POLL_INTERVAL_MS = 300;
+    const INTER_PAGE_DELAY_MS = 800;
+    let stallStreak = 0;
+    let lastCount = countAllVacancyAnchors();
+    try {
+      for (let page = 1; page <= MAX_PAGES; page++) {
+        btn.textContent = `Buscando página ${page}/${MAX_PAGES}…`;
+        const nextBtn = findLaPiezaNextPageButton();
+        if (!nextBtn) {
+          // No more pagination — either single-page result or we hit the end.
+          break;
+        }
+        // Fire React's onClick — LaPieza handles the page change internally,
+        // hydrates new vacancy cards, and updates the pagination state.
+        try { nextBtn.click(); } catch (_) { /* should never throw */ }
+        // Poll for the new cards to land. We compare against pre-click count
+        // so we don't wait pointlessly when LaPieza re-renders without
+        // changing the card pool (rare, but happens on filter mismatch).
+        const polls = Math.max(1, Math.round(PER_PAGE_TIMEOUT_MS / POLL_INTERVAL_MS));
+        let grew = false;
+        for (let p = 0; p < polls; p++) {
+          await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+          const now = countAllVacancyAnchors();
+          if (now > lastCount) {
+            lastCount = now;
+            grew = true;
+            break;
+          }
+        }
+        if (!grew) {
+          stallStreak++;
+          // Two consecutive stalls = LaPieza didn't paginate. Bail out
+          // rather than spinning. This usually means we're already on the
+          // last page or the next button is mid-disabled state.
+          if (stallStreak >= 2) break;
+        } else {
+          stallStreak = 0;
+        }
+        // Human-paced pause between pages.
+        await new Promise((r) => setTimeout(r, INTER_PAGE_DELAY_MS));
+      }
+      // Re-rank the now-larger card set. renderMatchesPanelContent picks
+      // up the new findVacancyCards count + cachedPreferences.
+      await renderMatchesPanelContent();
+      // Toast summary — countAllVacancyAnchors gives the true total
+      // including any cards we've now overlaid, which findVacancyCards
+      // would silently exclude. matchesCurrentTopN is set by render() so
+      // the best score in the toast matches what the user just saw.
+      const total = countAllVacancyAnchors();
+      const best = matchesCurrentTopN[0]?.score ?? 0;
+      toast(
+        `Análisis ampliado: ${total} vacantes consideradas, mejor match ${best}%`,
+        "success",
+        { durationMs: 4000 }
+      );
+    } catch (err) {
+      console.warn("[EmpleoAutomatico] wider search failed", err);
+      toast("No se pudo ampliar la búsqueda. Intenta de nuevo.", "error");
+    } finally {
+      btn.disabled = false;
+      btn.textContent = original || "🔍 Buscar más amplio";
+    }
+  }
+
   // Trigger LaPieza's own infinite scroll by scrolling the host page to the
   // bottom, wait for new cards to render, then re-rank. We never fetch
   // additional pages programmatically — only nudge LaPieza's existing UI.
+  // Kept for backwards compatibility; current panels emit wider-search.
   async function onMatchesLoadMore(btn) {
     if (!btn || btn.disabled) return;
     const original = btn.textContent;
@@ -1672,9 +1868,14 @@
     const bulk = matchesPanelEl.querySelector("[data-eamx-matches-bulk]");
     if (!host) return;
 
-    // Lazy-load deps + profile.
+    // Lazy-load deps + profile + preferences. We load profile and prefs
+    // in parallel — both are local storage reads, both are cheap, and the
+    // scorer needs both to be available before we render.
     const ok = await ensureDiscoveryDeps();
-    if (!profileLoaded) await loadProfileOnce();
+    const loaders = [];
+    if (!profileLoaded) loaders.push(loadProfileOnce());
+    if (!preferencesLoaded) loaders.push(loadPreferencesOnce());
+    if (loaders.length) await Promise.all(loaders);
 
     // Empty state #1 — no profile uploaded.
     if (!cachedProfile) {
@@ -1691,12 +1892,18 @@
       return;
     }
 
-    // Find cards on the page right now.
+    // Find cards on the page right now. We use findAllVacancyCards (no
+    // overlay-skip) instead of findVacancyCards because the matches
+    // panel needs to score every visible card, including those the
+    // inline-overlay path has already stamped. Cap at 100 to mirror the
+    // wider-search ceiling — past that point the panel becomes
+    // memory-heavy and the user can't really compare so many anyway.
     let cards = [];
-    try { cards = findVacancyCards() || []; } catch (err) {
-      console.warn("[EmpleoAutomatico] findVacancyCards threw", err);
+    try { cards = findAllVacancyCards() || []; } catch (err) {
+      console.warn("[EmpleoAutomatico] findAllVacancyCards threw", err);
       cards = [];
     }
+    if (cards.length > 100) cards = cards.slice(0, 100);
 
     // Empty state #2 — no cards at all.
     if (!cards.length) {
@@ -1715,7 +1922,9 @@
 
     // Score every card. matchScoreModule is loaded by ensureDiscoveryDeps;
     // if it failed (rare, ad-blocker chains, etc.) we just sort by document
-    // order and fall back to the unknown level.
+    // order and fall back to the unknown level. cachedPreferences may be
+    // null — the scorer handles that as "no preferences set" and runs the
+    // legacy code path.
     const scored = cards.map(({ anchor, card }) => {
       const jobLite = extractJobLiteFromCard(card, anchor);
       let score = 0;
@@ -1723,7 +1932,7 @@
       let level = "unknown";
       try {
         if (matchScoreModule) {
-          const r = matchScoreModule.computeMatchScore(cachedProfile, jobLite);
+          const r = matchScoreModule.computeMatchScore(cachedProfile, jobLite, cachedPreferences);
           score = r.score;
           reasons = r.reasons || [];
           level = matchScoreModule.levelForScore(score);
@@ -1745,16 +1954,30 @@
     const lowFitNote = topN.every((m) => m.score < 30)
       ? `<div class="eamx-matches-panel__note">Pocas vacantes en esta página coinciden con tu perfil. Prueba con otros filtros o con palabras clave.</div>`
       : "";
-    // Stats strip — shows the best score, the average, and the count.
-    // Helps the user calibrate at a glance: "is the top match really
-    // good, or is everything middling today?"
+    // Stats strip — shows the best score, the average, the card count,
+    // and a fourth Filtros cell summarizing the user's active preferences.
+    // Helps the user calibrate at a glance ("is the top match really
+    // good?") and discover that they have preference filters configured.
     const bestScore = topN[0]?.score ?? 0;
     const avgScore = Math.round(
       topN.reduce((sum, m) => sum + (m.score || 0), 0) / Math.max(1, topN.length)
     );
     const bestLevel = topN[0]?.level || "unknown";
+    // Build the Filtros cell. Each set preference contributes one icon —
+    // we keep it tiny so the 4-cell strip fits in the existing panel
+    // width. Click → opens Options with the preferences card focused.
+    const prefsIcons = [];
+    if (cachedPreferences?.city) prefsIcons.push("📍");
+    if (cachedPreferences?.modality && cachedPreferences.modality !== "any") prefsIcons.push("🏠");
+    if (Number.isFinite(cachedPreferences?.salaryMin) || Number.isFinite(cachedPreferences?.salaryMax)) prefsIcons.push("💰");
+    const filtersValue = prefsIcons.length
+      ? prefsIcons.join(" ")
+      : `<span class="eamx-matches-panel__stat-value--muted">Sin filtros</span>`;
+    const filtersTitle = prefsIcons.length
+      ? "Click para editar tus preferencias"
+      : "Click para configurar ciudad, modalidad y salario";
     const stats = `
-      <div class="eamx-matches-panel__stats">
+      <div class="eamx-matches-panel__stats eamx-matches-panel__stats--four">
         <div class="eamx-matches-panel__stat">
           <span class="eamx-matches-panel__stat-label">Mejor</span>
           <span class="eamx-matches-panel__stat-value eamx-matches-panel__stat-value--${bestLevel}">${bestScore}%</span>
@@ -1767,17 +1990,30 @@
           <span class="eamx-matches-panel__stat-label">Vistas</span>
           <span class="eamx-matches-panel__stat-value">${cards.length}</span>
         </div>
+        <button type="button" class="eamx-matches-panel__stat eamx-matches-panel__stat--clickable" data-action="open-preferences" title="${escapeHtml(filtersTitle)}">
+          <span class="eamx-matches-panel__stat-label">Filtros</span>
+          <span class="eamx-matches-panel__stat-value">${filtersValue}</span>
+        </button>
       </div>
     `;
     // Top-1 banner — calls out the single best match in this page so the
-    // user knows where to spend a quota slot if they only have time for one.
+    // user knows where to spend a quota slot if they only have time for
+    // one. Surfaces up to two of the top-1's reason lines so the user can
+    // see *why* the algorithm picked this one (e.g. skill match + city).
     const topItem = topN[0];
+    const topReasons = topItem
+      ? (Array.isArray(topItem.reasons) ? topItem.reasons : []).slice(0, 2)
+      : [];
+    const topReasonsLine = topReasons.length
+      ? `<div class="eamx-matches-panel__top1-reasons">✓ ${topReasons.map(escapeHtml).join(" · ")}</div>`
+      : "";
     const top1Banner = topItem
       ? `
         <div class="eamx-matches-panel__top1">
           <div class="eamx-matches-panel__top1-badge">🏆 Mejor match en esta página</div>
           <div class="eamx-matches-panel__top1-title">${escapeHtml(topItem.jobLite.title || "(sin título)")}</div>
           <div class="eamx-matches-panel__top1-company">${escapeHtml(topItem.jobLite.company || "")}</div>
+          ${topReasonsLine}
           <div class="eamx-matches-panel__top1-actions">
             <a href="${encodeURI(topItem.jobLite.url || "#")}" target="_blank" rel="noopener" class="eamx-matches-panel__top1-cta">Abrir mejor vacante →</a>
           </div>
@@ -1806,18 +2042,17 @@
 
     if (bulk) bulk.hidden = false;
 
-    // Show the "Cargar más" footer button only when LaPieza could
-    // plausibly have more vacancies to load. Heuristic: if the page
-    // ends near the document bottom (i.e. infinite scroll hasn't
-    // exhausted) AND we have at least 5 cards already visible.
+    // Show the "Buscar más amplio" button whenever we have enough cards
+    // visible to justify a wider sweep. We hide it when there are < 5
+    // cards because the user should fix their filters first; the auto-
+    // scroll loop won't summon vacancies that don't exist.
+    //
+    // Capped at 100 cards by the loop itself (see onMatchesWiderSearch),
+    // so we also hide the button once we hit that ceiling — there's no
+    // more headroom to grow.
     const loadMore = matchesPanelEl?.querySelector("[data-eamx-matches-loadmore]");
     if (loadMore) {
-      const docHeight = document.documentElement.scrollHeight;
-      const viewportBottom = window.scrollY + window.innerHeight;
-      const nearBottom = viewportBottom > docHeight - 200;
-      // If we're already at the bottom we've probably loaded everything;
-      // hide the button to avoid false hope. Otherwise show it.
-      loadMore.hidden = nearBottom && cards.length < 12;
+      loadMore.hidden = cards.length < 5 || cards.length >= 100;
     }
 
     // Wire the scroll re-populate handler when there are too few cards.
@@ -3136,6 +3371,14 @@
   let queueModule = null;
   let cachedProfile = null;
   let profileLoaded = false;
+  // Cached user preferences for ranking — { city, citySynonyms, modality,
+  // salaryMin, salaryMax, updatedAt }. Loaded lazily by loadPreferencesOnce
+  // and refreshed by chrome.storage.onChanged. Passed as the 3rd arg to
+  // matchScoreModule.computeMatchScore everywhere we score a card.
+  // Default null = "no preferences set" → legacy scoring.
+  const PREFERENCES_STORAGE_KEY = "eamx:preferences";
+  let cachedPreferences = null;
+  let preferencesLoaded = false;
   let listingObserver = null;
   let listingScanTimer = null;
 
@@ -3180,8 +3423,30 @@
     });
   }
 
+  // One-shot read of user preferences from chrome.storage.local. Same
+  // pattern as loadProfileOnce — null means "not configured", which the
+  // scorer treats as legacy mode (no city/modality/salary bonus). The
+  // storage.onChanged listener in watchProfileChanges keeps cachedPreferences
+  // fresh when the user updates them in the Options page.
+  function loadPreferencesOnce() {
+    if (preferencesLoaded) return Promise.resolve(cachedPreferences);
+    return new Promise((resolve) => {
+      try {
+        if (!chrome?.storage?.local) { preferencesLoaded = true; resolve(null); return; }
+        chrome.storage.local.get([PREFERENCES_STORAGE_KEY], (r) => {
+          const v = r && r[PREFERENCES_STORAGE_KEY];
+          cachedPreferences = (v && typeof v === "object") ? v : null;
+          preferencesLoaded = true;
+          resolve(cachedPreferences);
+        });
+      } catch (_) { preferencesLoaded = true; resolve(null); }
+    });
+  }
+
   // Watch for profile updates so the listing badges refresh after the user
-  // uploads a CV in another tab.
+  // uploads a CV in another tab. Also tracks preference changes — when the
+  // user updates their city/salary/modality in Options, the visible cards
+  // re-score and the matches panel re-renders if it's currently open.
   function watchProfileChanges() {
     try {
       if (!chrome?.storage?.onChanged) return;
@@ -3192,6 +3457,19 @@
           profileLoaded = true;
           // Re-score visible cards.
           scheduleListingScan(50);
+        }
+        if (changes[PREFERENCES_STORAGE_KEY]) {
+          // Preferences changed — refresh cache + re-score visible cards
+          // + re-render the matches panel if it's open. Sourced from any
+          // tab that wrote to chrome.storage.local.
+          const next = changes[PREFERENCES_STORAGE_KEY].newValue;
+          cachedPreferences = (next && typeof next === "object") ? next : null;
+          preferencesLoaded = true;
+          scheduleListingScan(50);
+          if (matchesPanelEl && document.documentElement.contains(matchesPanelEl)) {
+            // Best-effort — fail silently if the panel is mid-render.
+            try { renderMatchesPanelContent(); } catch (_) {}
+          }
         }
         if (changes["eamx:queue"]) {
           // Queue changed (likely from another tab via "Quitar"); re-render
@@ -3311,12 +3589,14 @@
       } catch (_) {}
 
       const jobLite = extractJobLiteFromCard(card, anchor);
-      // Score against the cached profile if we have one.
+      // Score against the cached profile if we have one. cachedPreferences
+      // is null until loadPreferencesOnce resolves — that's fine, the
+      // scorer treats null as "no preferences set" and skips the bonuses.
       let score = null;
       let reasons = [];
       let level = "unknown";
       if (cachedProfile && matchScoreModule) {
-        const r = matchScoreModule.computeMatchScore(cachedProfile, jobLite);
+        const r = matchScoreModule.computeMatchScore(cachedProfile, jobLite, cachedPreferences);
         score = r.score;
         reasons = r.reasons || [];
         level = matchScoreModule.levelForScore(score);
@@ -3539,7 +3819,7 @@
     // leak overlays into other routes.
     if (isListingPath()) {
       ensureDiscoveryDeps().then(() => {
-        loadProfileOnce().then(() => {
+        Promise.all([loadProfileOnce(), loadPreferencesOnce()]).then(() => {
           scheduleListingScan(150);
           startListingObserver();
         });
