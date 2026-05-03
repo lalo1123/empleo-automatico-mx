@@ -18,7 +18,7 @@ import {
   setQueue,
   QUEUE_STORAGE_KEY
 } from "../lib/queue.js";
-import { levelForScore, expandCitySynonyms } from "../lib/match-score.js";
+import { levelForScore, expandCitySynonyms, deriveImplicitPreferences } from "../lib/match-score.js";
 
 // ---------------------------------------------------------------------------
 // DOM shortcuts
@@ -964,8 +964,38 @@ async function init() {
     // Preferences live in chrome.storage.local too. We paint them BEFORE
     // refreshAuthState because the card is shown unconditionally (the
     // user can configure preferences without being logged in).
+    //
+    // First-run UX: when the user has uploaded a CV but never opened the
+    // preferences card, we pre-populate the form with values derived from
+    // the CV (city ← personal.location, salary ← summary/rawText scan,
+    // modality ← summary scan). The user sees sensible defaults instead
+    // of a blank form, and can confirm or adjust before clicking Save.
+    // We DON'T persist these auto-derived values until the user clicks
+    // Save — that way the saved-vs-implicit precedence stays clean.
     const prefs = await readPreferences();
-    paintPreferences(prefs);
+    if (prefs) {
+      paintPreferences(prefs);
+    } else if (profile) {
+      const implicit = deriveImplicitPreferences(profile);
+      paintPreferences({
+        city: implicit.city || "",
+        modality: implicit.modality || "any",
+        salaryMin: implicit.salaryMin || null,
+        salaryMax: implicit.salaryMax || null
+      });
+      // Visual hint: the status line shows the user we filled this in
+      // automatically. They click Save to persist.
+      if (preferencesStatus && (implicit.city || implicit.salaryMin || implicit.modality !== "any")) {
+        const bits = [];
+        if (implicit.city) bits.push(`ciudad: ${implicit.city}`);
+        if (implicit.modality && implicit.modality !== "any") bits.push(`modalidad: ${implicit.modality}`);
+        if (implicit.salaryMin || implicit.salaryMax) bits.push("salario");
+        preferencesStatus.textContent = `Detectado de tu CV (${bits.join(" · ")}). Guarda para confirmar.`;
+        preferencesStatus.className = "status status--info";
+      }
+    } else {
+      paintPreferences(null);
+    }
     maybeFocusPreferencesCard();
 
     if (profile) updatePreviewFromProfile(profile);

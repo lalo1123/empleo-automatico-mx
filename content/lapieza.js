@@ -1922,9 +1922,16 @@
 
     // Score every card. matchScoreModule is loaded by ensureDiscoveryDeps;
     // if it failed (rare, ad-blocker chains, etc.) we just sort by document
-    // order and fall back to the unknown level. cachedPreferences may be
-    // null — the scorer handles that as "no preferences set" and runs the
-    // legacy code path.
+    // order and fall back to the unknown level.
+    //
+    // effectivePrefs merges user-saved preferences with implicit defaults
+    // derived from the CV (city ← personal.location, salary ← summary or
+    // rawText, modality ← summary scan). Saved values always win when set;
+    // implicit values fill the gaps. Returns null when neither side has
+    // anything actionable, in which case the scorer runs the legacy path.
+    const effectivePrefs = (matchScoreModule && typeof matchScoreModule.effectivePreferences === "function")
+      ? matchScoreModule.effectivePreferences(cachedPreferences, cachedProfile)
+      : cachedPreferences;
     const scored = cards.map(({ anchor, card }) => {
       const jobLite = extractJobLiteFromCard(card, anchor);
       let score = 0;
@@ -1932,7 +1939,7 @@
       let level = "unknown";
       try {
         if (matchScoreModule) {
-          const r = matchScoreModule.computeMatchScore(cachedProfile, jobLite, cachedPreferences);
+          const r = matchScoreModule.computeMatchScore(cachedProfile, jobLite, effectivePrefs);
           score = r.score;
           reasons = r.reasons || [];
           level = matchScoreModule.levelForScore(score);
@@ -1966,10 +1973,15 @@
     // Build the Filtros cell. Each set preference contributes one icon —
     // we keep it tiny so the 4-cell strip fits in the existing panel
     // width. Click → opens Options with the preferences card focused.
+    // The Filtros cell reflects the EFFECTIVE prefs (saved + implicit
+    // from CV) — so even on first run, when the user hasn't opened the
+    // preferences card yet, they see "📍🏠💰" if their CV had enough
+    // signal for us to derive defaults.
+    const prefsForUi = effectivePrefs || cachedPreferences;
     const prefsIcons = [];
-    if (cachedPreferences?.city) prefsIcons.push("📍");
-    if (cachedPreferences?.modality && cachedPreferences.modality !== "any") prefsIcons.push("🏠");
-    if (Number.isFinite(cachedPreferences?.salaryMin) || Number.isFinite(cachedPreferences?.salaryMax)) prefsIcons.push("💰");
+    if (prefsForUi?.city) prefsIcons.push("📍");
+    if (prefsForUi?.modality && prefsForUi.modality !== "any") prefsIcons.push("🏠");
+    if (Number.isFinite(prefsForUi?.salaryMin) || Number.isFinite(prefsForUi?.salaryMax)) prefsIcons.push("💰");
     const filtersValue = prefsIcons.length
       ? prefsIcons.join(" ")
       : `<span class="eamx-matches-panel__stat-value--muted">Sin filtros</span>`;
@@ -3589,14 +3601,18 @@
       } catch (_) {}
 
       const jobLite = extractJobLiteFromCard(card, anchor);
-      // Score against the cached profile if we have one. cachedPreferences
-      // is null until loadPreferencesOnce resolves — that's fine, the
-      // scorer treats null as "no preferences set" and skips the bonuses.
+      // Score against cached profile + effective prefs (saved with
+      // CV-derived fallback). cachedPreferences may be null until
+      // loadPreferencesOnce resolves — effectivePreferences handles that
+      // and falls back to the implicit defaults from the CV.
       let score = null;
       let reasons = [];
       let level = "unknown";
       if (cachedProfile && matchScoreModule) {
-        const r = matchScoreModule.computeMatchScore(cachedProfile, jobLite, cachedPreferences);
+        const eff = (typeof matchScoreModule.effectivePreferences === "function")
+          ? matchScoreModule.effectivePreferences(cachedPreferences, cachedProfile)
+          : cachedPreferences;
+        const r = matchScoreModule.computeMatchScore(cachedProfile, jobLite, eff);
         score = r.score;
         reasons = r.reasons || [];
         level = matchScoreModule.levelForScore(score);
