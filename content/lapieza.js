@@ -1475,6 +1475,14 @@
   // can re-paint button states without re-running findVacancyCards.
   let matchesCurrentTopN = [];
 
+  // Wider-search accumulator. LaPieza paginates by REPLACING the cards on
+  // each page click — not appending — so a naive "click next 5 times then
+  // re-render" would leave us looking only at the final page's cards. We
+  // instead snapshot jobLites + scores after each page click and stash
+  // them here, keyed by id, so the render path can use the cumulative
+  // pool. Cleared on panel close + on SPA route change.
+  let widerSearchPool = null; // null = use live cards; Map = use accumulated pool
+
   /**
    * Open the best-matches shortlist panel on a LaPieza listing page.
    *
@@ -1581,6 +1589,10 @@
       matchesScrollDebounce = null;
     }
     matchesCurrentTopN = [];
+    // Drop the wider-search pool on close so the next panel open starts
+    // fresh from live cards. The user can click "Buscar más amplio" again
+    // if they want to re-aggregate.
+    widerSearchPool = null;
     try { matchesPanelEl.classList.remove("eamx-matches-panel--open"); } catch (_) {}
     const node = matchesPanelEl;
     matchesPanelEl = null;
@@ -1757,66 +1769,120 @@
    * Caps: 5 pages × ~12 vacantes/page ≈ 60 candidatos. Inter-page delay of
    * 800ms (human-paced) keeps us off any "too fast" detection.
    */
+  // Snapshot the live cards on the current page into a {id → entry} map.
+  // Used by the wider-search loop to build a cumulative pool because
+  // LaPieza's MUI Pagination REPLACES (not appends) cards on each page
+  // change — so without this snapshotting we'd only ever see the last
+  // page after the loop finishes.
+  function snapshotCurrentCardsAsPoolEntries() {
+    let cards;
+    try { cards = findAllVacancyCards() || []; } catch (_) { cards = []; }
+    const out = [];
+    const effectivePrefs = (matchScoreModule && typeof matchScoreModule.effectivePreferences === "function")
+      ? matchScoreModule.effectivePreferences(cachedPreferences, cachedProfile)
+      : cachedPreferences;
+    for (const { anchor, card } of cards) {
+      const jobLite = extractJobLiteFromCard(card, anchor);
+      if (!jobLite || !jobLite.id) continue;
+      let score = 0, reasons = [], level = "unknown";
+      try {
+        if (matchScoreModule && cachedProfile) {
+          const r = matchScoreModule.computeMatchScore(cachedProfile, jobLite, effectivePrefs);
+          score = r.score;
+          reasons = r.reasons || [];
+          level = matchScoreModule.levelForScore(score);
+        }
+      } catch (_) { /* leave defaults */ }
+      out.push({ jobLite, score, reasons, level });
+    }
+    return out;
+  }
+
   async function onMatchesWiderSearch(btn) {
     if (!btn || btn.disabled) return;
     const original = btn.textContent;
     btn.disabled = true;
-    const MAX_PAGES = 5;
+    // 14 covers the typical full LaPieza listing (we saw 14 pages live).
+    // Each page is ~12 cards = ~168 vacantes total. The cumulative pool
+    // map dedupes by id so re-visiting a page (e.g. when the loop bails
+    // and restarts) doesn't double-count.
+    const MAX_PAGES = 14;
     const PER_PAGE_TIMEOUT_MS = 4000;
     const POLL_INTERVAL_MS = 300;
-    const INTER_PAGE_DELAY_MS = 800;
+    const INTER_PAGE_DELAY_MS = 700;
+    // Cumulative pool, keyed by jobLite.id. Survives page-change
+    // unmounting because we extract jobLites BEFORE clicking next.
+    const pool = new Map();
+    // Seed the pool with whatever's on screen right now (page 1 worth).
+    for (const entry of snapshotCurrentCardsAsPoolEntries()) {
+      pool.set(entry.jobLite.id, entry);
+    }
     let stallStreak = 0;
-    let lastCount = countAllVacancyAnchors();
+    let lastFirstAnchorHref = "";
     try {
       for (let page = 1; page <= MAX_PAGES; page++) {
-        btn.textContent = `Buscando página ${page}/${MAX_PAGES}…`;
+        btn.textContent = `Página ${page}/${MAX_PAGES} · ${pool.size} vacantes`;
         const nextBtn = findLaPiezaNextPageButton();
-        if (!nextBtn) {
-          // No more pagination — either single-page result or we hit the end.
-          break;
-        }
-        // Fire React's onClick — LaPieza handles the page change internally,
-        // hydrates new vacancy cards, and updates the pagination state.
+        if (!nextBtn) break; // single-page result, stop early
+        // Capture the first anchor's href BEFORE click so we can confirm
+        // LaPieza actually changed the cards (not just re-rendered the
+        // same set). On the last page this stays the same → we bail.
+        try {
+          const firstAnchor = document.querySelector("a.vacancy-card-link[href]");
+          lastFirstAnchorHref = firstAnchor?.getAttribute("href") || "";
+        } catch (_) { lastFirstAnchorHref = ""; }
+        // Fire React's onClick.
         try { nextBtn.click(); } catch (_) { /* should never throw */ }
-        // Poll for the new cards to land. We compare against pre-click count
-        // so we don't wait pointlessly when LaPieza re-renders without
-        // changing the card pool (rare, but happens on filter mismatch).
+        // Poll until the first card's href changes (= page swapped) or
+        // the pool grows (defensive). 300ms × ~13 polls = ~4s timeout.
         const polls = Math.max(1, Math.round(PER_PAGE_TIMEOUT_MS / POLL_INTERVAL_MS));
-        let grew = false;
+        let pageChanged = false;
         for (let p = 0; p < polls; p++) {
           await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
-          const now = countAllVacancyAnchors();
-          if (now > lastCount) {
-            lastCount = now;
-            grew = true;
+          let firstNow = "";
+          try {
+            const a = document.querySelector("a.vacancy-card-link[href]");
+            firstNow = a?.getAttribute("href") || "";
+          } catch (_) {}
+          if (firstNow && firstNow !== lastFirstAnchorHref) {
+            pageChanged = true;
             break;
           }
         }
-        if (!grew) {
+        if (!pageChanged) {
           stallStreak++;
-          // Two consecutive stalls = LaPieza didn't paginate. Bail out
-          // rather than spinning. This usually means we're already on the
-          // last page or the next button is mid-disabled state.
+          if (stallStreak >= 2) break;
+          continue;
+        }
+        stallStreak = 0;
+        // Snapshot this page's cards into the cumulative pool.
+        const before = pool.size;
+        for (const entry of snapshotCurrentCardsAsPoolEntries()) {
+          pool.set(entry.jobLite.id, entry);
+        }
+        const grew = pool.size > before;
+        if (!grew) {
+          // Page changed but no new ids — listing duplicated or our
+          // dedup caught all entries (e.g. featured posts repeated).
+          // Bail rather than spinning forever.
+          stallStreak++;
           if (stallStreak >= 2) break;
         } else {
           stallStreak = 0;
         }
-        // Human-paced pause between pages.
+        // Human-paced pause between pages so we don't hammer LaPieza's
+        // search backend.
         await new Promise((r) => setTimeout(r, INTER_PAGE_DELAY_MS));
       }
-      // Re-rank the now-larger card set. renderMatchesPanelContent picks
-      // up the new findVacancyCards count + cachedPreferences.
+      // Activate the pool for the panel render. renderMatchesPanelContent
+      // checks widerSearchPool first and uses it instead of live cards.
+      widerSearchPool = pool;
       await renderMatchesPanelContent();
-      // Toast summary — countAllVacancyAnchors gives the true total
-      // including any cards we've now overlaid, which findVacancyCards
-      // would silently exclude. matchesCurrentTopN is set by render() so
-      // the best score in the toast matches what the user just saw.
-      const total = countAllVacancyAnchors();
       const best = matchesCurrentTopN[0]?.score ?? 0;
       toast(
-        `Análisis ampliado: ${total} vacantes consideradas, mejor match ${best}%`,
+        `Análisis ampliado: ${pool.size} vacantes consideradas, mejor match ${best}%`,
         "success",
-        { durationMs: 4000 }
+        { durationMs: 4500 }
       );
     } catch (err) {
       console.warn("[EmpleoAutomatico] wider search failed", err);
@@ -1932,21 +1998,47 @@
     const effectivePrefs = (matchScoreModule && typeof matchScoreModule.effectivePreferences === "function")
       ? matchScoreModule.effectivePreferences(cachedPreferences, cachedProfile)
       : cachedPreferences;
-    const scored = cards.map(({ anchor, card }) => {
-      const jobLite = extractJobLiteFromCard(card, anchor);
-      let score = 0;
-      let reasons = [];
-      let level = "unknown";
-      try {
-        if (matchScoreModule) {
-          const r = matchScoreModule.computeMatchScore(cachedProfile, jobLite, effectivePrefs);
-          score = r.score;
-          reasons = r.reasons || [];
-          level = matchScoreModule.levelForScore(score);
-        }
-      } catch (_) { /* keep defaults */ }
-      return { jobLite, anchor, card, score, reasons, level };
-    });
+    // Build the scored set. Two paths:
+    //   A) If we have a wider-search pool (user clicked "Buscar más amplio"
+    //      and we accumulated jobLites across multiple LaPieza pages),
+    //      use that — it has more vacancies than the current visible page.
+    //   B) Otherwise, score the live cards on screen.
+    let scored;
+    if (widerSearchPool && widerSearchPool.size) {
+      // Pool entries already have score + reasons from the moment they were
+      // accumulated, so we re-score with the latest preferences (cheap) and
+      // pass through. anchor/card live refs are null because past pages
+      // have been unmounted by LaPieza's pagination — that's fine, the
+      // panel doesn't need them, and "Abrir vacante" uses the URL.
+      scored = Array.from(widerSearchPool.values()).map((entry) => {
+        let score = entry.score, reasons = entry.reasons || [], level = entry.level || "unknown";
+        try {
+          if (matchScoreModule) {
+            const r = matchScoreModule.computeMatchScore(cachedProfile, entry.jobLite, effectivePrefs);
+            score = r.score;
+            reasons = r.reasons || [];
+            level = matchScoreModule.levelForScore(score);
+          }
+        } catch (_) { /* keep entry defaults */ }
+        return { jobLite: entry.jobLite, anchor: null, card: null, score, reasons, level };
+      });
+    } else {
+      scored = cards.map(({ anchor, card }) => {
+        const jobLite = extractJobLiteFromCard(card, anchor);
+        let score = 0;
+        let reasons = [];
+        let level = "unknown";
+        try {
+          if (matchScoreModule) {
+            const r = matchScoreModule.computeMatchScore(cachedProfile, jobLite, effectivePrefs);
+            score = r.score;
+            reasons = r.reasons || [];
+            level = matchScoreModule.levelForScore(score);
+          }
+        } catch (_) { /* keep defaults */ }
+        return { jobLite, anchor, card, score, reasons, level };
+      });
+    }
 
     // Sort by score desc, then take 25. We doubled the cap from the
     // original 10 because v1 testing showed users want a wider shortlist
