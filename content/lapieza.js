@@ -1509,9 +1509,12 @@
         <h2>🎯 Mejores matches en esta página</h2>
         <button type="button" class="eamx-matches-panel__close" aria-label="Cerrar">✕</button>
       </header>
-      <p class="eamx-matches-panel__lead">Top 10 vacantes ordenadas por afinidad con tu CV. Tú decides a cuáles postular.</p>
+      <p class="eamx-matches-panel__lead">Top 25 vacantes ordenadas por afinidad con tu CV. Tú decides a cuáles postular.</p>
       <div class="eamx-matches-panel__content" data-eamx-matches-content>
         <div class="eamx-matches-panel__loading">Analizando vacantes…</div>
+      </div>
+      <div class="eamx-matches-panel__loadmore" data-eamx-matches-loadmore hidden>
+        <button type="button" class="eamx-matches-panel__loadmore-btn" data-action="load-more">⬇ Cargar más vacantes de LaPieza</button>
       </div>
       <div class="eamx-matches-panel__bulk" data-eamx-matches-bulk hidden>
         <button type="button" class="eamx-matches-panel__bulk-btn" data-action="mark-top-5">⭐ Marcar top 5 de un solo clic</button>
@@ -1621,7 +1624,44 @@
       renderMatchesPanelContent();
       return;
     }
+    if (what === "load-more") {
+      ev.preventDefault();
+      onMatchesLoadMore(action);
+      return;
+    }
     // "open" links are real <a target="_blank"> — let the browser handle them.
+  }
+
+  // Trigger LaPieza's own infinite scroll by scrolling the host page to the
+  // bottom, wait for new cards to render, then re-rank. We never fetch
+  // additional pages programmatically — only nudge LaPieza's existing UI.
+  async function onMatchesLoadMore(btn) {
+    if (!btn || btn.disabled) return;
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "Cargando…";
+    try {
+      const before = findVacancyCards().length + (matchesCurrentTopN?.length || 0);
+      // Scroll the body to the bottom — LaPieza listens for this and
+      // hydrates the next page of vacancies into the same DOM.
+      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "smooth" });
+      // Poll up to 4 seconds (8 × 500ms) for new cards to render. We bail
+      // as soon as we detect any growth.
+      for (let i = 0; i < 8; i++) {
+        await new Promise((r) => setTimeout(r, 500));
+        const now = findVacancyCards().length + (matchesCurrentTopN?.length || 0);
+        if (now > before) break;
+      }
+      // Restore scroll position so the user doesn't lose context of the panel.
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      // Re-rank the now-larger card set.
+      await renderMatchesPanelContent();
+    } catch (err) {
+      console.warn("[EmpleoAutomatico] load more failed", err);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = original || "⬇ Cargar más vacantes de LaPieza";
+    }
   }
 
   // Render the content area. Idempotent — can be called repeatedly (e.g.
@@ -1692,20 +1732,63 @@
       return { jobLite, anchor, card, score, reasons, level };
     });
 
-    // Sort by score desc, then take 10. Stable sort via index tiebreaker.
+    // Sort by score desc, then take 25. We doubled the cap from the
+    // original 10 because v1 testing showed users want a wider shortlist
+    // — at 10 the panel hides quality candidates that scored mid-tier.
+    // The "Cargar más" footer button triggers LaPieza's own infinite-
+    // scroll so the cap can keep growing as the user fetches more pages.
     scored.sort((a, b) => (b.score - a.score) || 0);
-    const topN = scored.slice(0, 10);
+    const topN = scored.slice(0, 25);
     matchesCurrentTopN = topN;
 
     // Render
     const lowFitNote = topN.every((m) => m.score < 30)
       ? `<div class="eamx-matches-panel__note">Pocas vacantes en esta página coinciden con tu perfil. Prueba con otros filtros o con palabras clave.</div>`
       : "";
+    // Stats strip — shows the best score, the average, and the count.
+    // Helps the user calibrate at a glance: "is the top match really
+    // good, or is everything middling today?"
+    const bestScore = topN[0]?.score ?? 0;
+    const avgScore = Math.round(
+      topN.reduce((sum, m) => sum + (m.score || 0), 0) / Math.max(1, topN.length)
+    );
+    const bestLevel = topN[0]?.level || "unknown";
+    const stats = `
+      <div class="eamx-matches-panel__stats">
+        <div class="eamx-matches-panel__stat">
+          <span class="eamx-matches-panel__stat-label">Mejor</span>
+          <span class="eamx-matches-panel__stat-value eamx-matches-panel__stat-value--${bestLevel}">${bestScore}%</span>
+        </div>
+        <div class="eamx-matches-panel__stat">
+          <span class="eamx-matches-panel__stat-label">Promedio</span>
+          <span class="eamx-matches-panel__stat-value">${avgScore}%</span>
+        </div>
+        <div class="eamx-matches-panel__stat">
+          <span class="eamx-matches-panel__stat-label">Vistas</span>
+          <span class="eamx-matches-panel__stat-value">${cards.length}</span>
+        </div>
+      </div>
+    `;
+    // Top-1 banner — calls out the single best match in this page so the
+    // user knows where to spend a quota slot if they only have time for one.
+    const topItem = topN[0];
+    const top1Banner = topItem
+      ? `
+        <div class="eamx-matches-panel__top1">
+          <div class="eamx-matches-panel__top1-badge">🏆 Mejor match en esta página</div>
+          <div class="eamx-matches-panel__top1-title">${escapeHtml(topItem.jobLite.title || "(sin título)")}</div>
+          <div class="eamx-matches-panel__top1-company">${escapeHtml(topItem.jobLite.company || "")}</div>
+          <div class="eamx-matches-panel__top1-actions">
+            <a href="${encodeURI(topItem.jobLite.url || "#")}" target="_blank" rel="noopener" class="eamx-matches-panel__top1-cta">Abrir mejor vacante →</a>
+          </div>
+        </div>
+      `
+      : "";
     const list = topN.map((m, i) => renderMatchItem(m, i + 1)).join("");
     const footer = cards.length < 5
       ? `<p class="eamx-matches-panel__hint">Scroll para más vacantes.</p>`
       : "";
-    host.innerHTML = `${lowFitNote}<ol class="eamx-matches-list">${list}</ol>${footer}`;
+    host.innerHTML = `${stats}${top1Banner}${lowFitNote}<ol class="eamx-matches-list">${list}</ol>${footer}`;
 
     // Resolve initial marked state for each row asynchronously. We render
     // optimistic "⭐ Marcar" first, then upgrade to "✓ Marcada" once the
@@ -1722,6 +1805,20 @@
     }
 
     if (bulk) bulk.hidden = false;
+
+    // Show the "Cargar más" footer button only when LaPieza could
+    // plausibly have more vacancies to load. Heuristic: if the page
+    // ends near the document bottom (i.e. infinite scroll hasn't
+    // exhausted) AND we have at least 5 cards already visible.
+    const loadMore = matchesPanelEl?.querySelector("[data-eamx-matches-loadmore]");
+    if (loadMore) {
+      const docHeight = document.documentElement.scrollHeight;
+      const viewportBottom = window.scrollY + window.innerHeight;
+      const nearBottom = viewportBottom > docHeight - 200;
+      // If we're already at the bottom we've probably loaded everything;
+      // hide the button to avoid false hope. Otherwise show it.
+      loadMore.hidden = nearBottom && cards.length < 12;
+    }
 
     // Wire the scroll re-populate handler when there are too few cards.
     if (cards.length < 5) attachMatchesScrollHandler();

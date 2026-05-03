@@ -2417,6 +2417,139 @@
 
 .eamx-matches-panel__bulk[hidden] { display: none; }
 
+/* Stats strip at the top of the matches list — Mejor / Promedio / Vistas.
+   Three equal-width cells, monospace digits for alignment, color-coded
+   "Mejor" value reusing the same level scale as the per-item badges. */
+.eamx-matches-panel__stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  margin: 0 4px 14px 4px;
+  padding: 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.eamx-matches-panel__stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.eamx-matches-panel__stat-label {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #94a3b8;
+}
+
+.eamx-matches-panel__stat-value {
+  font: 700 19px/1 var(--eamx-font-mono, ui-monospace, "SF Mono", monospace);
+  color: #f1f5f9;
+}
+
+.eamx-matches-panel__stat-value--high  { color: #4ade80; }
+.eamx-matches-panel__stat-value--mid   { color: #70d1c6; }
+.eamx-matches-panel__stat-value--low   { color: #fbbf24; }
+.eamx-matches-panel__stat-value--poor  { color: #94a3b8; }
+
+/* Top-1 banner — gold/cyan highlight for the single best match so the
+   user knows where to spend a quota slot if they only do one today. */
+.eamx-matches-panel__top1 {
+  margin: 0 4px 14px 4px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(112, 209, 198, 0.18) 0%, rgba(255, 102, 0, 0.10) 100%);
+  border: 1px solid rgba(112, 209, 198, 0.35);
+  box-shadow: 0 4px 16px rgba(15, 29, 44, 0.4);
+}
+
+.eamx-matches-panel__top1-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffd166;
+  font: 700 11px/1.5 inherit;
+  letter-spacing: 0.02em;
+  margin-bottom: 8px;
+}
+
+.eamx-matches-panel__top1-title {
+  font: 700 15px/1.3 inherit;
+  color: #f1f5f9;
+  margin-bottom: 2px;
+}
+
+.eamx-matches-panel__top1-company {
+  font: 500 12.5px/1.3 inherit;
+  color: #cbd5e1;
+  margin-bottom: 10px;
+}
+
+.eamx-matches-panel__top1-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.eamx-matches-panel__top1-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: var(--eamx-c-flame-500, #ff6600);
+  color: #ffffff;
+  font: 700 12.5px/1 inherit;
+  text-decoration: none;
+  transition: background 120ms ease, transform 120ms ease;
+}
+
+.eamx-matches-panel__top1-cta:hover {
+  background: #ff7a1f;
+  transform: translateY(-1px);
+}
+
+/* "⬇ Cargar más vacantes" footer — sits between the list and the bulk
+   action card so the user can grow the candidate pool before deciding
+   what to mark. Styled as a ghost button to avoid competing with the
+   primary "Marcar top 5" CTA below it. */
+.eamx-matches-panel__loadmore {
+  flex-shrink: 0;
+  padding: 12px 22px 4px 22px;
+}
+
+.eamx-matches-panel__loadmore[hidden] { display: none; }
+
+.eamx-matches-panel__loadmore-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 10px 16px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.05);
+  color: #f1f5f9;
+  font: 600 13px/1 inherit;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.eamx-matches-panel__loadmore-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.32);
+}
+
+.eamx-matches-panel__loadmore-btn:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
 .eamx-matches-panel__bulk-btn {
   appearance: none;
   display: inline-flex;
