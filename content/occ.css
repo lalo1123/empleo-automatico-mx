@@ -9,7 +9,10 @@
 .eamx-fab,
 .eamx-panel,
 .eamx-toast,
-.eamx-cv-card {
+.eamx-cv-card,
+.eamx-matches-panel,
+.eamx-card-overlay,
+.eamx-mark-btn {
   /* Brand */
   --eamx-c-brand-50: #ecfaf7;
   --eamx-c-brand-100: #d2f3ec;
