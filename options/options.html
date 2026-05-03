@@ -254,6 +254,33 @@
         </ol>
       </section>
 
+      <!-- ============ Card: Mi cola de postulación ============ -->
+      <!--
+        Discovery / pre-selection queue. Populated by the listing-page
+        overlay on LaPieza (content/lapieza.js → onMarkClick) — clicking
+        the ⭐ Marcar button on a vacancy card writes the entry to
+        chrome.storage.local["eamx:queue"]. This card mirrors the same
+        key. NEVER auto-submits — HITL always: the user opens each
+        vacancy and clicks the FAB themselves.
+      -->
+      <section class="card is-hidden" id="queue-section" aria-labelledby="queueHeading">
+        <div class="card__head">
+          <div class="card__eyebrow">Descubrimiento</div>
+          <h2 id="queueHeading">&#11088; Mi cola de postulaci&oacute;n</h2>
+          <p class="card__sub">
+            Vacantes que marcaste para revisar despu&eacute;s. La extensi&oacute;n NO postula sola &mdash; t&uacute; abres cada una y le das al FAB cuando quieras aplicar.
+          </p>
+        </div>
+        <div id="queue-empty" class="queue-empty">
+          No has marcado vacantes. Ve a LaPieza y dale al bot&oacute;n <strong>&#11088; Marcar</strong> en las que te interesen.
+        </div>
+        <ul id="queue-list" class="queue-list" role="list" hidden></ul>
+        <div class="queue-actions" id="queue-actions" hidden>
+          <button class="btn btn--ghost btn--sm" id="queue-clear" type="button">Vaciar cola</button>
+          <span id="queue-status" class="status" role="status" aria-live="polite"></span>
+        </div>
+      </section>
+
       <!-- ============ Card 2: CV ============ -->
       <section class="card" aria-labelledby="cvHeading">
         <div class="card__head">

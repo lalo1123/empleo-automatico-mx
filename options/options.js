@@ -12,6 +12,13 @@ import {
   nowISO
 } from "../lib/schemas.js";
 import { sendMessage } from "../lib/messaging.js";
+import {
+  getQueue,
+  removeFromQueue,
+  setQueue,
+  QUEUE_STORAGE_KEY
+} from "../lib/queue.js";
+import { levelForScore } from "../lib/match-score.js";
 
 // ---------------------------------------------------------------------------
 // DOM shortcuts
@@ -598,6 +605,173 @@ if (expressModeOnInput) expressModeOnInput.addEventListener("change", onExpressM
 if (expressModeOffInput) expressModeOffInput.addEventListener("change", onExpressModeChange);
 
 // ---------------------------------------------------------------------------
+// "Mi cola" — discovery queue rendered from chrome.storage.local["eamx:queue"]
+// Populated by content/lapieza.js → onMarkClick. We never write here except
+// for "Quitar" (single-item delete) and "Vaciar cola" (clear). Listens to
+// chrome.storage.onChanged so any tab's mark/unmark reflects instantly.
+// ---------------------------------------------------------------------------
+
+const queueSection = $("queue-section");
+const queueListEl = $("queue-list");
+const queueEmptyEl = $("queue-empty");
+const queueActionsEl = $("queue-actions");
+const queueClearBtn = $("queue-clear");
+const queueStatusEl = $("queue-status");
+
+// Pretty source labels — keep in sync with SOURCES in lib/schemas.js. We
+// avoid importing those constants because the strings are user-facing.
+const QUEUE_SOURCE_LABELS = {
+  lapieza: "LaPieza",
+  occ: "OCC",
+  computrabajo: "Computrabajo",
+  bumeran: "Bumeran",
+  indeed: "Indeed",
+  linkedin: "LinkedIn"
+};
+
+function escapeHtml(s) {
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+// Match the relative-time format used by content/lapieza.js so the user
+// sees consistent copy across the extension.
+//   <60s  "hace un momento"
+//   <60m  "hace X min"
+//   <24h  "hace X h"
+//   else  "hace X días"
+function queueRelative(ts) {
+  if (!Number.isFinite(ts)) return "hace un momento";
+  const delta = Date.now() - ts;
+  if (delta < 0) return "hace un momento";
+  const sec = Math.floor(delta / 1000);
+  if (sec < 60) return "hace un momento";
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `hace ${min} min`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `hace ${hr} h`;
+  const days = Math.floor(hr / 24);
+  return `hace ${days} días`;
+}
+
+function renderQueueItem(item) {
+  const score = Number.isFinite(item.matchScore) ? Math.max(0, Math.min(100, item.matchScore | 0)) : 0;
+  const level = levelForScore(score);
+  const reasonsText = Array.isArray(item.reasons) && item.reasons.length
+    ? item.reasons.slice(0, 3).join(" · ")
+    : "";
+  const sourceLabel = QUEUE_SOURCE_LABELS[item.source] || item.source || "";
+  const companyLine = [item.company, item.location, sourceLabel]
+    .map((s) => (s || "").trim())
+    .filter(Boolean)
+    .join(" · ");
+
+  const li = document.createElement("li");
+  li.className = "queue-item";
+  li.setAttribute("data-id", item.id || "");
+  li.setAttribute("data-source", item.source || "");
+  li.innerHTML = `
+    <div class="queue-item__head">
+      <span class="queue-item__score queue-item__score--${escapeHtml(level)}">${score}%</span>
+      <a class="queue-item__title" href="${escapeHtml(item.url || "#")}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.title || "(sin título)")}</a>
+    </div>
+    <div class="queue-item__company">${escapeHtml(companyLine || "—")}</div>
+    ${reasonsText ? `<div class="queue-item__reasons">${escapeHtml(reasonsText)}</div>` : ""}
+    <div class="queue-item__foot">
+      <span class="queue-item__when">Marcada ${escapeHtml(queueRelative(item.savedAt))}</span>
+      <button class="queue-item__remove" type="button" data-id="${escapeHtml(item.id || "")}" data-source="${escapeHtml(item.source || "")}">Quitar</button>
+    </div>
+  `;
+  return li;
+}
+
+async function paintQueue() {
+  if (!queueSection) return;
+  let queue = [];
+  try { queue = await getQueue(); } catch (_) { queue = []; }
+
+  // Show/hide the entire section depending on whether the user is logged in
+  // (we keep it hidden in the logged-out shell). This is a soft gate — if
+  // they ever marked a vacancy and then logged out, the queue still survives
+  // in storage; we just don't surface it until they're back in.
+  queueSection.classList.remove("is-hidden");
+
+  if (!queue.length) {
+    queueEmptyEl.hidden = false;
+    queueListEl.hidden = true;
+    queueListEl.innerHTML = "";
+    queueActionsEl.hidden = true;
+    return;
+  }
+
+  // Sort newest-first so the user sees their most-recent marks at the top.
+  const sorted = queue.slice().sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0));
+
+  queueEmptyEl.hidden = true;
+  queueListEl.hidden = false;
+  queueActionsEl.hidden = false;
+  queueListEl.innerHTML = "";
+  for (const item of sorted) {
+    queueListEl.appendChild(renderQueueItem(item));
+  }
+}
+
+// Single delegated click handler — fewer listeners as the queue mutates.
+if (queueListEl) {
+  queueListEl.addEventListener("click", async (ev) => {
+    const target = ev.target;
+    if (!(target instanceof HTMLElement)) return;
+    const btn = target.closest(".queue-item__remove");
+    if (!btn) return;
+    const id = btn.getAttribute("data-id");
+    const source = btn.getAttribute("data-source");
+    if (!id || !source) return;
+    btn.disabled = true;
+    try {
+      await removeFromQueue(id, source);
+      await paintQueue();
+    } catch (e) {
+      setStatus(queueStatusEl, "err", e?.message || "No se pudo quitar");
+    } finally {
+      btn.disabled = false;
+    }
+  });
+}
+
+if (queueClearBtn) {
+  queueClearBtn.addEventListener("click", async () => {
+    const ok = window.confirm("¿Vaciar la cola completa? Esto no afecta tus postulaciones reales.");
+    if (!ok) return;
+    queueClearBtn.disabled = true;
+    try {
+      await setQueue([]);
+      await paintQueue();
+      setStatus(queueStatusEl, "ok", "Cola vaciada");
+    } catch (e) {
+      setStatus(queueStatusEl, "err", e?.message || "No se pudo vaciar");
+    } finally {
+      queueClearBtn.disabled = false;
+    }
+  });
+}
+
+// chrome.storage.onChanged keeps the options view in sync with whatever
+// the LaPieza content script is doing in another tab. We re-render only
+// when the queue key changes — no point repainting on every storage write.
+try {
+  if (chrome?.storage?.onChanged) {
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area !== "local") return;
+      if (changes[QUEUE_STORAGE_KEY]) paintQueue();
+    });
+  }
+} catch (_) { /* ignore */ }
+
+// ---------------------------------------------------------------------------
 // Initial load
 // ---------------------------------------------------------------------------
 
@@ -619,6 +793,9 @@ async function init() {
     if (profile) updatePreviewFromProfile(profile);
     await refreshExistingBanner();
     await refreshAuthState();
+    // Queue paints last — it depends on chrome.storage.local, not on any
+    // backend state, so it's safe even when offline / logged out.
+    await paintQueue();
   } catch (e) {
     setStatus(accountStatus, "err", `Error al cargar: ${e.message}`);
   }

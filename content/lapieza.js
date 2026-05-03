@@ -2416,12 +2416,414 @@
   }
 
   // =========================================================================
+  // Discovery & Queue — listing page badges + queue marker
+  // =========================================================================
+  // On LaPieza listing routes (/vacantes, /vacancies, /comunidad/jobs, /),
+  // we walk the DOM finding vacancy cards, score each one against the
+  // user's profile via lib/match-score.js, and inject a small overlay
+  // (badge + Marcar button). The button writes to chrome.storage.local
+  // under "eamx:queue" via lib/queue.js. The options page renders the
+  // same key. Defensive everywhere — the React DOM here re-renders often.
+
+  const LISTING_PATH_RX = [
+    /^\/?$/,                      // home (with "Últimas publicaciones")
+    /^\/vacantes\/?$/i,
+    /^\/vacancies\/?$/i,
+    /^\/comunidad\/?(jobs|empleos)?\/?$/i,
+    /^\/jobs\/?$/i,
+    /^\/empleos\/?$/i
+  ];
+
+  // The single most stable signal for "this is a vacancy card": an <a>
+  // whose href contains /vacancy/<uuid> (or the Spanish variant). UUIDs
+  // are loose (8+ hex/dashes) to tolerate truncation in the route.
+  const VACANCY_ANCHOR_RX = /\/(?:vacancy|vacante)\/([a-f0-9][a-f0-9-]{7,})/i;
+
+  // Module-scoped lazy-loaded helpers. We dynamic-import lib/match-score.js
+  // and lib/queue.js the same way we do schemas.js — content scripts can't
+  // use static ES imports declared in the manifest.
+  let matchScoreModule = null;
+  let queueModule = null;
+  let cachedProfile = null;
+  let profileLoaded = false;
+  let listingObserver = null;
+  let listingScanTimer = null;
+
+  function isListingPath() {
+    const path = location.pathname || "";
+    return LISTING_PATH_RX.some((re) => re.test(path));
+  }
+
+  // Lazy-load lib/match-score and lib/queue. Returns a boolean indicating
+  // whether both are available. Failures are silent — the caller falls back
+  // to an "unknown" badge state when the modules aren't loaded.
+  async function ensureDiscoveryDeps() {
+    if (matchScoreModule && queueModule) return true;
+    try {
+      if (!matchScoreModule) {
+        matchScoreModule = await import(chrome.runtime.getURL("lib/match-score.js"));
+      }
+      if (!queueModule) {
+        queueModule = await import(chrome.runtime.getURL("lib/queue.js"));
+      }
+      return !!(matchScoreModule && queueModule);
+    } catch (err) {
+      console.warn("[EmpleoAutomatico] discovery deps load failed", err);
+      return false;
+    }
+  }
+
+  // One-shot read of the user profile from chrome.storage.local. The key
+  // is "userProfile" (STORAGE_KEYS.PROFILE in lib/schemas.js). We cache the
+  // result so listing scans are zero-cost; storage.onChanged refreshes it.
+  function loadProfileOnce() {
+    if (profileLoaded) return Promise.resolve(cachedProfile);
+    return new Promise((resolve) => {
+      try {
+        if (!chrome?.storage?.local) { profileLoaded = true; resolve(null); return; }
+        chrome.storage.local.get(["userProfile"], (r) => {
+          cachedProfile = (r && r.userProfile) || null;
+          profileLoaded = true;
+          resolve(cachedProfile);
+        });
+      } catch (_) { profileLoaded = true; resolve(null); }
+    });
+  }
+
+  // Watch for profile updates so the listing badges refresh after the user
+  // uploads a CV in another tab.
+  function watchProfileChanges() {
+    try {
+      if (!chrome?.storage?.onChanged) return;
+      chrome.storage.onChanged.addListener((changes, area) => {
+        if (area !== "local") return;
+        if (changes.userProfile) {
+          cachedProfile = changes.userProfile.newValue || null;
+          profileLoaded = true;
+          // Re-score visible cards.
+          scheduleListingScan(50);
+        }
+        if (changes["eamx:queue"]) {
+          // Queue changed (likely from another tab via "Quitar"); re-render
+          // the Marcar buttons so they reflect the new state.
+          scheduleListingScan(50);
+        }
+      });
+    } catch (_) { /* ignore */ }
+  }
+
+  // Walk up from a vacancy <a> to its visual card root. We pick the closest
+  // ancestor that is (a) block/flex display, (b) at least 80px tall, (c)
+  // contains a heading. Bail at 8 levels — beyond that we'd just be picking
+  // up sidebar containers.
+  function findCardRoot(anchor) {
+    let p = anchor.parentElement;
+    let depth = 0;
+    while (p && depth < 8) {
+      try {
+        const cs = getComputedStyle(p);
+        if (cs.display === "block" || cs.display === "flex" || cs.display === "grid") {
+          const rect = p.getBoundingClientRect();
+          const tall = rect.height > 80;
+          const hasH = !!p.querySelector("h1, h2, h3, h4, [class*='title' i]");
+          if (tall && hasH) return p;
+        }
+      } catch (_) { /* getComputedStyle can throw on detached nodes */ }
+      p = p.parentElement;
+      depth++;
+    }
+    return null;
+  }
+
+  // Build a jobLite from a card. This is intentionally cheap: we only need
+  // enough to score against, not the full JobPosting shape.
+  function extractJobLiteFromCard(card, anchor) {
+    const titleEl = card.querySelector("h1, h2, h3, h4, [class*='title' i] strong, [class*='title' i]");
+    let title = "";
+    if (titleEl) title = cleanText(titleEl.textContent);
+    if (!title) {
+      // Fallback: anchor text often has the title for LaPieza cards.
+      title = cleanText(anchor.textContent);
+    }
+    const companyEl = card.querySelector("[class*='empresa' i], [class*='company' i], [class*='employer' i]");
+    let company = companyEl ? cleanText(companyEl.textContent) : "";
+    // Last-ditch: walk through text nodes and pick the second visible non-title text.
+    if (!company) {
+      const texts = Array.from(card.querySelectorAll("*"))
+        .map((el) => el.children.length === 0 ? cleanText(el.textContent) : "")
+        .filter((t) => t && t !== title && t.length > 1 && t.length < 80);
+      if (texts.length) company = texts[0];
+    }
+    const url = anchor.href;
+    const id = idFromUrl(url);
+    const locationEl = card.querySelector("[class*='location' i], [class*='ubicacion' i], [class*='ciudad' i], address");
+    const loc = locationEl ? cleanText(locationEl.textContent) : "";
+    return {
+      id,
+      url,
+      title: title || "(sin título)",
+      company: company || "(empresa)",
+      location: loc || ""
+    };
+  }
+
+  // Find every vacancy anchor that's NOT already inside a card we've
+  // overlaid. Returns the unique set of (anchor, cardRoot) tuples.
+  function findVacancyCards() {
+    const anchors = Array.from(document.querySelectorAll("a[href]"))
+      .filter((a) => VACANCY_ANCHOR_RX.test(a.href || ""));
+    const seen = new WeakSet();
+    const out = [];
+    for (const a of anchors) {
+      const card = findCardRoot(a);
+      if (!card) continue;
+      if (seen.has(card)) continue;
+      seen.add(card);
+      // Skip if already overlaid (idempotency).
+      if (card.hasAttribute("data-eamx-card-overlay")) continue;
+      out.push({ anchor: a, card });
+    }
+    return out;
+  }
+
+  // Inject the overlay (badge + Marcar button) into a card.
+  async function injectOverlay({ anchor, card }) {
+    try {
+      // Stamp the host so we never double-inject.
+      card.setAttribute("data-eamx-card-overlay", "1");
+      // We need positioning context for the absolute overlay.
+      try {
+        if (getComputedStyle(card).position === "static") {
+          card.style.position = "relative";
+        }
+      } catch (_) {}
+
+      const jobLite = extractJobLiteFromCard(card, anchor);
+      // Score against the cached profile if we have one.
+      let score = null;
+      let reasons = [];
+      let level = "unknown";
+      if (cachedProfile && matchScoreModule) {
+        const r = matchScoreModule.computeMatchScore(cachedProfile, jobLite);
+        score = r.score;
+        reasons = r.reasons || [];
+        level = matchScoreModule.levelForScore(score);
+      }
+
+      // Apply the "poor" fade to the host card when score < 40 so the eye
+      // gravitates to better fits without us reordering the listing.
+      try {
+        if (score !== null && level === "poor") card.classList.add("eamx-card--poor");
+      } catch (_) {}
+
+      const overlay = document.createElement("div");
+      overlay.className = "eamx-card-overlay";
+      overlay.setAttribute("data-eamx-overlay-host", "1");
+
+      const badge = document.createElement("span");
+      badge.className = `eamx-match-badge eamx-match-badge--${level}`;
+      if (score === null) {
+        badge.textContent = "—";
+        badge.title = "Sube tu CV en Opciones para ver match scores";
+      } else {
+        badge.textContent = `${score}% match`;
+        badge.title = reasons.length ? reasons.join(" · ") : "Match calculado contra tu CV";
+      }
+      overlay.appendChild(badge);
+
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "eamx-mark-btn";
+      btn.setAttribute("data-eamx-mark", jobLite.id);
+      // Stop propagation so clicking the button doesn't navigate via the
+      // anchor underneath.
+      btn.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        onMarkClick(btn, jobLite, { score: score === null ? 0 : score, reasons });
+      });
+      overlay.appendChild(btn);
+
+      // Initial label depends on whether the job is already in the queue.
+      let already = false;
+      try {
+        if (queueModule) already = await queueModule.isInQueue(jobLite.id, SOURCE);
+      } catch (_) {}
+      paintMarkButton(btn, already);
+
+      card.appendChild(overlay);
+    } catch (err) {
+      console.warn("[EmpleoAutomatico] overlay inject failed", err);
+    }
+  }
+
+  function paintMarkButton(btn, marked) {
+    if (!btn) return;
+    if (marked) {
+      btn.classList.add("eamx-mark-btn--marked");
+      btn.innerHTML = '<span aria-hidden="true">✓</span><span>Marcada</span>';
+      btn.setAttribute("aria-pressed", "true");
+      btn.setAttribute("aria-label", "Quitar de la cola");
+    } else {
+      btn.classList.remove("eamx-mark-btn--marked");
+      btn.innerHTML = '<span aria-hidden="true">⭐</span><span>Marcar</span>';
+      btn.setAttribute("aria-pressed", "false");
+      btn.setAttribute("aria-label", "Marcar para revisar después");
+    }
+  }
+
+  async function onMarkClick(btn, jobLite, scoring) {
+    if (!queueModule) {
+      const ok = await ensureDiscoveryDeps();
+      if (!ok) { toast("No se pudo abrir la cola.", "error"); return; }
+    }
+    btn.disabled = true;
+    try {
+      const already = await queueModule.isInQueue(jobLite.id, SOURCE);
+      if (already) {
+        await queueModule.removeFromQueue(jobLite.id, SOURCE);
+        paintMarkButton(btn, false);
+        toast("Quitada de tu cola.", "info", { durationMs: 2500 });
+      } else {
+        const item = {
+          id: jobLite.id,
+          source: SOURCE,
+          url: jobLite.url,
+          title: jobLite.title,
+          company: jobLite.company,
+          location: jobLite.location,
+          savedAt: Date.now(),
+          matchScore: Number(scoring?.score) || 0,
+          reasons: Array.isArray(scoring?.reasons) ? scoring.reasons.slice(0, 3) : []
+        };
+        const { added } = await queueModule.addToQueue(item);
+        if (added) {
+          paintMarkButton(btn, true);
+          toast("⭐ Marcada. Revísala después en Opciones → Mi cola.", "success", { durationMs: 3500 });
+        }
+      }
+    } catch (err) {
+      console.warn("[EmpleoAutomatico] queue toggle failed", err);
+      toast("No se pudo guardar en la cola.", "error");
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  // Throttled re-scan. The MutationObserver below funnels every DOM change
+  // through this so infinite-scroll, lazy-load, and React re-renders all
+  // converge to a single batched scan ~600ms after the latest change.
+  function scheduleListingScan(delayMs = 600) {
+    if (listingScanTimer) clearTimeout(listingScanTimer);
+    listingScanTimer = setTimeout(async () => {
+      listingScanTimer = null;
+      if (!isListingPath()) return;
+      const ok = await ensureDiscoveryDeps();
+      if (!ok) return;
+      // Refresh profile if not yet loaded — must happen before findVacancyCards
+      // injects badges.
+      if (!profileLoaded) await loadProfileOnce();
+      // Walk + inject. injectOverlay is async (it calls isInQueue) but we
+      // intentionally don't await — they run concurrently.
+      const cards = findVacancyCards();
+      cards.forEach((c) => { injectOverlay(c); });
+    }, delayMs);
+  }
+
+  function startListingObserver() {
+    if (listingObserver) return;
+    listingObserver = new MutationObserver(() => {
+      if (!isListingPath()) return;
+      scheduleListingScan(600);
+    });
+    try {
+      listingObserver.observe(document.body, { childList: true, subtree: true });
+    } catch (_) { /* body may be missing */ }
+  }
+
+  function stopListingObserver() {
+    if (listingObserver) {
+      try { listingObserver.disconnect(); } catch (_) {}
+      listingObserver = null;
+    }
+    if (listingScanTimer) {
+      clearTimeout(listingScanTimer);
+      listingScanTimer = null;
+    }
+    // Tear down any overlays we already injected — they're tied to a card
+    // root that may unmount when LaPieza route-changes anyway, but be tidy.
+    document.querySelectorAll("[data-eamx-overlay-host]").forEach((el) => {
+      try { el.remove(); } catch (_) {}
+    });
+    document.querySelectorAll("[data-eamx-card-overlay]").forEach((el) => {
+      try { el.removeAttribute("data-eamx-card-overlay"); } catch (_) {}
+      try { el.classList.remove("eamx-card--poor"); } catch (_) {}
+    });
+  }
+
+  // Show a toast on /vacancy/<uuid> when the user previously marked this
+  // vacancy. Resolves immediately when no queue match — so the FAB-mount
+  // path is unaffected for all unmarked jobs.
+  let queuedReminderShown = false;
+  async function maybeShowQueuedReminder() {
+    if (queuedReminderShown) return;
+    if (!isJobDetailPage()) return;
+    const ok = await ensureDiscoveryDeps();
+    if (!ok) return;
+    const id = idFromUrl(location.href);
+    if (!id) return;
+    try {
+      const queue = await queueModule.getQueue();
+      const found = queue.find((q) => q.id === id && q.source === SOURCE);
+      if (!found) return;
+      queuedReminderShown = true;
+      const when = relativeTimeFromMs(Date.now() - (found.savedAt || Date.now()));
+      toast(`⭐ Marcaste esta vacante ${when}. Dale FAB cuando estés listo.`, "info", { durationMs: 5000 });
+    } catch (_) { /* ignore */ }
+  }
+
+  // Format a relative time. Mirrors the spec: <60s "hace un momento",
+  // <60min "hace X min", <24h "hace X h", else "hace X días".
+  function relativeTimeFromMs(deltaMs) {
+    if (!Number.isFinite(deltaMs) || deltaMs < 0) return "hace un momento";
+    const sec = Math.floor(deltaMs / 1000);
+    if (sec < 60) return "hace un momento";
+    const min = Math.floor(sec / 60);
+    if (min < 60) return `hace ${min} min`;
+    const hr = Math.floor(min / 60);
+    if (hr < 24) return `hace ${hr} h`;
+    const days = Math.floor(hr / 24);
+    return `hace ${days} día${days === 1 ? "" : "s"}`;
+  }
+
+  // =========================================================================
   // SPA nav watching & bootstrap
   // =========================================================================
 
   function detectAndMount() {
-    if (isJobDetailPage()) mountFab();
-    else { unmountFab(); closePanel(); }
+    if (isJobDetailPage()) {
+      mountFab();
+      // Reminder toast — fire after a short delay so the mount completes
+      // and the toast lands cleanly. Idempotent (queuedReminderShown gate).
+      setTimeout(() => { maybeShowQueuedReminder(); }, 1200);
+    } else {
+      unmountFab();
+      closePanel();
+    }
+
+    // Listing-page badges run on a separate axis from the FAB. We scan
+    // when on a known listing path; otherwise we tear down so we don't
+    // leak overlays into other routes.
+    if (isListingPath()) {
+      ensureDiscoveryDeps().then(() => {
+        loadProfileOnce().then(() => {
+          scheduleListingScan(150);
+          startListingObserver();
+        });
+      });
+    } else {
+      stopListingObserver();
+    }
   }
 
   function throttle(fn, ms) {
@@ -2445,6 +2847,13 @@
         // The detector re-runs on the new route; old fieldRefs would resolve
         // to nothing once the form unmounts.
         detectedQuestions = []; questionAnswers = []; questionsState = "idle"; questionsError = "";
+        // Reset the queued-reminder gate so we re-fire on the new vacancy
+        // (or skip on a non-vacancy route).
+        queuedReminderShown = false;
+        // Tear down listing overlays — they're tied to the previous route's
+        // DOM. detectAndMount() below re-arms them if we're still on a
+        // listing path.
+        stopListingObserver();
         // SPA route changed: tear down any in-flow helpers tied to the old
         // page. The assistant will re-arm if the user approves on the new
         // route. We clear the dedupe set so detectors can re-attach to
@@ -2476,6 +2885,10 @@
       // BEFORE the FAB click is preserved by Express fill (we won't clobber
       // a field whose data-eamx-user-edited === "true").
       attachUserEditListener();
+      // Profile + queue change watcher (storage.onChanged) — re-render
+      // listing badges when the user uploads a new CV or removes from queue
+      // in another tab.
+      watchProfileChanges();
       detectAndMount();
       watchUrlChanges();
     }

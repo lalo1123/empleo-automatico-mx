@@ -1851,3 +1851,134 @@
   }
   /* Panel intentionally remains light. */
 }
+
+/* =============================================================================
+ * Discovery / Queue — listing-page card overlay
+ * Match-score badge + "Marcar" button injected on each vacancy card.
+ * Inert by default (anchored absolute over the card), high z-index so the
+ * portal's React re-render doesn't bury it.
+ * ============================================================================= */
+
+.eamx-card-overlay {
+  /* Token redeclaration so this block is self-contained on any portal. */
+  --eamx-c-brand-300: #70d1c6;
+  --eamx-c-brand-500: #2a9c91;
+  --eamx-c-brand-600: #137e7a;
+  --eamx-c-brand-700: #105971;
+  --eamx-c-flame-500: #ff6600;
+  --eamx-c-ink: #0f1d2c;
+  --eamx-c-ink-muted: #5b6e7e;
+  --eamx-c-surface: #ffffff;
+  --eamx-c-border: #e2e8f0;
+
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2147483500;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: 600 12.5px/1 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  pointer-events: auto;
+}
+
+.eamx-match-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 9px;
+  border-radius: 9999px;
+  font-weight: 700;
+  letter-spacing: 0.005em;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  cursor: default;
+  user-select: none;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+.eamx-match-badge--high {
+  background: linear-gradient(135deg, #047857 0%, #065f46 100%);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.12);
+}
+.eamx-match-badge--mid {
+  background: linear-gradient(135deg, #137e7a 0%, #105971 100%);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.12);
+}
+.eamx-match-badge--low {
+  background: #fef3c7;
+  color: #92400e;
+  border-color: #fde68a;
+}
+.eamx-match-badge--poor {
+  background: #f1f5f9;
+  color: #5b6e7e;
+  border-color: #e2e8f0;
+  opacity: 0.85;
+}
+.eamx-match-badge--unknown {
+  background: #f1f5f9;
+  color: #5b6e7e;
+  border-color: #e2e8f0;
+}
+
+.eamx-mark-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 9px;
+  border-radius: 9999px;
+  border: 1px solid var(--eamx-c-border);
+  background: var(--eamx-c-surface);
+  color: var(--eamx-c-ink);
+  font: 600 12.5px/1 inherit;
+  cursor: pointer;
+  transition:
+    transform 120ms cubic-bezier(0.4, 0, 0.2, 1),
+    border-color 120ms cubic-bezier(0.4, 0, 0.2, 1),
+    background 120ms cubic-bezier(0.4, 0, 0.2, 1),
+    color 120ms cubic-bezier(0.4, 0, 0.2, 1);
+  white-space: nowrap;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+.eamx-mark-btn:hover {
+  border-color: var(--eamx-c-brand-300);
+  color: var(--eamx-c-brand-700);
+  transform: translateY(-1px);
+}
+
+.eamx-mark-btn:active { transform: scale(0.97); }
+
+.eamx-mark-btn:focus-visible {
+  outline: 2px solid var(--eamx-c-brand-300);
+  outline-offset: 2px;
+}
+
+.eamx-mark-btn--marked {
+  background: linear-gradient(135deg, #137e7a 0%, #105971 100%);
+  color: #ffffff;
+  border-color: transparent;
+}
+.eamx-mark-btn--marked:hover {
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+/* When score < 40, slightly fade the host card to push the eye to better fits.
+   Hosted on the parent — content script flips the class. */
+.eamx-card--poor {
+  opacity: 0.6;
+  transition: opacity 200ms ease;
+}
+.eamx-card--poor:hover { opacity: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  .eamx-mark-btn,
+  .eamx-card--poor {
+    transition: none !important;
+  }
+}

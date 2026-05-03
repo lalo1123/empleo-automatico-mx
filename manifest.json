@@ -92,7 +92,7 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["lib/schemas.js", "vendor/pdf.min.js", "vendor/pdf.worker.min.js"],
+      "resources": ["lib/schemas.js", "lib/match-score.js", "lib/queue.js", "vendor/pdf.min.js", "vendor/pdf.worker.min.js"],
       "matches": ["<all_urls>"]
     }
   ]
