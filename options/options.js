@@ -8,6 +8,7 @@ import {
   DEFAULT_SETTINGS,
   PLAN_LABELS,
   ERROR_CODES,
+  STORAGE_KEYS,
   nowISO
 } from "../lib/schemas.js";
 import { sendMessage } from "../lib/messaging.js";
@@ -79,6 +80,13 @@ const languageSelect = $("language");
 const autoApproveInput = $("autoApprove");
 const saveSettingsBtn = $("saveSettings");
 const settingsStatus = $("settingsStatus");
+
+// Express Mode radio refs. Lives in chrome.storage.local under
+// STORAGE_KEYS.EXPRESS_MODE so the LaPieza content script can read it
+// directly without round-tripping through the background worker.
+const expressModeOnInput = $("expressModeOn");
+const expressModeOffInput = $("expressModeOff");
+const expressModeStatus = $("expressModeStatus");
 
 const exportBtn = $("exportProfile");
 const importBtn = $("importProfile");
@@ -532,6 +540,64 @@ importInput.addEventListener("change", async () => {
 });
 
 // ---------------------------------------------------------------------------
+// Express Mode toggle (chrome.storage.local key: STORAGE_KEYS.EXPRESS_MODE)
+//
+// Why local storage and not the SETTINGS object: the LaPieza content script
+// reads this on every FAB click and we want zero-latency / no-round-trip.
+// Default is true — Express ON for new users.
+// ---------------------------------------------------------------------------
+
+function readExpressMode() {
+  return new Promise((resolve) => {
+    try {
+      chrome.storage.local.get([STORAGE_KEYS.EXPRESS_MODE], (r) => {
+        const v = r && r[STORAGE_KEYS.EXPRESS_MODE];
+        // First run: stored key missing → default to true (Express on).
+        if (typeof v === "boolean") resolve(v);
+        else resolve(true);
+      });
+    } catch (_) {
+      resolve(true);
+    }
+  });
+}
+
+function writeExpressMode(value) {
+  return new Promise((resolve) => {
+    try {
+      chrome.storage.local.set({ [STORAGE_KEYS.EXPRESS_MODE]: !!value }, () => resolve());
+    } catch (_) {
+      resolve();
+    }
+  });
+}
+
+function paintExpressMode(value) {
+  if (expressModeOnInput) expressModeOnInput.checked = !!value;
+  if (expressModeOffInput) expressModeOffInput.checked = !value;
+}
+
+async function onExpressModeChange(ev) {
+  // Both radios live in the same group so we toggle on either change. The
+  // truthy mode is `value === "express"` (i.e. expressModeOn checked).
+  const target = ev.target;
+  if (!target) return;
+  const next = target.value === "express";
+  await writeExpressMode(next);
+  paintExpressMode(next);
+  setStatus(expressModeStatus, "ok", "Modo guardado");
+  // Auto-clear the status line after 2.5s so it doesn't linger.
+  setTimeout(() => {
+    if (expressModeStatus && expressModeStatus.textContent === "Modo guardado") {
+      setStatus(expressModeStatus, "", "");
+    }
+  }, 2500);
+}
+
+if (expressModeOnInput) expressModeOnInput.addEventListener("change", onExpressModeChange);
+if (expressModeOffInput) expressModeOffInput.addEventListener("change", onExpressModeChange);
+
+// ---------------------------------------------------------------------------
 // Initial load
 // ---------------------------------------------------------------------------
 
@@ -544,6 +610,11 @@ async function init() {
     const s = settings || DEFAULT_SETTINGS;
     languageSelect.value = s.language || "es";
     autoApproveInput.checked = !!s.autoApprove;
+
+    // Express Mode lives in chrome.storage.local, NOT the backend SETTINGS
+    // object — load it independently.
+    const express = await readExpressMode();
+    paintExpressMode(express);
 
     if (profile) updatePreviewFromProfile(profile);
     await refreshExistingBanner();

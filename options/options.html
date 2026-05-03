@@ -358,6 +358,45 @@
           </div>
         </div>
 
+        <!-- Express vs Revision-completa: this is a per-portal feature flag.
+             LaPieza is the first portal that honors it; the others still run
+             the legacy panel-first flow until ported in the next pass. The
+             value is stored in chrome.storage.local under
+             STORAGE_KEYS.EXPRESS_MODE (`eamx:settings:expressMode`). -->
+        <div class="field">
+          <label class="field-label">Modo de aplicaci&oacute;n</label>
+          <div class="muted" style="margin-bottom: 8px;">
+            C&oacute;mo se comporta el bot&oacute;n &laquo;&#10024; Postular con IA&raquo; al hacer clic.
+          </div>
+          <div class="mode-radio" role="radiogroup" aria-label="Modo de aplicaci&oacute;n">
+            <label class="mode-option">
+              <input type="radio" name="expressMode" id="expressModeOn" value="express" />
+              <span class="mode-option__body">
+                <span class="mode-option__title">
+                  <span aria-hidden="true">&#128994;</span>
+                  Express <span class="mode-option__pill">recomendado</span>
+                </span>
+                <span class="mode-option__desc">
+                  1 clic en el FAB &rarr; la extensi&oacute;n llena los campos autom&aacute;ticamente. T&uacute; revisas y das el clic final a Finalizar.
+                </span>
+              </span>
+            </label>
+            <label class="mode-option">
+              <input type="radio" name="expressMode" id="expressModeOff" value="review" />
+              <span class="mode-option__body">
+                <span class="mode-option__title">
+                  <span aria-hidden="true">&#128203;</span>
+                  Revisi&oacute;n completa
+                </span>
+                <span class="mode-option__desc">
+                  Abre el panel para revisar la carta + CV + respuestas antes de llenar el formulario. M&aacute;s control, m&aacute;s clics.
+                </span>
+              </span>
+            </label>
+          </div>
+          <span id="expressModeStatus" class="status" role="status" aria-live="polite"></span>
+        </div>
+
         <div class="toggle-row">
           <label class="switch">
             <input id="autoApprove" type="checkbox" />

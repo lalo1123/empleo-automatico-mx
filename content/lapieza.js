@@ -62,6 +62,15 @@
   ];
 
   const JOB_CACHE_PREFIX = "eamx:lapieza:job:";
+  // Express Mode pre-warmed draft cache key prefix. We store the GENERATE_DRAFT
+  // result on /vacancy/<uuid> so the matching /apply/<uuid> page can paste the
+  // cover letter without waiting for the network. Cleared on SPA route change
+  // and on cancel/finish.
+  const DRAFT_CACHE_PREFIX = "eamx:lapieza:draft:";
+  // chrome.storage.local key for the Express toggle. Mirrors STORAGE_KEYS.EXPRESS_MODE
+  // (lib/schemas.js) — we hardcode here because content scripts can't reliably
+  // import the schema module synchronously and we need this on every FAB click.
+  const EXPRESS_MODE_STORAGE_KEY = "eamx:settings:expressMode";
 
   // Dynamic import of shared schemas (same pattern as occ.js/bumeran.js).
   // MV3 content scripts can't declare ES imports via manifest; runtime dynamic
@@ -199,6 +208,78 @@
       if (job && typeof job === "object" && job.title) return job;
     } catch (_) { /* ignore */ }
     return null;
+  }
+
+  // -------------------------------------------------------------------------
+  // Express Mode — toggle + pre-warmed draft cache
+  // -------------------------------------------------------------------------
+
+  // Best-effort read of the Express toggle from chrome.storage.local. Default
+  // is true (Express ON) when the key is missing — same default as options.js.
+  // Resolves to a boolean; never rejects.
+  function readExpressMode() {
+    return new Promise((resolve) => {
+      try {
+        if (!chrome?.storage?.local) { resolve(true); return; }
+        chrome.storage.local.get([EXPRESS_MODE_STORAGE_KEY], (r) => {
+          const v = r && r[EXPRESS_MODE_STORAGE_KEY];
+          resolve(typeof v === "boolean" ? v : true);
+        });
+      } catch (_) { resolve(true); }
+    });
+  }
+
+  function draftCacheKey(url) {
+    const id = idFromUrl(url || location.href);
+    return DRAFT_CACHE_PREFIX + id;
+  }
+  function persistDraftToSession(draft) {
+    if (!draft || !chrome?.storage?.session) return;
+    try {
+      const key = draftCacheKey(location.href);
+      chrome.storage.session.set({ [key]: draft });
+    } catch (_) { /* ignore */ }
+  }
+  async function restoreDraftFromSession() {
+    if (!chrome?.storage?.session) return null;
+    try {
+      const key = draftCacheKey(location.href);
+      const obj = await new Promise((resolve) => {
+        chrome.storage.session.get([key], (r) => resolve(r || {}));
+      });
+      const draft = obj && obj[key];
+      if (draft && typeof draft === "object" && (draft.coverLetter || draft.id)) return draft;
+    } catch (_) { /* ignore */ }
+    return null;
+  }
+  function clearDraftSession(url) {
+    if (!chrome?.storage?.session) return;
+    try {
+      chrome.storage.session.remove(draftCacheKey(url || location.href));
+    } catch (_) { /* ignore */ }
+  }
+
+  // Pre-warm the cover-letter generation in the background while the user is
+  // still on /vacancy/<uuid>. By the time they click "Postularme" → land on
+  // /apply/<uuid>, the draft is already in chrome.storage.session and the
+  // Express fill can paste it instantly. Silent on errors — the apply-page
+  // FAB click will fall back to a fresh request.
+  async function prewarmExpressDraft(job) {
+    if (!job || !job.title) return;
+    try {
+      const res = await sendMsg({ type: MSG.GENERATE_DRAFT, job });
+      if (!res || !res.ok) return; // silent: user hasn't done anything wrong yet
+      const draft = res.draft || null;
+      if (draft) {
+        // Stash the draft under the matching uuid key so /apply/<uuid> finds it.
+        try {
+          if (chrome?.storage?.session) {
+            const key = DRAFT_CACHE_PREFIX + idFromUrl(job.url || location.href);
+            chrome.storage.session.set({ [key]: { ...draft, id: res.draftId || draft.id || null } });
+          }
+        } catch (_) {}
+      }
+    } catch (_) { /* silent */ }
   }
 
   function findJobPostingJsonLd() {
@@ -571,8 +652,22 @@
     if (lbl) lbl.textContent = b ? "Generando" : "Postular con IA";
   }
 
+  // Top-level FAB dispatcher. Branches on the Express toggle:
+  //   - Express ON  + /vacancy/<uuid> → pre-warm draft + show "ready" toast
+  //   - Express ON  + /apply/<uuid>   → run full Express fill (carta + cv + answers)
+  //   - Express OFF (any page)        → legacy panel flow (current behavior)
   async function onFabClick() {
     if (!fabEl || fabEl.disabled) return;
+    let express = true;
+    try { express = await readExpressMode(); } catch (_) { express = true; }
+    if (!express) return onFabClickReview();
+    if (isApplyPage()) return onFabClickExpressApply();
+    return onFabClickExpressVacancy();
+  }
+
+  // Legacy "Revisión completa" path. Identical to the original onFabClick:
+  // generate the draft, open the panel, let the user review/edit/approve.
+  async function onFabClickReview() {
     let { job, partial } = extractJob();
 
     // If we're on the apply form, the page has no job description — we
@@ -608,6 +703,565 @@
     } finally {
       setFabBusy(false);
     }
+  }
+
+  // Express FAB click on /vacancy/<uuid>. Job-extract, persist, kick off
+  // background draft generation, show a toast pointing at LaPieza's own
+  // "Postularme" button. We do NOT auto-click that button — HITL.
+  async function onFabClickExpressVacancy() {
+    const { job, partial } = extractJob();
+    if (partial && job.title === "(sin título)" && job.company === "(empresa desconocida)") {
+      toast("Abre primero la vacante (página /vacancy/...) para que la IA la lea.", "info");
+      return;
+    }
+    lastJob = job;
+    persistJobToSession(job);
+    // Fire-and-forget — generation typically takes 6-15s; the user will
+    // navigate to /apply/<uuid> in that window. If they're faster, the
+    // apply-side click will simply re-request.
+    prewarmExpressDraft(job);
+    toast("⚡ Listo. Dale 'Postularme' y te lleno todo.", "info", { durationMs: 4000 });
+  }
+
+  // Express FAB click on /apply/<uuid>. Restore job + draft from session,
+  // show progress overlay, fire 3 parallel requests, fill fields as each
+  // resolves. See runExpressFill JSDoc for full guarantees.
+  async function onFabClickExpressApply() {
+    const { job: extracted, partial } = extractJob();
+    let job = extracted;
+    const cached = await restoreJobFromSession();
+    if (cached) {
+      job = cached;
+    } else if (partial && job.title === "(sin título)" && job.company === "(empresa desconocida)") {
+      // Deep-linked user — no cached context, can't run Express safely.
+      toast(
+        "Abre primero la vacante desde LaPieza, así tengo el contexto completo.",
+        "info"
+      );
+      return;
+    }
+    lastJob = job;
+    persistJobToSession(job);
+
+    // Pre-warmed draft (if any) lives in chrome.storage.session.
+    const prewarmed = await restoreDraftFromSession();
+    if (prewarmed) {
+      lastDraft = prewarmed;
+      activeDraftId = prewarmed.id || null;
+    }
+
+    setFabBusy(true);
+    try {
+      await runExpressFill({ job, prewarmedDraft: prewarmed });
+    } catch (err) {
+      console.warn("[EmpleoAutomatico] Express fill threw", err);
+      toast(humanizeError(err), "error");
+    } finally {
+      setFabBusy(false);
+    }
+  }
+
+  // =========================================================================
+  // Express Mode — orchestrator + UI helpers
+  // =========================================================================
+
+  /**
+   * Run the Express fill flow on /apply/<uuid>. Auto-fills the cover-letter
+   * textarea, the per-question answers, and (in a new tab) the tailored CV.
+   * The user does the final review and clicks LaPieza's own submit button.
+   *
+   * HITL guarantees (NEVER violated):
+   *   - We NEVER click LaPieza's "Postularme" button programmatically.
+   *   - We NEVER click LaPieza's "Finalizar"/submit button programmatically.
+   *   - We NEVER fire form.submit() programmatically.
+   *   - We only modify field values + dispatch input/change/blur events for
+   *     React-friendliness.
+   *   - The user always clicks the platform's CTA themselves.
+   *
+   * Error handling:
+   *   - GENERATE_DRAFT failure → error toast + open the panel so the user can
+   *     retry from there. No fields are half-filled.
+   *   - ANSWER_QUESTIONS failure → still fill the cover letter; toast tells
+   *     the user the answers must be written manually.
+   *   - GENERATE_CV failure → carta + answers still populate; toast reminds
+   *     the user to upload their existing CV.
+   *
+   * @param {Object} opts
+   * @param {Object} opts.job — the job posting (restored from session cache).
+   * @param {Object|null} opts.prewarmedDraft — draft cached from /vacancy/<uuid>,
+   *        or null if the user came in cold.
+   */
+  async function runExpressFill({ job, prewarmedDraft }) {
+    if (!job || !job.title) {
+      toast("No tengo la vacante. Abre /vacancy/<id> primero.", "info");
+      return;
+    }
+
+    // 1) Scan the form right now (synchronous — apply forms are usually
+    //    server-rendered). We always re-scan inside runExpressFill so SPA
+    //    mutations between vacancy → apply are picked up.
+    const scanned = scanQuestionFields();
+    detectedQuestions = scanned;
+
+    // 2) Locate the cover-letter target field. We try the same heuristics as
+    //    detectCoverLetterTextarea but applied to apply-page DOM directly.
+    const coverField = findExpressCoverLetterField();
+
+    // Build the progress overlay aligned with the FAB. We push 3 steps in:
+    //   carta / cv / preguntas. Steps are skipped when their target doesn't
+    //   exist (no carta field on form / no questions detected).
+    const overlay = buildExpressOverlay({
+      hasCover: !!coverField,
+      hasQuestions: scanned.length > 0
+    });
+    overlay.show();
+
+    // Track per-step status so we can surface a meaningful final toast.
+    const status = { cover: "skipped", questions: "skipped", cv: "skipped" };
+    const errors = [];
+
+    // 3) Cover-letter pipeline. If we have a pre-warmed draft, use it
+    //    immediately; otherwise fire a fresh GENERATE_DRAFT request.
+    const coverPromise = (async () => {
+      if (!coverField) return null;
+      try {
+        let draft = prewarmedDraft;
+        if (!draft || !draft.coverLetter) {
+          overlay.markPending("cover");
+          const res = await sendMsg({ type: MSG.GENERATE_DRAFT, job });
+          if (!res || !res.ok) {
+            handleExpressDraftFailure(res, { job });
+            overlay.markError("cover", "No se pudo generar la carta");
+            errors.push("draft");
+            status.cover = "error";
+            return null;
+          }
+          draft = res.draft || null;
+          activeDraftId = res.draftId || draft?.id || null;
+          lastDraft = draft;
+          persistDraftToSession(draft);
+        } else {
+          activeDraftId = draft.id || activeDraftId;
+          lastDraft = draft;
+        }
+        const cover = (draft && draft.coverLetter) ? String(draft.coverLetter) : "";
+        if (!cover) {
+          overlay.markError("cover", "Carta vacía");
+          status.cover = "error";
+          return null;
+        }
+        if (!isUserEdited(coverField)) {
+          fillFieldWithPulse(coverField, cover);
+          status.cover = "ok";
+          overlay.markDone("cover");
+        } else {
+          overlay.markDone("cover", "Respetado (lo editaste)");
+          status.cover = "ok";
+        }
+        return cover;
+      } catch (err) {
+        console.warn("[EmpleoAutomatico] Express cover failed", err);
+        overlay.markError("cover", humanizeError(err));
+        errors.push("draft");
+        status.cover = "error";
+        return null;
+      }
+    })();
+
+    // 4) Questions pipeline. Skipped when no questions detected.
+    const questionsPromise = (async () => {
+      if (!scanned.length) return null;
+      overlay.markPending("questions", `0/${scanned.length}`);
+      try {
+        const res = await sendMsg({
+          type: MSG.ANSWER_QUESTIONS,
+          job,
+          questions: scanned.map((q) => q.question)
+        });
+        if (!res || !res.ok) {
+          // Per spec: degraded mode — keep the cover-letter step but tell the
+          // user they have to write the questions manually.
+          overlay.markError("questions", "No se generaron — escríbelas tú");
+          errors.push("questions");
+          status.questions = "error";
+          return null;
+        }
+        const answers = Array.isArray(res.answers) ? res.answers : [];
+        questionAnswers = answers.slice();
+        questionsState = "success";
+
+        // Stagger fills 200ms apart so the user sees them populate sequentially.
+        let filled = 0;
+        for (let i = 0; i < scanned.length; i++) {
+          const q = scanned[i];
+          const value = answers[i];
+          if (!value) continue;
+          const target = resolveFieldRef(q.fieldRef);
+          if (!target) continue;
+          if (isUserEdited(target)) continue;
+          fillFieldWithPulse(target, value);
+          filled++;
+          overlay.markPending("questions", `${filled}/${scanned.length}`);
+          // 200ms stagger between fields so the typing-pulse effect is visible.
+          await new Promise((r) => setTimeout(r, 200));
+        }
+        overlay.markDone("questions", `${filled}/${scanned.length}`);
+        status.questions = "ok";
+        return answers;
+      } catch (err) {
+        console.warn("[EmpleoAutomatico] Express questions failed", err);
+        overlay.markError("questions", "Error generando respuestas");
+        errors.push("questions");
+        status.questions = "error";
+        return null;
+      }
+    })();
+
+    // 5) CV pipeline. Open the generated HTML in a new tab with auto-print
+    //    so the user just confirms the print dialog. Failure is non-blocking.
+    const cvPromise = (async () => {
+      overlay.markPending("cv");
+      try {
+        const res = await sendMsg({ type: MSG.GENERATE_CV, job });
+        if (!res || !res.ok) {
+          overlay.markError("cv", "No se pudo generar el CV");
+          errors.push("cv");
+          status.cv = "error";
+          return null;
+        }
+        cvHtml = res.html || "";
+        cvSummary = res.summary || "";
+        cvState = "success";
+        if (!cvHtml) {
+          overlay.markError("cv", "CV vacío");
+          status.cv = "error";
+          return null;
+        }
+        // Open the cached HTML in a new tab via the service worker. This is
+        // the SAME flow as the panel "Abrir y descargar PDF" button — the
+        // bootstrap script auto-fires the print dialog ~800ms after first paint.
+        let openRes = await sendMsg({ type: MSG.OPEN_GENERATED_CV, html: cvHtml });
+        if (!openRes || !openRes.ok) {
+          openRes = await sendMsg({ type: MSG.OPEN_GENERATED_CV, html: cvHtml, useDataUrl: true });
+        }
+        if (!openRes || !openRes.ok) {
+          overlay.markError("cv", "No se pudo abrir el CV");
+          status.cv = "error";
+          return null;
+        }
+        overlay.markDone("cv");
+        status.cv = "ok";
+        return cvHtml;
+      } catch (err) {
+        console.warn("[EmpleoAutomatico] Express CV failed", err);
+        overlay.markError("cv", humanizeError(err));
+        errors.push("cv");
+        status.cv = "error";
+        return null;
+      }
+    })();
+
+    // 6) Wait for all three to settle. We use Promise.allSettled because we
+    //    already classified each step's outcome individually above and we
+    //    never want to short-circuit (e.g. CV failure shouldn't kill carta).
+    await Promise.allSettled([coverPromise, questionsPromise, cvPromise]);
+
+    // 7) If the cover letter failed AND there was a draft path (i.e. the
+    //    target field exists), that's the most critical failure — open the
+    //    panel for retry as the spec requires.
+    if (status.cover === "error" && coverField) {
+      try {
+        if (lastDraft) {
+          openPanel({ job, draft: lastDraft, partial: false });
+        } else {
+          // No draft at all — the panel needs SOMETHING. Open with a synthetic
+          // empty draft so the user can hit "Re-generar".
+          openPanel({ job, draft: { coverLetter: "" }, partial: false });
+        }
+      } catch (_) { /* ignore */ }
+      // The handleExpressDraftFailure helper already showed a typed toast.
+      // Hide overlay after a beat.
+      setTimeout(() => overlay.hide(), 1500);
+      return;
+    }
+
+    // 8) Highlight LaPieza's submit button + show final toast. The toast copy
+    //    branches on which steps succeeded / failed so the user knows what to
+    //    do next.
+    setTimeout(() => overlay.hide(), 1500);
+    highlightExpressSubmitButton();
+
+    let toastMsg = "✓ Listo. Revisa los campos y dale 'Finalizar' →";
+    let toastVariant = "success";
+    if (status.cover !== "ok" && coverField) {
+      // Already handled above with a panel open; shouldn't reach here.
+    }
+    if (status.cover === "skipped" && status.questions === "ok" && coverField === null) {
+      toastMsg = "✓ Respuestas listas. Sube tu CV cuando lo pida.";
+    }
+    if (status.questions === "error" && status.cover === "ok") {
+      toastMsg = "Algunas respuestas no se generaron, llénalas manualmente.";
+      toastVariant = "info";
+    }
+    if (status.cv === "error" && status.cover === "ok") {
+      // Append a CV note if the carta succeeded — don't overwrite the success
+      // copy entirely, just append the warning so the user knows.
+      toast(
+        "El CV personalizado no se pudo generar — usa tu CV actual.",
+        "info",
+        { durationMs: 5000 }
+      );
+    }
+    toast(toastMsg, toastVariant, { durationMs: 6000 });
+
+    // Arm the in-flow assistant (file-input tip, fallback paste buttons,
+    // submit-button pulse on later wizard steps). It's idempotent.
+    startFlowAssistant();
+  }
+
+  // Find the cover-letter target textarea on the apply page. Heuristic:
+  //   1) textarea whose label/placeholder matches carta / presentación /
+  //      motivación / cover / por qué / ideal
+  //   2) otherwise, the largest visible textarea on the page (by area)
+  //   3) returns null if no textarea exists at all (e.g. quick-apply forms)
+  function findExpressCoverLetterField() {
+    const textareas = Array.from(document.querySelectorAll("textarea"))
+      .filter((t) => isVisible(t) && !t.disabled && !t.readOnly);
+    if (!textareas.length) return null;
+    const rx = /carta|presentaci[oó]n|motivaci[oó]n|cover\s*letter|motivation|por\s*qu[eé]|ideal/i;
+    const labelHay = (t) => {
+      const parts = [
+        t.getAttribute("placeholder") || "",
+        t.getAttribute("aria-label") || "",
+        t.name || "",
+        t.id || ""
+      ];
+      if (t.id) {
+        try {
+          const lbl = document.querySelector(`label[for="${CSS.escape(t.id)}"]`);
+          if (lbl) parts.push(lbl.textContent || "");
+        } catch (_) {}
+      }
+      const wrap = t.closest("label");
+      if (wrap) parts.push(wrap.textContent || "");
+      return parts.join(" ").toLowerCase();
+    };
+    const matched = textareas.find((t) => rx.test(labelHay(t)));
+    if (matched) return matched;
+    // Fallback: largest area
+    textareas.sort((a, b) => {
+      const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+      return (rb.width * rb.height) - (ra.width * ra.height);
+    });
+    return textareas[0] || null;
+  }
+
+  // Detect "user-edited" fields so Express doesn't clobber what the user
+  // typed before clicking. We tag fields with data-eamx-user-edited="true"
+  // on every input event from outside the express handler. The flag is
+  // cleared only when the user explicitly cancels.
+  // We also defensively guard against pre-existing non-trivial values:
+  // any textarea/input with > 30 characters is treated as user-typed.
+  function isUserEdited(el) {
+    if (!el) return false;
+    if (el.dataset && el.dataset.eamxUserEdited === "true") return true;
+    const v = (el.value || "").trim();
+    if (v.length > 30) return true;
+    return false;
+  }
+
+  // Track user edits while the FAB is in flight. We attach the listener on
+  // first runExpressFill call and never remove it — it's a passive flag
+  // setter, doesn't trigger re-renders.
+  let _userEditListenerAttached = false;
+  function attachUserEditListener() {
+    if (_userEditListenerAttached) return;
+    _userEditListenerAttached = true;
+    document.addEventListener("input", (ev) => {
+      const t = ev.target;
+      if (!t) return;
+      if (!(t instanceof HTMLInputElement) && !(t instanceof HTMLTextAreaElement)) return;
+      // Express runs set values via setNativeValue + dispatch input. To
+      // avoid marking those, we set t.dataset.eamxFilling="true" briefly
+      // around the programmatic write (see fillFieldWithPulse).
+      if (t.dataset && t.dataset.eamxFilling === "true") return;
+      try { t.dataset.eamxUserEdited = "true"; } catch (_) {}
+    }, true);
+  }
+
+  // Set the field value + dispatch input/change/blur (React-friendly) +
+  // briefly add the `.eamx-field-typing` class so the user sees the field
+  // pulse. The class is removed after 1.6s (1.5s anim + buffer).
+  function fillFieldWithPulse(el, value) {
+    if (!el) return;
+    attachUserEditListener();
+    try {
+      // Mark the field so the document-level "input" listener doesn't flag
+      // this programmatic write as a user edit.
+      try { el.dataset.eamxFilling = "true"; } catch (_) {}
+
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+        setNativeValue(el, value);
+      } else if (el.isContentEditable) {
+        el.textContent = value;
+      } else {
+        try { el.value = value; } catch (_) {}
+      }
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      try { el.dispatchEvent(new Event("blur", { bubbles: true })); } catch (_) {}
+
+      // Visible pulse — 1.5s outline animation.
+      try {
+        el.classList.add("eamx-field-typing");
+        setTimeout(() => { try { el.classList.remove("eamx-field-typing"); } catch (_) {} }, 1600);
+      } catch (_) {}
+    } finally {
+      // Clear the filling-flag on the next tick so the user-edit listener
+      // doesn't pick up the synthetic input event.
+      setTimeout(() => { try { delete el.dataset.eamxFilling; } catch (_) {} }, 50);
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Express progress overlay — small floating card pinned above the FAB.
+  // Steps:
+  //   cover     "Carta de presentación"
+  //   cv        "CV personalizado"
+  //   questions "Respuestas (n/m)"
+  // Each step has 3 visual states: pending (⏳), done (✓), error (×).
+  // -------------------------------------------------------------------------
+  function buildExpressOverlay({ hasCover, hasQuestions }) {
+    let host = document.querySelector(".eamx-express-overlay");
+    if (host) try { host.remove(); } catch (_) {}
+    host = document.createElement("div");
+    host.className = "eamx-express-overlay";
+    host.setAttribute("role", "status");
+    host.setAttribute("aria-live", "polite");
+
+    const steps = [];
+    if (hasCover) steps.push({ key: "cover", label: "Carta de presentación" });
+    steps.push({ key: "cv", label: "CV personalizado" });
+    if (hasQuestions) steps.push({ key: "questions", label: "Respuestas" });
+
+    let inner = '<div class="eamx-express-overlay__title">⚡ Llenando…</div>';
+    for (const s of steps) {
+      inner += `<div class="eamx-express-overlay__step eamx-express-overlay__step--pending" data-step="${escapeHtml(s.key)}">` +
+        '<span class="eamx-express-overlay__icon" aria-hidden="true">⏳</span>' +
+        `<span class="eamx-express-overlay__label">${escapeHtml(s.label)}</span>` +
+        '<span class="eamx-express-overlay__detail"></span>' +
+      '</div>';
+    }
+    host.innerHTML = inner;
+    document.documentElement.appendChild(host);
+
+    function find(stepKey) { return host.querySelector(`[data-step="${stepKey}"]`); }
+    function setIcon(stepEl, icon) {
+      const i = stepEl.querySelector(".eamx-express-overlay__icon");
+      if (i) i.textContent = icon;
+    }
+    function setDetail(stepEl, detail) {
+      const d = stepEl.querySelector(".eamx-express-overlay__detail");
+      if (d) d.textContent = detail ? ` ${detail}` : "";
+    }
+
+    return {
+      show: () => { /* already mounted */ },
+      hide: () => { try { host.remove(); } catch (_) {} },
+      markPending: (key, detail) => {
+        const el = find(key); if (!el) return;
+        el.classList.remove("eamx-express-overlay__step--done", "eamx-express-overlay__step--error");
+        el.classList.add("eamx-express-overlay__step--pending");
+        setIcon(el, "⏳");
+        if (detail !== undefined) setDetail(el, detail);
+      },
+      markDone: (key, detail) => {
+        const el = find(key); if (!el) return;
+        el.classList.remove("eamx-express-overlay__step--pending", "eamx-express-overlay__step--error");
+        el.classList.add("eamx-express-overlay__step--done");
+        setIcon(el, "✓");
+        if (detail !== undefined) setDetail(el, detail);
+      },
+      markError: (key, detail) => {
+        const el = find(key); if (!el) return;
+        el.classList.remove("eamx-express-overlay__step--pending", "eamx-express-overlay__step--done");
+        el.classList.add("eamx-express-overlay__step--error");
+        setIcon(el, "×");
+        if (detail !== undefined) setDetail(el, detail);
+      }
+    };
+  }
+
+  // Surface a panel-style error for a failed GENERATE_DRAFT inside Express.
+  // Mirrors showBackendFailure (toast with action) but keyed for Express.
+  function handleExpressDraftFailure(res, _ctx) {
+    const code = res?.error;
+    const message = res?.message || "No se pudo generar la carta.";
+    if (code === ERR.PLAN_LIMIT_EXCEEDED) {
+      toast("Llegaste al límite de tu plan.", "error", {
+        label: "Ver planes",
+        onClick: () => openBilling()
+      });
+      return;
+    }
+    if (code === ERR.UNAUTHORIZED) {
+      toast("Inicia sesión para continuar.", "error", {
+        label: "Inicia sesión",
+        onClick: () => openOptionsPage()
+      });
+      return;
+    }
+    if (code === ERR.INVALID_INPUT && /perfil|cv|profile/i.test(message)) {
+      toast("Sube un CV más completo en Opciones.", "info", {
+        label: "Abrir Opciones",
+        onClick: () => openOptionsPage()
+      });
+      return;
+    }
+    toast(message, "error");
+  }
+
+  // Find LaPieza's most-prominent submit-ish button + apply the
+  // .eamx-submit-highlight class. Selector cascade per spec:
+  //   1) buttons containing "Finalizar"/"Enviar"/"Aplicar"
+  //   2) any button[type=submit] inside the application form
+  // We pick the most visible one by area; the CSS class handles the 3-pulse
+  // animation + static glow.
+  function highlightExpressSubmitButton() {
+    const candidates = [];
+    const form = findApplicationForm();
+    const scope = form || document;
+    // 1) text-match cascade
+    const rx = /(finalizar|postularme|postular|enviar(?:\s+postulaci[oó]n)?|aplicar(?:\s+ahora)?|submit\s+application|send\s+application|apply)/i;
+    const txtBtns = Array.from(scope.querySelectorAll("button, a[role='button'], input[type='submit']"))
+      .filter((b) => isVisible(b))
+      .filter((b) => rx.test(((b.textContent || b.value || "")).trim()));
+    candidates.push(...txtBtns);
+    // 2) type=submit fallback
+    const sub = Array.from(scope.querySelectorAll("button[type='submit'], input[type='submit']"))
+      .filter((b) => isVisible(b));
+    candidates.push(...sub);
+    if (!candidates.length) {
+      toast("No encontré el botón de Finalizar — postula manualmente.", "info");
+      return;
+    }
+    // De-dupe + pick the largest by area.
+    const seen = new Set();
+    const unique = candidates.filter((b) => {
+      if (seen.has(b)) return false;
+      seen.add(b);
+      return true;
+    });
+    unique.sort((a, b) => {
+      const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+      return (rb.width * rb.height) - (ra.width * ra.height);
+    });
+    const btn = unique[0];
+    try {
+      btn.scrollIntoView({ behavior: "smooth", block: "center" });
+      btn.classList.add("eamx-submit-highlight");
+      // Static glow remains; we leave the class until the user navigates away.
+    } catch (_) { /* ignore */ }
   }
 
   // =========================================================================
@@ -1086,6 +1740,9 @@
     // Reset the adaptive-questions cache too — different vacancy = different
     // questions, and stale fieldRefs from the prior page would resolve wrong.
     detectedQuestions = []; questionAnswers = []; questionsState = "idle"; questionsError = "";
+    // Express pre-warmed draft is keyed by uuid; drop it so a fresh request
+    // runs the next time the user enters this same vacancy.
+    clearDraftSession();
     stopFlowAssistant();
     closePanel(); setFabBusy(false);
   }
@@ -1260,6 +1917,11 @@
   // Toast & messaging
   // =========================================================================
 
+  // Shared toast helper. The third arg can be either:
+  //   - { label, onClick } — adds an action button (8s default duration)
+  //   - { label, onClick, durationMs } — same, with custom duration
+  //   - { durationMs } — no action button, custom duration
+  // When no third arg: 4s info / 4s success / 4s error.
   function toast(message, variant = "info", action) {
     const el = document.createElement("div");
     const v = variant === "success" ? "eamx-toast--success"
@@ -1282,7 +1944,10 @@
 
     document.body.appendChild(el);
     requestAnimationFrame(() => el.classList.add("eamx-toast--show"));
-    const duration = action ? 8000 : 4000;
+    const hasAction = !!(action && action.label && typeof action.onClick === "function");
+    const duration = (action && Number.isFinite(action.durationMs))
+      ? Math.max(800, action.durationMs | 0)
+      : (hasAction ? 8000 : 4000);
     setTimeout(() => { el.classList.remove("eamx-toast--show"); setTimeout(() => el.remove(), 400); }, duration);
   }
 
@@ -1787,7 +2452,14 @@
   }
 
   function boot() {
-    try { detectAndMount(); watchUrlChanges(); }
+    try {
+      // Wire up the user-edit detector early so any text the user types
+      // BEFORE the FAB click is preserved by Express fill (we won't clobber
+      // a field whose data-eamx-user-edited === "true").
+      attachUserEditListener();
+      detectAndMount();
+      watchUrlChanges();
+    }
     catch (err) { console.error("[EmpleoAutomatico]", err); }
   }
 

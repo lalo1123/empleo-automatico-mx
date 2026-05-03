@@ -1674,6 +1674,96 @@
 }
 
 /* =============================================================================
+ * Express Mode — field typing pulse + submit highlight + progress overlay
+ *
+ * Applied to apply-form fields as Express fills them (cover letter, per-question
+ * answers). The cyan pulse signals "the IA just typed here" without being so
+ * loud that it distracts from the form. Submit-highlight uses the brand flame
+ * color so it reads as the next CTA.
+ * ============================================================================= */
+
+/* Field being filled — gentle cyan pulse for 1.5s */
+.eamx-field-typing {
+  animation: eamx-field-typing 1.5s ease-out;
+  outline: 2px solid #70d1c6;
+  outline-offset: 2px;
+}
+@keyframes eamx-field-typing {
+  0%   { box-shadow: 0 0 0 0 rgba(112, 209, 198, 0.7); }
+  60%  { box-shadow: 0 0 0 12px rgba(112, 209, 198, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(112, 209, 198, 0); }
+}
+
+/* Submit button highlight — 3 pulses then static glow.
+   Static glow remains via the box-shadow value below; the animation only
+   runs 3 times and then settles. */
+.eamx-submit-highlight {
+  animation: eamx-submit-pulse 1.2s ease-out 3;
+  box-shadow: 0 0 0 4px rgba(255, 102, 0, 0.4);
+  position: relative;
+}
+@keyframes eamx-submit-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(255, 102, 0, 0.7); }
+  60%  { box-shadow: 0 0 0 16px rgba(255, 102, 0, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 102, 0, 0); }
+}
+
+/* Express progress overlay — anchored bottom-right above FAB.
+   Lives at z-index just below the toast (which sits at 2147483647). */
+.eamx-express-overlay {
+  position: fixed;
+  right: 20px;
+  bottom: 88px;
+  z-index: 2147483646;
+  background: #0f1d2c;
+  color: #e9eef5;
+  padding: 14px 16px;
+  border-radius: 12px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  font: 500 13px/1.5 system-ui, sans-serif;
+  min-width: 240px;
+  max-width: 320px;
+  border-left: 4px solid #70d1c6;
+}
+.eamx-express-overlay__title {
+  font-weight: 700;
+  margin-bottom: 8px;
+  color: #70d1c6;
+}
+.eamx-express-overlay__step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0;
+}
+.eamx-express-overlay__step--done {
+  color: #6ee7b7;
+}
+.eamx-express-overlay__step--pending {
+  opacity: 0.6;
+}
+.eamx-express-overlay__step--error {
+  color: #fda4af;
+}
+.eamx-express-overlay__icon {
+  display: inline-block;
+  width: 16px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.eamx-express-overlay__label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.eamx-express-overlay__detail {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+/* =============================================================================
  * Reduced motion
  * ============================================================================= */
 
@@ -1725,6 +1815,18 @@
     animation: none !important;
   }
   .eamx-submit-pulse { box-shadow: 0 0 0 3px gold; }
+  /* Express Mode: kill animations, keep static visual cues. */
+  .eamx-field-typing,
+  .eamx-submit-highlight {
+    animation: none !important;
+  }
+  .eamx-field-typing {
+    outline: 2px solid #70d1c6;
+    outline-offset: 2px;
+  }
+  .eamx-submit-highlight {
+    box-shadow: 0 0 0 4px rgba(255, 102, 0, 0.4);
+  }
 }
 
 /* =============================================================================

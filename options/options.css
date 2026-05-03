@@ -903,6 +903,76 @@ code {
 }
 
 /* =============================================================================
+ * MODE RADIO — Express vs Revisión completa (Settings card)
+ * ============================================================================= */
+
+.mode-radio {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mode-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  background: var(--c-surface-soft);
+  cursor: pointer;
+  transition: border-color var(--t), background var(--t);
+}
+
+.mode-option:hover {
+  border-color: var(--c-brand-300);
+}
+
+.mode-option input[type="radio"] {
+  margin: 3px 0 0;
+  flex-shrink: 0;
+  accent-color: #137e7a;
+}
+
+.mode-option:has(input:checked) {
+  border-color: #137e7a;
+  background: linear-gradient(180deg, rgba(112, 209, 198, 0.10) 0%, rgba(112, 209, 198, 0.0) 60%), var(--c-surface);
+}
+
+.mode-option__body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mode-option__title {
+  font-weight: 600;
+  font-size: 14.5px;
+  color: var(--c-ink);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mode-option__pill {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  background: linear-gradient(135deg, #137e7a 0%, #105971 100%);
+  color: #ffffff;
+}
+
+.mode-option__desc {
+  font-size: 13px;
+  color: var(--c-ink-muted, #5b6e7e);
+  line-height: 1.45;
+}
+
+/* =============================================================================
  * MISC LAYOUT
  * ============================================================================= */
 
