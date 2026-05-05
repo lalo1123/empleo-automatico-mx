@@ -30,6 +30,17 @@
     ANSWER_QUESTIONS: "ANSWER_QUESTIONS"
   };
   const ERR = { UNAUTHORIZED: "UNAUTHORIZED", PLAN_LIMIT_EXCEEDED: "PLAN_LIMIT_EXCEEDED", INVALID_INPUT: "INVALID_INPUT", SERVER_ERROR: "SERVER_ERROR" };
+  // Modo Auto storage keys — must mirror lib/schemas.js STORAGE_KEYS exactly.
+  // Hardcoded so the auto-submit gates work synchronously without waiting for
+  // the dynamic import to settle. The syncSchema() block below overwrites
+  // these from the live schemas module on a best-effort basis.
+  const STORAGE_KEYS = {
+    AUTO_MODE: "eamx:settings:autoMode",
+    AUTO_DAILY: "eamx:auto:daily",
+    AUTO_DISCLAIMER_SEEN: "eamx:auto:disclaimerSeen",
+    AUTO_LAST_SUBMIT_AT: "eamx:auto:lastSubmitAt",
+    AUTO_DAY_PAUSE: "eamx:auto:dayPause"
+  };
   const BILLING_URL = "https://empleo.skybrandmx.com/account/billing";
 
   // Confirmed via live test: vacancy page is /vacancy/<uuid>, apply page is
@@ -92,6 +103,13 @@
         PLAN_LIMIT_EXCEEDED: mod.ERROR_CODES.PLAN_LIMIT_EXCEEDED,
         INVALID_INPUT: mod.ERROR_CODES.INVALID_INPUT,
         SERVER_ERROR: mod.ERROR_CODES.SERVER_ERROR
+      });
+      if (mod && mod.STORAGE_KEYS) Object.assign(STORAGE_KEYS, {
+        AUTO_MODE: mod.STORAGE_KEYS.AUTO_MODE || STORAGE_KEYS.AUTO_MODE,
+        AUTO_DAILY: mod.STORAGE_KEYS.AUTO_DAILY || STORAGE_KEYS.AUTO_DAILY,
+        AUTO_DISCLAIMER_SEEN: mod.STORAGE_KEYS.AUTO_DISCLAIMER_SEEN || STORAGE_KEYS.AUTO_DISCLAIMER_SEEN,
+        AUTO_LAST_SUBMIT_AT: mod.STORAGE_KEYS.AUTO_LAST_SUBMIT_AT || STORAGE_KEYS.AUTO_LAST_SUBMIT_AT,
+        AUTO_DAY_PAUSE: mod.STORAGE_KEYS.AUTO_DAY_PAUSE || STORAGE_KEYS.AUTO_DAY_PAUSE
       });
     } catch (_) { /* fall back to hardcoded */ }
   })();
@@ -881,6 +899,407 @@
   }
 
   // =========================================================================
+  // Modo Auto — premium-only optional auto-submit (gated 4 ways, 5 kill
+  // switches). All identifiers prefixed with `auto` to avoid collisions
+  // with the existing HITL helpers. See runExpressFill JSDoc for the full
+  // list of guarantees and the documented exception.
+  //
+  // Gates (all must be true to even ATTEMPT a click):
+  //   1) cachedProfile.plan === "premium"
+  //   2) chrome.storage.local[AUTO_MODE] === true
+  //   3) chrome.storage.local[AUTO_DISCLAIMER_SEEN] === true
+  //   4) under daily cap (120 total / 30 per portal) AND not day-paused AND
+  //      30s+ since last submit on any portal.
+  //
+  // Kill switches (any one halts the flow):
+  //   1) Escape key during countdown
+  //   2) Sanity recheck after countdown (URL drift, CAPTCHA appears, button
+  //      disappears, fields cleared)
+  //   3) CAPTCHA detection (pre-flight + post-countdown)
+  //   4) Day-pause after 2 consecutive failures in the same session
+  //   5) Inter-submit delay (30s minimum) — silent throttle
+  // =========================================================================
+
+  /**
+   * Read the AUTO_MODE toggle from chrome.storage.local. Returns false on
+   * any error (most defensive default — Modo Auto is opt-in).
+   */
+  async function readAutoMode() {
+    return new Promise((resolve) => {
+      try {
+        chrome.storage.local.get([STORAGE_KEYS.AUTO_MODE], (r) => {
+          resolve(!!(r && r[STORAGE_KEYS.AUTO_MODE]));
+        });
+      } catch (_) { resolve(false); }
+    });
+  }
+
+  /** Has the user accepted the Modo Auto disclaimer modal? */
+  async function readDisclaimerSeen() {
+    return new Promise((resolve) => {
+      try {
+        chrome.storage.local.get([STORAGE_KEYS.AUTO_DISCLAIMER_SEEN], (r) => {
+          resolve(!!(r && r[STORAGE_KEYS.AUTO_DISCLAIMER_SEEN]));
+        });
+      } catch (_) { resolve(false); }
+    });
+  }
+
+  /** YYYY-MM-DD in local time. Used as the rollover key for daily counters. */
+  function autoTodayKey() {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${dd}`;
+  }
+
+  /**
+   * Read the daily counter. Auto-resets when the date doesn't match today.
+   * Shape: { date: "YYYY-MM-DD", count: number, perPortal: { [SOURCE]: n } }.
+   */
+  async function readAutoDaily() {
+    return new Promise((resolve) => {
+      try {
+        chrome.storage.local.get([STORAGE_KEYS.AUTO_DAILY], (r) => {
+          const v = r && r[STORAGE_KEYS.AUTO_DAILY];
+          if (v && v.date === autoTodayKey()) resolve(v);
+          else resolve({ date: autoTodayKey(), count: 0, perPortal: {} });
+        });
+      } catch (_) { resolve({ date: autoTodayKey(), count: 0, perPortal: {} }); }
+    });
+  }
+
+  async function writeAutoDaily(value) {
+    return new Promise((resolve) => {
+      try {
+        chrome.storage.local.set({ [STORAGE_KEYS.AUTO_DAILY]: value }, () => resolve());
+      } catch (_) { resolve(); }
+    });
+  }
+
+  /**
+   * Day-pause record. Persists for the rest of the day after 2 consecutive
+   * portal errors. Shape: { date: "YYYY-MM-DD", reason: string } | null.
+   */
+  async function readDayPause() {
+    return new Promise((resolve) => {
+      try {
+        chrome.storage.local.get([STORAGE_KEYS.AUTO_DAY_PAUSE], (r) => {
+          const v = r && r[STORAGE_KEYS.AUTO_DAY_PAUSE];
+          if (v && v.date === autoTodayKey()) resolve(v);
+          else resolve(null);
+        });
+      } catch (_) { resolve(null); }
+    });
+  }
+
+  async function setDayPause(reason) {
+    return autoWriteStorage(STORAGE_KEYS.AUTO_DAY_PAUSE, { date: autoTodayKey(), reason });
+  }
+
+  /** Last successful auto-submit timestamp (any portal). 0 means never. */
+  async function readLastSubmitAt() {
+    return new Promise((resolve) => {
+      try {
+        chrome.storage.local.get([STORAGE_KEYS.AUTO_LAST_SUBMIT_AT], (r) => {
+          resolve(Number(r && r[STORAGE_KEYS.AUTO_LAST_SUBMIT_AT]) || 0);
+        });
+      } catch (_) { resolve(0); }
+    });
+  }
+
+  /** Generic single-key writer — small helper used by setDayPause + the success path. */
+  async function autoWriteStorage(key, value) {
+    return new Promise((resolve) => {
+      try { chrome.storage.local.set({ [key]: value }, () => resolve()); }
+      catch (_) { resolve(); }
+    });
+  }
+
+  /** Plan check — premium gate. Free/pro users never see auto-submit. */
+  async function autoIsPremium() {
+    await loadProfileOnce();
+    return cachedProfile && cachedProfile.plan === "premium";
+  }
+
+  /**
+   * Cap check — composite gate that combines the day-pause, total cap (120),
+   * portal cap (30 for LaPieza), and inter-submit delay (30s). Returns
+   * { ok: true, daily, portalCount } or { ok: false, reason }.
+   */
+  async function canAutoSubmitNow() {
+    const dp = await readDayPause();
+    if (dp) return { ok: false, reason: `Pausado hoy: ${dp.reason}` };
+    const daily = await readAutoDaily();
+    const total = daily.count || 0;
+    const portalCount = (daily.perPortal && daily.perPortal[SOURCE]) || 0;
+    if (total >= 120) return { ok: false, reason: "Cap diario total alcanzado (120)" };
+    if (portalCount >= 30) return { ok: false, reason: "Cap diario alcanzado en LaPieza (30)" };
+    // Inter-submit delay: 30s minimum since last submit on ANY portal.
+    const last = await readLastSubmitAt();
+    const elapsed = Date.now() - last;
+    if (elapsed < 30000) {
+      return { ok: false, reason: `Espera ${Math.ceil((30000 - elapsed) / 1000)}s antes del siguiente auto-submit` };
+    }
+    return { ok: true, daily, portalCount };
+  }
+
+  /**
+   * Locate LaPieza's Finalizar/submit button. We prefer a text match over a
+   * generic [type=submit] selector to avoid clicking unrelated buttons (the
+   * app shell sometimes has a "Guardar" button that's also type=submit).
+   */
+  function findLaPiezaSubmitButton() {
+    const candidates = Array.from(document.querySelectorAll(
+      "button, input[type=submit], a[role=button]"
+    )).filter((el) => {
+      try { return isVisible(el); } catch (_) { return true; }
+    });
+    const byText = candidates.find((el) => {
+      const t = ((el.textContent || el.value || "") + "").trim().toLowerCase();
+      return /^(finalizar|enviar|aplicar|postular|postularme|submit|apply)$/i.test(t);
+    });
+    if (byText) return byText;
+    // Fallback: any submit button inside an apply form.
+    const form = document.querySelector("form");
+    if (form) {
+      const sub = form.querySelector("button[type=submit], input[type=submit]");
+      if (sub) return sub;
+    }
+    return null;
+  }
+
+  /**
+   * Detect any visible CAPTCHA / hCaptcha / reCAPTCHA widget. We check both
+   * the iframe src and the className/id heuristic. Returns the element so
+   * the caller can log/scroll if needed; null if nothing is found.
+   */
+  function detectCaptcha() {
+    return document.querySelector(
+      'iframe[src*="captcha"], iframe[src*="recaptcha"], iframe[src*="hcaptcha"], ' +
+      '[class*="captcha"], [class*="recaptcha"], [class*="hcaptcha"], ' +
+      '[id*="captcha"], [id*="recaptcha"], [id*="hcaptcha"]'
+    );
+  }
+
+  /**
+   * Pre-flight + post-countdown sanity check. Returns { ok, reason }. Called
+   * twice in maybeAutoSubmit — once before the countdown starts, once right
+   * before the click — so the page has a chance to drift (CAPTCHA appears,
+   * URL changes, fields get cleared by a SPA re-render) and we'll catch it.
+   */
+  function autoSubmitSanityCheck() {
+    if (!isApplyPage()) return { ok: false, reason: "Ya no estás en la página de postulación" };
+    const tas = Array.from(document.querySelectorAll("textarea"));
+    const hasContent = tas.some((t) => (t.value || "").trim().length > 20);
+    if (tas.length > 0 && !hasContent) return { ok: false, reason: "Los campos están vacíos" };
+    if (detectCaptcha()) return { ok: false, reason: "CAPTCHA detectado, completa manual" };
+    if (!findLaPiezaSubmitButton()) return { ok: false, reason: "No encontré el botón de Finalizar" };
+    return { ok: true };
+  }
+
+  /**
+   * Show a 3-5s countdown toast with an Escape kill switch. Returns
+   * { cancel(), promise } — promise resolves true (proceed) on timeout,
+   * false (abort) on cancel or Escape. The Escape listener is attached at
+   * capture phase so it preempts page-level handlers.
+   */
+  function showAutoSubmitCountdown(seconds) {
+    let cancelled = false;
+    let escHandler = null;
+    const controller = {
+      cancel: () => {
+        if (cancelled) return;
+        cancelled = true;
+        if (escHandler) {
+          try { document.removeEventListener("keydown", escHandler, true); } catch (_) {}
+          escHandler = null;
+        }
+      },
+      promise: null
+    };
+    controller.promise = new Promise((resolve) => {
+      let elapsed = 0;
+      const tick = setInterval(() => {
+        elapsed += 1;
+        if (cancelled) {
+          clearInterval(tick);
+          if (escHandler) {
+            try { document.removeEventListener("keydown", escHandler, true); } catch (_) {}
+            escHandler = null;
+          }
+          resolve(false);
+          return;
+        }
+        if (elapsed >= seconds) {
+          clearInterval(tick);
+          if (escHandler) {
+            try { document.removeEventListener("keydown", escHandler, true); } catch (_) {}
+            escHandler = null;
+          }
+          resolve(true);
+        }
+      }, 1000);
+      escHandler = (ev) => {
+        if (ev.key === "Escape") {
+          controller.cancel();
+          clearInterval(tick);
+          resolve(false);
+        }
+      };
+      try { document.addEventListener("keydown", escHandler, true); } catch (_) {}
+      // Use a single info toast — toast() doesn't support a button click
+      // handler that reaches back into our controller, so the Escape key is
+      // the documented kill switch for v1.
+      toast(`⚡ Modo Auto: enviando en ${seconds}s... (Esc para cancelar)`, "info", { durationMs: seconds * 1000 });
+    });
+    return controller;
+  }
+
+  /**
+   * Build a minimal jobLite for queue + logging. Falls back to lastJob (the
+   * cached vacancy from /vacancy/<uuid>) when the runExpressFill caller
+   * didn't pass one through.
+   */
+  function extractJobLiteFromUrl(jobOverride) {
+    const j = jobOverride || lastJob || null;
+    return {
+      id: idFromUrl(location.href),
+      source: SOURCE,
+      url: location.href,
+      title: (j && j.title) || "",
+      company: (j && j.company) || ""
+    };
+  }
+
+  // Failure counter for the day-pause heuristic. Module-scoped (not stored)
+  // — a page reload resets it, which is intentional: the user can keep going
+  // manually after a reload, and the day-pause requires 2 in a row in the
+  // SAME session to avoid spurious pauses across days.
+  let autoSubmitFailStreak = 0;
+
+  async function markAutoSubmitFailure() {
+    autoSubmitFailStreak++;
+    if (autoSubmitFailStreak >= 2) {
+      await setDayPause("Dos errores consecutivos del portal");
+      toast("⛔ Modo Auto pausado el resto del día. Vuelve mañana o aplica manual.", "error", { durationMs: 7000 });
+      autoSubmitFailStreak = 0; // reset so the next session starts clean
+    }
+  }
+
+  async function incrementAutoDaily() {
+    const daily = await readAutoDaily();
+    daily.count = (daily.count || 0) + 1;
+    daily.perPortal = daily.perPortal || {};
+    daily.perPortal[SOURCE] = (daily.perPortal[SOURCE] || 0) + 1;
+    await writeAutoDaily(daily);
+    return daily;
+  }
+
+  /**
+   * The main hook. Called from runExpressFill AFTER all three pipelines
+   * (cover, questions, CV) have settled successfully. No-op for free/pro,
+   * disclaimer-not-seen, toggle-off, day-paused, capped, or inter-submit
+   * throttled. Otherwise: 3-5s countdown → re-sanity → click → verify → log.
+   *
+   * Errors NEVER throw: the wrapping try/catch swallows everything because
+   * Modo Auto failures must NOT break the manual HITL fallback path.
+   */
+  async function maybeAutoSubmit(jobLite) {
+    try {
+      // Gate 1: toggle on.
+      if (!(await readAutoMode())) return;
+      // Gate 2: disclaimer seen.
+      if (!(await readDisclaimerSeen())) return;
+      // Gate 3: premium plan.
+      if (!(await autoIsPremium())) return;
+      // Gate 4: cap + delay + day-pause.
+      const cap = await canAutoSubmitNow();
+      if (!cap.ok) {
+        toast(`Modo Auto: ${cap.reason}`, "info", { durationMs: 4500 });
+        return;
+      }
+
+      // Pre-flight sanity (kill switch #2/#3 first pass).
+      const sanity = autoSubmitSanityCheck();
+      if (!sanity.ok) {
+        toast(`Modo Auto cancelado: ${sanity.reason}`, "info", { durationMs: 4500 });
+        return;
+      }
+
+      // Random 3-5s countdown with Escape kill switch (#1).
+      const seconds = 3 + Math.floor(Math.random() * 3);
+      const cd = showAutoSubmitCountdown(seconds);
+      const proceed = await cd.promise;
+      if (!proceed) {
+        toast("Modo Auto cancelado por ti.", "info");
+        return;
+      }
+
+      // Re-sanity (kill switch #2/#3 second pass — page may have changed
+      // during the countdown, e.g. CAPTCHA appeared, SPA navigated away).
+      const sanity2 = autoSubmitSanityCheck();
+      if (!sanity2.ok) {
+        toast(`Modo Auto cancelado: ${sanity2.reason}`, "info", { durationMs: 4500 });
+        return;
+      }
+
+      // Single deliberate click. We do NOT dispatch synthetic events at the
+      // document level — only the platform's own click on the button.
+      const btn = findLaPiezaSubmitButton();
+      if (!btn) {
+        toast("Modo Auto: no encontré el botón Finalizar", "error");
+        return;
+      }
+      console.log("[EmpleoAutomatico] auto-submit fired:", { portal: SOURCE, jobId: jobLite && jobLite.id });
+      try { btn.click(); } catch (clickErr) {
+        console.warn("[EmpleoAutomatico] auto-submit click threw", clickErr);
+        toast("Modo Auto: el clic en Finalizar falló. Revisa manualmente.", "error");
+        await markAutoSubmitFailure();
+        return;
+      }
+
+      // Verify after 3s. If we're still on the apply page AND no error
+      // banner appeared, the submit didn't take — likely a multi-step
+      // wizard or a silent failure. Don't increment the counter and don't
+      // mark applied; just inform the user.
+      await new Promise((r) => setTimeout(r, 3000));
+      const stillOnApply = isApplyPage();
+      const errorVisible = !!document.querySelector('[class*="error" i]:not([class*="border" i])');
+      if (errorVisible) {
+        toast("Modo Auto: el portal devolvió un error. No incrementé el contador.", "error");
+        await markAutoSubmitFailure();
+        return;
+      }
+      if (stillOnApply) {
+        toast("Modo Auto: el envío no se confirmó. Revisa manualmente.", "info");
+        await markAutoSubmitFailure();
+        return;
+      }
+
+      // Success path. Reset the failure streak so a clean session starts
+      // fresh after a successful submit.
+      autoSubmitFailStreak = 0;
+      await incrementAutoDaily();
+      await autoWriteStorage(STORAGE_KEYS.AUTO_LAST_SUBMIT_AT, Date.now());
+      if (jobLite && jobLite.id && queueModule && typeof queueModule.markApplied === "function") {
+        try { await queueModule.markApplied(jobLite.id, SOURCE); } catch (_) { /* ignore */ }
+      }
+      const daily = await readAutoDaily();
+      const portalCount = (daily.perPortal && daily.perPortal[SOURCE]) || 0;
+      const company = (jobLite && jobLite.company) || "esta vacante";
+      toast(
+        `✓ Auto-aplicado a ${company}. ${portalCount}/30 hoy en LaPieza`,
+        "success",
+        { durationMs: 5000 }
+      );
+    } catch (err) {
+      console.warn("[EmpleoAutomatico] maybeAutoSubmit failed", err);
+    }
+  }
+
+  // =========================================================================
   // Express Mode — orchestrator + UI helpers
   // =========================================================================
 
@@ -889,13 +1308,22 @@
    * textarea, the per-question answers, and (in a new tab) the tailored CV.
    * The user does the final review and clicks LaPieza's own submit button.
    *
-   * HITL guarantees (NEVER violated):
+   * HITL guarantees (NEVER violated, except via Modo Auto — see below):
    *   - We NEVER click LaPieza's "Postularme" button programmatically.
    *   - We NEVER click LaPieza's "Finalizar"/submit button programmatically.
    *   - We NEVER fire form.submit() programmatically.
    *   - We only modify field values + dispatch input/change/blur events for
    *     React-friendliness.
    *   - The user always clicks the platform's CTA themselves.
+   *
+   * Documented exception — Modo Auto (see maybeAutoSubmit below):
+   *   The auto-submit flow MAY click LaPieza's Finalizar button, but only
+   *   after passing four gates: (1) plan === "premium", (2) AUTO_MODE
+   *   toggle is on, (3) AUTO_DISCLAIMER_SEEN is true, (4) under the daily
+   *   cap. Five kill switches guard the click itself: Esc key, sanity
+   *   recheck after countdown, CAPTCHA detection, day-pause on 2 errors,
+   *   and the inter-submit delay. Free/pro users and users who haven't
+   *   accepted the disclaimer never see this code path.
    *
    * Error handling:
    *   - GENERATE_DRAFT failure → error toast + open the panel so the user can
@@ -1136,6 +1564,15 @@
     // Arm the in-flow assistant (file-input tip, fallback paste buttons,
     // submit-button pulse on later wizard steps). It's idempotent.
     startFlowAssistant();
+
+    // Modo Auto — Premium-only optional auto-submit. Reads its own gates
+    // (plan + toggle + disclaimer + cap + sanity) and is a no-op for free
+    // /pro users or when the toggle is off. This is the documented exception
+    // to the HITL guarantees declared in this function's JSDoc — gated 4
+    // ways and wrapped in 5 kill switches (see maybeAutoSubmit below).
+    if (typeof maybeAutoSubmit === "function") {
+      maybeAutoSubmit(extractJobLiteFromUrl(job)).catch(() => {});
+    }
   }
 
   // Find the cover-letter target textarea on the apply page. Heuristic:
