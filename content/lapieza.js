@@ -761,6 +761,22 @@
     if (!fabEl || fabEl.disabled) return;
     // Listing branch — Express toggle is irrelevant here, the panel is read-only.
     if (fabMode() === "listing") return openBestMatchesPanel();
+
+    // If this vacancy is in the user's queue, mark it as "postulando_ahora"
+    // so the dashboard pill flips to cyan-pulse in real time. We do this
+    // before kicking off any generation so even if the request fails, the
+    // user can still see in their dashboard "tried to apply at X time".
+    // Best-effort: ensureDiscoveryDeps lazy-loads lib/queue.js the first
+    // time we need it; a load failure (rare, ad-blocker chains) silently
+    // skips this — the FAB action still proceeds normally.
+    try {
+      await ensureDiscoveryDeps();
+      if (queueModule && typeof queueModule.touchOpened === "function") {
+        const id = idFromUrl(location.href);
+        if (id) await queueModule.touchOpened(id, SOURCE);
+      }
+    } catch (_) { /* swallow */ }
+
     let express = true;
     try { express = await readExpressMode(); } catch (_) { express = true; }
     if (!express) return onFabClickReview();
