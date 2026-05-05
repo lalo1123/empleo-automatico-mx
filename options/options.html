@@ -339,11 +339,12 @@
       <section class="card" id="autoModeCard" hidden>
         <div class="auto-card__head">
           <h2>&#128640; Modo Auto <span class="auto-card__beta">Premium</span></h2>
-          <span class="auto-card__counter" id="autoCounterTotal">0/120 hoy</span>
+          <span class="auto-card__counter" id="autoCounterTotal">0/110 hoy</span>
         </div>
         <p class="auto-card__lead">
-          La extensi&oacute;n presiona &laquo;Finalizar&raquo; por ti en hasta <strong>30 vacantes/d&iacute;a por portal</strong>
-          en OCC, Computrabajo, Bumeran y LaPieza. Con salvaguardas activas y disclaimer transparente.
+          La extensi&oacute;n presiona &laquo;Finalizar&raquo; por ti hasta tu cap diario por portal,
+          dise&ntilde;ado para mantenerte en zona verde de detecci&oacute;n. Caps espec&iacute;ficos:
+          LinkedIn/Indeed 15/d&iacute;a, OCC/Computrabajo/Bumeran/LaPieza 20/d&iacute;a.
         </p>
 
         <div class="auto-card__toggle-row" id="autoToggleRow">
@@ -357,21 +358,29 @@
         </div>
 
         <div class="auto-card__breakdown" id="autoBreakdown" hidden>
-          <div class="auto-card__portal" data-portal="lapieza">
-            <span class="auto-card__portal-name">LaPieza</span>
-            <span class="auto-card__portal-count">0/30</span>
+          <div class="auto-card__portal" data-portal="linkedin">
+            <span class="auto-card__portal-name">LinkedIn <span class="auto-card__portal-tag">verde</span></span>
+            <span class="auto-card__portal-count">0/15</span>
+          </div>
+          <div class="auto-card__portal" data-portal="indeed">
+            <span class="auto-card__portal-name">Indeed <span class="auto-card__portal-tag">verde</span></span>
+            <span class="auto-card__portal-count">0/15</span>
           </div>
           <div class="auto-card__portal" data-portal="occ">
             <span class="auto-card__portal-name">OCC</span>
-            <span class="auto-card__portal-count">0/30</span>
+            <span class="auto-card__portal-count">0/20</span>
           </div>
           <div class="auto-card__portal" data-portal="computrabajo">
             <span class="auto-card__portal-name">Computrabajo</span>
-            <span class="auto-card__portal-count">0/30</span>
+            <span class="auto-card__portal-count">0/20</span>
           </div>
           <div class="auto-card__portal" data-portal="bumeran">
             <span class="auto-card__portal-name">Bumeran</span>
-            <span class="auto-card__portal-count">0/30</span>
+            <span class="auto-card__portal-count">0/20</span>
+          </div>
+          <div class="auto-card__portal" data-portal="lapieza">
+            <span class="auto-card__portal-name">LaPieza</span>
+            <span class="auto-card__portal-count">0/20</span>
           </div>
         </div>
 
@@ -381,8 +390,8 @@
         </div>
 
         <p class="auto-card__legal">
-          &#128737;&#65039; <strong>NUNCA en LinkedIn ni Indeed</strong> &mdash; documentado 23% restricci&oacute;n en 90 d&iacute;as
-          (Growleads 2026). Excluido por seguridad.
+          &#128737;&#65039; Caps calibrados con datos p&uacute;blicos: LinkedIn green zone &lt;15/d&iacute;a,
+          yellow 15-30, red 30+. Nos quedamos en verde a prop&oacute;sito.
         </p>
 
         <p class="auto-card__status status" id="autoModeStatus" aria-live="polite"></p>
@@ -627,20 +636,22 @@
         <h2 id="autoDisclaimerTitle">&#128640; Modo Auto</h2>
         <section class="auto-modal__section">
           <h3>&iquest;Qu&eacute; hace?</h3>
-          <p>La extensi&oacute;n presiona &laquo;Finalizar&raquo; o &laquo;Enviar&raquo; por ti despu&eacute;s de llenar el formulario, en hasta <strong>30 vacantes/d&iacute;a por portal</strong> en OCC, Computrabajo, Bumeran y LaPieza.</p>
+          <p>La extensi&oacute;n presiona &laquo;Finalizar&raquo; o &laquo;Enviar&raquo; por ti despu&eacute;s de llenar el formulario, hasta tu cap diario por portal: LinkedIn/Indeed 15/d&iacute;a, OCC/Computrabajo/Bumeran/LaPieza 20/d&iacute;a (110 totales).</p>
         </section>
         <section class="auto-modal__section auto-modal__section--warn">
           <h3>&#9888;&#65039; Riesgos reales (transparentes)</h3>
           <ul>
-            <li>Estudios independientes muestran que tools de auto-aplicaci&oacute;n generan restricciones en <strong>23% de cuentas en 90 d&iacute;as</strong> en LinkedIn.</li>
-            <li>Por eso EXCLUIMOS LinkedIn e Indeed &mdash; los m&aacute;s agresivos en detecci&oacute;n.</li>
-            <li>En OCC/Computrabajo/Bumeran/LaPieza el riesgo es menor pero no cero. Si tu cuenta del portal se ve afectada por uso intensivo, no es un bug &mdash; es el costo de la velocidad.</li>
+            <li>LinkedIn detecta auto-apply: zona verde &lt;15/d&iacute;a, amarilla 15-30, roja 30+. Nuestro cap es 15 &mdash; punto verde.</li>
+            <li>Indeed similar: cap 15/d&iacute;a.</li>
+            <li>OCC/Computrabajo/Bumeran/LaPieza: detecci&oacute;n menos agresiva en MX, cap 20/d&iacute;a.</li>
+            <li>Si tu cuenta del portal se ve afectada por uso intensivo, no es bug &mdash; es el costo de la velocidad.</li>
           </ul>
         </section>
         <section class="auto-modal__section auto-modal__section--ok">
           <h3>&#128737;&#65039; Salvaguardas que aplicamos</h3>
           <ul>
-            <li>Cap r&iacute;gido: 30 aplicaciones/d&iacute;a por portal (vs 750 de LazyApply)</li>
+            <li>Caps por portal: LinkedIn/Indeed 15/d&iacute;a, otros 20/d&iacute;a (vs LazyApply 750/d&iacute;a)</li>
+            <li>Total combinado: 110/d&iacute;a &mdash; bajo el umbral humano-like en cada plataforma</li>
             <li>Delay aleatorio 30-90s entre submits (parece humano)</li>
             <li>Stop autom&aacute;tico si detectamos CAPTCHA o respuesta inusual</li>
             <li>T&uacute; revisas los campos llenos antes de cada submit (3-5s window con Cancelar)</li>

@@ -41,6 +41,14 @@
     AUTO_LAST_SUBMIT_AT: "eamx:auto:lastSubmitAt",
     AUTO_DAY_PAUSE: "eamx:auto:dayPause"
   };
+  // Per-portal Modo Auto caps. Hardcoded fallbacks mirror lib/schemas.js
+  // (AUTO_PORTAL_CAPS / AUTO_PORTAL_ORDER / AUTO_TOTAL_CAP) so the
+  // auto-submit gate works even before syncSchema() finishes. Calibrated
+  // against published green-zone thresholds: LinkedIn/Indeed 15/day,
+  // OCC/Computrabajo/Bumeran/LaPieza 20/day, total 110/day.
+  let AUTO_PORTAL_CAPS = { linkedin: 15, indeed: 15, occ: 20, computrabajo: 20, bumeran: 20, lapieza: 20 };
+  let AUTO_PORTAL_ORDER = ["linkedin", "indeed", "occ", "computrabajo", "bumeran", "lapieza"];
+  let AUTO_TOTAL_CAP = 110;
   const BILLING_URL = "https://empleo.skybrandmx.com/account/billing";
 
   // Confirmed via live test: vacancy page is /vacancy/<uuid>, apply page is
@@ -111,6 +119,18 @@
         AUTO_LAST_SUBMIT_AT: mod.STORAGE_KEYS.AUTO_LAST_SUBMIT_AT || STORAGE_KEYS.AUTO_LAST_SUBMIT_AT,
         AUTO_DAY_PAUSE: mod.STORAGE_KEYS.AUTO_DAY_PAUSE || STORAGE_KEYS.AUTO_DAY_PAUSE
       });
+      // Per-portal cap config — overwrite the hardcoded fallback if the
+      // live schemas module exposes the new exports. Defensive checks so
+      // an older lib/schemas.js (without these) doesn't blow us up.
+      if (mod && mod.AUTO_PORTAL_CAPS && typeof mod.AUTO_PORTAL_CAPS === "object") {
+        AUTO_PORTAL_CAPS = mod.AUTO_PORTAL_CAPS;
+      }
+      if (mod && Array.isArray(mod.AUTO_PORTAL_ORDER)) {
+        AUTO_PORTAL_ORDER = mod.AUTO_PORTAL_ORDER;
+      }
+      if (mod && typeof mod.AUTO_TOTAL_CAP === "number") {
+        AUTO_TOTAL_CAP = mod.AUTO_TOTAL_CAP;
+      }
     } catch (_) { /* fall back to hardcoded */ }
   })();
 
@@ -1024,25 +1044,37 @@
   }
 
   /**
-   * Cap check — composite gate that combines the day-pause, total cap (120),
-   * portal cap (30 for LaPieza), and inter-submit delay (30s). Returns
-   * { ok: true, daily, portalCount } or { ok: false, reason }.
+   * Cap check — composite gate that combines the day-pause, total cap
+   * (AUTO_TOTAL_CAP, currently 110), portal-specific cap (from
+   * AUTO_PORTAL_CAPS keyed by SOURCE — 20 for lapieza), and the
+   * inter-submit delay (30s minimum since last submit on ANY portal).
+   * Returns { ok: true, daily, portalCount, portalCap } or
+   * { ok: false, reason }.
    */
   async function canAutoSubmitNow() {
+    // Day-pause check (unchanged).
     const dp = await readDayPause();
     if (dp) return { ok: false, reason: `Pausado hoy: ${dp.reason}` };
+
     const daily = await readAutoDaily();
     const total = daily.count || 0;
+    const portalCap = AUTO_PORTAL_CAPS[SOURCE] ?? 20;
     const portalCount = (daily.perPortal && daily.perPortal[SOURCE]) || 0;
-    if (total >= 120) return { ok: false, reason: "Cap diario total alcanzado (120)" };
-    if (portalCount >= 30) return { ok: false, reason: "Cap diario alcanzado en LaPieza (30)" };
-    // Inter-submit delay: 30s minimum since last submit on ANY portal.
+
+    if (total >= AUTO_TOTAL_CAP) {
+      return { ok: false, reason: `Cap diario total alcanzado (${AUTO_TOTAL_CAP})` };
+    }
+    if (portalCount >= portalCap) {
+      return { ok: false, reason: `Cap diario alcanzado en ${SOURCE} (${portalCap})` };
+    }
+
+    // Inter-submit delay (unchanged): 30s minimum since last submit.
     const last = await readLastSubmitAt();
     const elapsed = Date.now() - last;
     if (elapsed < 30000) {
       return { ok: false, reason: `Espera ${Math.ceil((30000 - elapsed) / 1000)}s antes del siguiente auto-submit` };
     }
-    return { ok: true, daily, portalCount };
+    return { ok: true, daily, portalCount, portalCap };
   }
 
   /**
@@ -1288,9 +1320,10 @@
       }
       const daily = await readAutoDaily();
       const portalCount = (daily.perPortal && daily.perPortal[SOURCE]) || 0;
+      const portalCap = AUTO_PORTAL_CAPS[SOURCE] ?? 20;
       const company = (jobLite && jobLite.company) || "esta vacante";
       toast(
-        `✓ Auto-aplicado a ${company}. ${portalCount}/30 hoy en LaPieza`,
+        `✓ Auto-aplicado a ${company}. ${portalCount}/${portalCap} hoy en ${SOURCE}`,
         "success",
         { durationMs: 5000 }
       );

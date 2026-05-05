@@ -9,6 +9,9 @@ import {
   PLAN_LABELS,
   ERROR_CODES,
   STORAGE_KEYS,
+  AUTO_PORTAL_CAPS,
+  AUTO_PORTAL_ORDER,
+  AUTO_TOTAL_CAP,
   nowISO
 } from "../lib/schemas.js";
 import { sendMessage } from "../lib/messaging.js";
@@ -1098,10 +1101,10 @@ try {
 // and day-pause toast all live in content/lapieza.js (next agent).
 // ---------------------------------------------------------------------------
 
-// Per-portal cap. Mirrors lib/schemas.js → AUTO_MODE_DAILY_CAPS but kept
-// inline so the UI doesn't have to import the constants table.
-const AUTO_PER_PORTAL_CAP = 30;
-const AUTO_TOTAL_CAP = 120;
+// Per-portal caps now come from lib/schemas.js (AUTO_PORTAL_CAPS,
+// AUTO_PORTAL_ORDER, AUTO_TOTAL_CAP) — imported at the top. The previous
+// inline 30/120 constants were stale once Modo Auto v2 calibrated the
+// caps per portal (LinkedIn/Indeed 15, MX portals 20, total 110).
 
 // Local YYYY-MM-DD — used to detect a stale daily counter on paint.
 function todayKey() {
@@ -1226,13 +1229,17 @@ async function paintAutoMode() {
   }
 
   // Per-portal counts — read from the breakdown rows by data-portal.
+  // Each portal has its own cap from AUTO_PORTAL_CAPS (LinkedIn/Indeed
+  // 15/day, OCC/Computrabajo/Bumeran/LaPieza 20/day) — calibrated to
+  // stay in each platform's documented "green zone".
   if (autoBreakdown) {
     const rows = autoBreakdown.querySelectorAll(".auto-card__portal");
     for (const row of rows) {
       const portal = row.getAttribute("data-portal");
       const count = Number(perPortal[portal] || 0);
+      const cap = AUTO_PORTAL_CAPS[portal] || 20;
       const countEl = row.querySelector(".auto-card__portal-count");
-      if (countEl) countEl.textContent = `${count}/${AUTO_PER_PORTAL_CAP}`;
+      if (countEl) countEl.textContent = `${count}/${cap}`;
     }
   }
 }
