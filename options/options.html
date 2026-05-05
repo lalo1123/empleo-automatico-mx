@@ -326,30 +326,44 @@
         </div>
       </section>
 
-      <!-- ============ Card: Mi cola de postulación ============ -->
+      <!-- ============ Card: Mi cola de postulación (dashboard) ============ -->
       <!--
-        Discovery / pre-selection queue. Populated by the listing-page
-        overlay on LaPieza (content/lapieza.js → onMarkClick) — clicking
-        the ⭐ Marcar button on a vacancy card writes the entry to
-        chrome.storage.local["eamx:queue"]. This card mirrors the same
-        key. NEVER auto-submits — HITL always: the user opens each
-        vacancy and clicks the FAB themselves.
+        Discovery / pre-selection dashboard. Populated by the listing-page
+        overlay on LaPieza (content/lapieza.js → onMarkClick). NEVER
+        auto-submits — HITL always: the user opens each vacancy and clicks
+        the FAB themselves. The "✓ La envié" button is user-driven; that
+        explicit click is what flips status to "aplicada".
+        Layout cloned from aiapply.co's auto-apply card with SkyBrandMX
+        branding (see project_commercial_skybrandmx + the 2026-05-05 spec).
       -->
-      <section class="card is-hidden" id="queue-section" aria-labelledby="queueHeading">
-        <div class="card__head">
-          <div class="card__eyebrow">Descubrimiento</div>
-          <h2 id="queueHeading">&#11088; Mi cola de postulaci&oacute;n</h2>
-          <p class="card__sub">
-            Vacantes que marcaste para revisar despu&eacute;s. La extensi&oacute;n NO postula sola &mdash; t&uacute; abres cada una y le das al FAB cuando quieras aplicar.
-          </p>
+      <section class="card qd-card-wrap is-hidden" id="queue-section" aria-labelledby="queueHeading">
+        <header class="qd-header">
+          <div class="qd-header__title">
+            <span class="qd-header__icon" aria-hidden="true">&#11088;</span>
+            <h2 id="queueHeading">Mi cola de postulaci&oacute;n</h2>
+          </div>
+          <div class="qd-counter" aria-live="polite">
+            <span class="qd-counter__queue" id="qd-counter-queue">0 en cola</span>
+            <span class="qd-counter__sep" aria-hidden="true">&middot;</span>
+            <span class="qd-counter__applied" id="qd-counter-applied">0 este mes</span>
+          </div>
+        </header>
+
+        <div class="qd-disclaimer">
+          <span class="qd-disclaimer__icon" aria-hidden="true">&#128737;&#65039;</span>
+          <span><strong>HITL real:</strong> &laquo;Aplicado&raquo; = T&Uacute; diste clic en Finalizar. La extensi&oacute;n nunca env&iacute;a sola &mdash; eso es lo que protege tu cuenta de baneos.</span>
         </div>
-        <div id="queue-empty" class="queue-empty">
-          No has marcado vacantes. Ve a LaPieza y dale al bot&oacute;n <strong>&#11088; Marcar</strong> en las que te interesen.
+
+        <div id="queue-empty" class="qd-empty">
+          <span class="qd-empty__icon" aria-hidden="true">&#128236;</span>
+          <p>No has marcado vacantes. Ve a un portal soportado y dale a <strong>&#11088; Marcar</strong>.</p>
         </div>
-        <ul id="queue-list" class="queue-list" role="list" hidden></ul>
-        <div class="queue-actions" id="queue-actions" hidden>
-          <button class="btn btn--ghost btn--sm" id="queue-clear" type="button">Vaciar cola</button>
+
+        <ul id="queue-list" class="qd-list" role="list" hidden></ul>
+
+        <div class="qd-actions" id="queue-actions" hidden>
           <span id="queue-status" class="status" role="status" aria-live="polite"></span>
+          <button class="btn btn--ghost btn--sm" id="queue-clear" type="button">Vaciar cola</button>
         </div>
       </section>
 

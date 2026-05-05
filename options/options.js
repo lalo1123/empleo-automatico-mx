@@ -16,9 +16,11 @@ import {
   getQueue,
   removeFromQueue,
   setQueue,
+  markApplied,
+  appliedThisMonth,
   QUEUE_STORAGE_KEY
 } from "../lib/queue.js";
-import { levelForScore, expandCitySynonyms, deriveImplicitPreferences } from "../lib/match-score.js";
+import { expandCitySynonyms, deriveImplicitPreferences } from "../lib/match-score.js";
 
 // ---------------------------------------------------------------------------
 // DOM shortcuts
@@ -788,6 +790,8 @@ const queueEmptyEl = $("queue-empty");
 const queueActionsEl = $("queue-actions");
 const queueClearBtn = $("queue-clear");
 const queueStatusEl = $("queue-status");
+const queueCounterQueueEl = $("qd-counter-queue");
+const queueCounterAppliedEl = $("qd-counter-applied");
 
 // Pretty source labels — keep in sync with SOURCES in lib/schemas.js. We
 // avoid importing those constants because the strings are user-facing.
@@ -800,6 +804,26 @@ const QUEUE_SOURCE_LABELS = {
   linkedin: "LinkedIn"
 };
 
+// Status presentation — emoji + Spanish label for the right-side pill.
+const STATUS_PRESENTATION = {
+  comenzando: { icon: "🟠", label: "Comenzando" },          // 🟠
+  postulando_ahora: { icon: "🟦", label: "Postulando ahora" }, // 🟦
+  aplicada: { icon: "🟢", label: "Aplicado" }                  // 🟢
+};
+
+// Matches the brand-friendly gradients listed in the spec — picked by
+// hashing the company name so each company gets a stable variant. The flame
+// gradient is the rarest because we use it sparingly (visual accent, not
+// the default) — having it as 1 of 5 keeps the LaPieza-heavy queue
+// predominantly cyan/teal.
+const LOGO_GRADIENTS = [
+  "linear-gradient(135deg, #70d1c6, #137e7a)",
+  "linear-gradient(135deg, #137e7a, #105971)",
+  "linear-gradient(135deg, #2a9c91, #0d3f57)",
+  "linear-gradient(135deg, #105971, #0f1d2c)",
+  "linear-gradient(135deg, #ff6600, #c44a00)"
+];
+
 function escapeHtml(s) {
   return String(s == null ? "" : s)
     .replace(/&/g, "&amp;")
@@ -810,54 +834,135 @@ function escapeHtml(s) {
 }
 
 // Match the relative-time format used by content/lapieza.js so the user
-// sees consistent copy across the extension.
-//   <60s  "hace un momento"
+// sees consistent copy across the extension. The aiapply.co reference uses
+// terse forms like "Ahora", "3h", "4h" — we keep "hace X" because the
+// queue cards are the user's *own* recent marks, not external feed items.
+//   <60s  "Ahora"
 //   <60m  "hace X min"
 //   <24h  "hace X h"
 //   else  "hace X días"
 function queueRelative(ts) {
-  if (!Number.isFinite(ts)) return "hace un momento";
+  if (!Number.isFinite(ts)) return "Ahora";
   const delta = Date.now() - ts;
-  if (delta < 0) return "hace un momento";
+  if (delta < 0) return "Ahora";
   const sec = Math.floor(delta / 1000);
-  if (sec < 60) return "hace un momento";
+  if (sec < 60) return "Ahora";
   const min = Math.floor(sec / 60);
   if (min < 60) return `hace ${min} min`;
   const hr = Math.floor(min / 60);
   if (hr < 24) return `hace ${hr} h`;
   const days = Math.floor(hr / 24);
-  return `hace ${days} días`;
+  return `hace ${days} d`;
+}
+
+// Stable-ish 32-bit hash for the company name → logo gradient mapping. We
+// strip accents/case first so "Bimbó" and "bimbo" land on the same color.
+function logoHash(s) {
+  const norm = String(s || "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase();
+  let h = 0;
+  for (let i = 0; i < norm.length; i++) {
+    h = ((h << 5) - h + norm.charCodeAt(i)) | 0;
+  }
+  return Math.abs(h);
+}
+
+function logoGradient(companyName) {
+  return LOGO_GRADIENTS[logoHash(companyName) % LOGO_GRADIENTS.length];
+}
+
+function logoLetter(companyName) {
+  const norm = String(companyName || "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .trim();
+  if (!norm) return ""; // caller renders 📁 fallback
+  const ch = norm[0];
+  return ch ? ch.toUpperCase() : "";
 }
 
 function renderQueueItem(item) {
-  const score = Number.isFinite(item.matchScore) ? Math.max(0, Math.min(100, item.matchScore | 0)) : 0;
-  const level = levelForScore(score);
-  const reasonsText = Array.isArray(item.reasons) && item.reasons.length
-    ? item.reasons.slice(0, 3).join(" · ")
-    : "";
+  const status = STATUS_PRESENTATION[item.status] ? item.status : "comenzando";
+  const statusInfo = STATUS_PRESENTATION[status];
+  const tags = Array.isArray(item.skillTags) ? item.skillTags.slice(0, 3) : [];
   const sourceLabel = QUEUE_SOURCE_LABELS[item.source] || item.source || "";
   const companyLine = [item.company, item.location, sourceLabel]
     .map((s) => (s || "").trim())
     .filter(Boolean)
     .join(" · ");
+  const letter = logoLetter(item.company);
+  const gradient = logoGradient(item.company);
+  const isApplied = status === "aplicada";
 
   const li = document.createElement("li");
-  li.className = "queue-item";
+  li.className = `qd-card qd-card--${status}`;
   li.setAttribute("data-id", item.id || "");
   li.setAttribute("data-source", item.source || "");
+
+  const tagsHtml = tags.length
+    ? `<ul class="qd-card__tags" role="list">${tags
+        .map((t) => `<li class="qd-card__tag">${escapeHtml(t)}</li>`)
+        .join("")}</ul>`
+    : "";
+
+  const logoBody = letter
+    ? `<span class="qd-card__logo-letter">${escapeHtml(letter)}</span>`
+    : `<span class="qd-card__logo-fallback" aria-hidden="true">📁</span>`;
+
+  // The "✓ La envié" button is suppressed once the user already marked it as
+  // applied — leaving only "Quitar" so they can purge the entry once the
+  // status becomes informational.
+  const appliedBtnHtml = isApplied
+    ? ""
+    : `<button class="qd-card__action qd-card__action--applied" type="button" data-action="mark-applied" data-id="${escapeHtml(item.id || "")}" data-source="${escapeHtml(item.source || "")}">✓ La envié</button>`;
+
   li.innerHTML = `
-    <div class="queue-item__head">
-      <span class="queue-item__score queue-item__score--${escapeHtml(level)}">${score}%</span>
-      <a class="queue-item__title" href="${escapeHtml(item.url || "#")}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.title || "(sin título)")}</a>
-    </div>
-    <div class="queue-item__company">${escapeHtml(companyLine || "—")}</div>
-    ${reasonsText ? `<div class="queue-item__reasons">${escapeHtml(reasonsText)}</div>` : ""}
-    <div class="queue-item__foot">
-      <span class="queue-item__when">Marcada ${escapeHtml(queueRelative(item.savedAt))}</span>
-      <button class="queue-item__remove" type="button" data-id="${escapeHtml(item.id || "")}" data-source="${escapeHtml(item.source || "")}">Quitar</button>
+    <div class="qd-card__logo" aria-hidden="true" style="background:${gradient}">${logoBody}</div>
+    <div class="qd-card__main">
+      <div class="qd-card__head">
+        <div class="qd-card__title">
+          <a href="${escapeHtml(item.url || "#")}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.title || "(sin título)")}</a>
+        </div>
+        <span class="qd-card__time">${escapeHtml(queueRelative(item.savedAt))}</span>
+      </div>
+      <div class="qd-card__company">${escapeHtml(companyLine || "—")}</div>
+      <div class="qd-card__row">
+        ${tagsHtml}
+        <span class="qd-card__status qd-card__status--${status}">
+          <span class="qd-card__status-icon" aria-hidden="true">${statusInfo.icon}</span>
+          <span class="qd-card__status-label">${escapeHtml(statusInfo.label)}</span>
+        </span>
+      </div>
+      <div class="qd-card__actions">
+        ${appliedBtnHtml}
+        <button class="qd-card__action qd-card__action--remove" type="button" data-action="remove" data-id="${escapeHtml(item.id || "")}" data-source="${escapeHtml(item.source || "")}">Quitar</button>
+      </div>
     </div>
   `;
   return li;
+}
+
+// Animate the counter pill briefly when its number changes. Honors
+// prefers-reduced-motion via the CSS keyframe definition (see options.css
+// → .qd-counter--tick / @media block).
+function tickCounter(el, nextText) {
+  if (!el) return;
+  if (el.textContent === nextText) return;
+  el.textContent = nextText;
+  el.classList.remove("qd-counter--tick");
+  // Force reflow so the class re-applies and the animation re-fires.
+  // eslint-disable-next-line no-unused-expressions
+  void el.offsetWidth;
+  el.classList.add("qd-counter--tick");
+}
+
+function paintCounter(queue) {
+  const total = queue.length;
+  const applied = appliedThisMonth(queue);
+  tickCounter(queueCounterQueueEl, `${total} en cola`);
+  tickCounter(queueCounterAppliedEl, `${applied} este mes`);
 }
 
 async function paintQueue() {
@@ -871,6 +976,8 @@ async function paintQueue() {
   // in storage; we just don't surface it until they're back in.
   queueSection.classList.remove("is-hidden");
 
+  paintCounter(queue);
+
   if (!queue.length) {
     queueEmptyEl.hidden = false;
     queueListEl.hidden = true;
@@ -880,6 +987,8 @@ async function paintQueue() {
   }
 
   // Sort newest-first so the user sees their most-recent marks at the top.
+  // Within "applied" we keep them visible too — applied items aren't pulled
+  // out of the queue, just visually tagged. The user can choose to "Quitar".
   const sorted = queue.slice().sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0));
 
   queueEmptyEl.hidden = true;
@@ -891,22 +1000,28 @@ async function paintQueue() {
   }
 }
 
-// Single delegated click handler — fewer listeners as the queue mutates.
+// Single delegated click handler covers all the per-card buttons (mark
+// applied, remove). Keeps the listener count constant as the queue mutates.
 if (queueListEl) {
   queueListEl.addEventListener("click", async (ev) => {
     const target = ev.target;
     if (!(target instanceof HTMLElement)) return;
-    const btn = target.closest(".queue-item__remove");
-    if (!btn) return;
+    const btn = target.closest("[data-action]");
+    if (!btn || !queueListEl.contains(btn)) return;
+    const action = btn.getAttribute("data-action");
     const id = btn.getAttribute("data-id");
     const source = btn.getAttribute("data-source");
-    if (!id || !source) return;
+    if (!action || !id || !source) return;
     btn.disabled = true;
     try {
-      await removeFromQueue(id, source);
+      if (action === "mark-applied") {
+        await markApplied(id, source);
+      } else if (action === "remove") {
+        await removeFromQueue(id, source);
+      }
       await paintQueue();
     } catch (e) {
-      setStatus(queueStatusEl, "err", e?.message || "No se pudo quitar");
+      setStatus(queueStatusEl, "err", e?.message || "No se pudo actualizar");
     } finally {
       btn.disabled = false;
     }

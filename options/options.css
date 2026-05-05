@@ -1668,172 +1668,471 @@ code {
 }
 
 /* =============================================================================
- * Queue (Mi cola) — discovery / pre-selection list rendered from
- * chrome.storage.local["eamx:queue"]. Cards are color-coded by match score
- * level via the same scale as the listing-page badges (high/mid/low/poor).
+ * Queue Dashboard (qd-) — premium aiapply.co-style layout cloned for SkyBrandMX.
+ * Each card: gradient logo · title · skill chips · status pill · time · actions.
+ * Status semantics live in lib/queue.js — never auto-submit, the user's own
+ * "✓ La envié" click is the only way an item flips to "aplicada".
  * ============================================================================= */
 
-.queue-empty {
-  padding: 16px 18px;
+.qd-card-wrap {
+  /* The dashboard card inherits .card padding; rows inside get a tighter
+     gap so the header / disclaimer / list don't drift apart. */
+  gap: 14px;
+}
+
+/* --- Header row (title + counter pill) ------------------------------------ */
+
+.qd-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.qd-header__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.qd-header__icon {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--r-md);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  background: linear-gradient(135deg, rgba(112, 209, 198, 0.20) 0%, rgba(16, 89, 113, 0.10) 100%);
+  border: 1px solid var(--c-brand-200);
+  flex-shrink: 0;
+}
+
+.qd-header h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--c-ink);
+  line-height: 1.25;
+}
+
+.qd-counter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: var(--r-pill);
+  background: linear-gradient(135deg, rgba(112, 209, 198, 0.18) 0%, rgba(16, 89, 113, 0.08) 100%);
+  color: var(--c-brand-700);
+  border: 1px solid var(--c-brand-200);
+  font-size: 12.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.005em;
+  white-space: nowrap;
+}
+
+.qd-counter__sep {
+  color: var(--c-brand-300);
+  margin: 0 1px;
+}
+
+.qd-counter__queue,
+.qd-counter__applied {
+  display: inline-block;
+}
+
+/* Pulse-tick when the counter changes value. Honors prefers-reduced-motion
+   via the global @media block at the bottom of this file. */
+.qd-counter--tick {
+  animation: qd-counter-tick 320ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes qd-counter-tick {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.15); color: var(--c-flame-500); }
+  100% { transform: scale(1); }
+}
+
+/* --- Disclaimer banner ---------------------------------------------------- */
+
+.qd-disclaimer {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 14px;
+  border-left: 3px solid var(--c-brand-300);
+  border-radius: var(--r-sm);
+  background: linear-gradient(135deg, rgba(255, 192, 120, 0.10) 0%, rgba(112, 209, 198, 0.10) 100%);
+  color: var(--c-ink-soft);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.qd-disclaimer strong {
+  color: var(--c-brand-700);
+  font-weight: 700;
+}
+
+.qd-disclaimer__icon {
+  flex-shrink: 0;
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+/* --- Empty state ---------------------------------------------------------- */
+
+.qd-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 10px;
+  padding: 28px 18px;
   border: 1px dashed var(--c-border);
   border-radius: var(--r-md);
   color: var(--c-ink-muted);
   background: var(--c-surface-soft);
-  font-size: 14px;
-  line-height: 1.55;
 }
 
-.queue-empty strong {
+.qd-empty p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  max-width: 380px;
+}
+
+.qd-empty strong {
   color: var(--c-ink-soft);
 }
 
-.queue-list {
+.qd-empty__icon {
+  font-size: 28px;
+  line-height: 1;
+}
+
+/* --- Card list ------------------------------------------------------------ */
+
+.qd-list {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
-.queue-item {
+.qd-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 16px 18px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-lg);
+  background: var(--c-surface);
+  box-shadow: var(--sh-soft);
+  transition: transform 150ms cubic-bezier(0.4, 0, 0.2, 1), box-shadow 150ms cubic-bezier(0.4, 0, 0.2, 1), border-color 150ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.qd-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 24px -10px rgba(16, 89, 113, 0.30);
+  border-color: var(--c-brand-200);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .qd-card {
+    animation: qd-card-enter 220ms cubic-bezier(0.4, 0, 0.2, 1) both;
+  }
+}
+
+@keyframes qd-card-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* When the user marks an item as applied, dial down the visual weight a
+   touch — green pill is enough; we don't want it to scream for attention
+   the way an in-flight one does. */
+.qd-card--aplicada {
+  background: linear-gradient(180deg, rgba(16, 185, 129, 0.04) 0%, transparent 60%), var(--c-surface);
+}
+
+/* Logo bubble ------------------------------------------------------------- */
+
+.qd-card__logo {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--r-pill);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 18px;
+  letter-spacing: 0.01em;
+  /* gradient is applied inline by JS via logoGradient(company) */
+  box-shadow: 0 4px 12px -4px rgba(16, 89, 113, 0.40);
+  user-select: none;
+}
+
+.qd-card__logo-letter {
+  text-shadow: 0 1px 2px rgba(15, 23, 42, 0.20);
+}
+
+.qd-card__logo-fallback {
+  font-size: 18px;
+  filter: drop-shadow(0 1px 2px rgba(15, 23, 42, 0.18));
+}
+
+/* Main content (everything to the right of the logo) ---------------------- */
+
+.qd-card__main {
+  flex: 1 1 auto;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 14px 16px;
-  border: 1px solid var(--c-border);
-  border-left: 3px solid var(--c-brand-300);
-  border-radius: var(--r-md);
-  background: var(--c-surface);
-  box-shadow: var(--sh-soft);
-  transition: transform 120ms cubic-bezier(0.4, 0, 0.2, 1), box-shadow 120ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.queue-item:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 6px 18px -8px rgba(16, 89, 113, 0.25);
-}
-
-.queue-item__head {
+.qd-card__head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
+  justify-content: space-between;
   gap: 10px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
-.queue-item__title {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--c-ink);
-  text-decoration: none;
-  letter-spacing: -0.005em;
-  line-height: 1.4;
+.qd-card__title {
   flex: 1 1 auto;
   min-width: 0;
 }
 
-.queue-item__title:hover {
+.qd-card__title a {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.005em;
+  color: var(--c-ink);
+  line-height: 1.35;
+  text-decoration: none;
+  display: inline-block;
+  word-break: break-word;
+}
+
+.qd-card__title a:hover {
+  color: var(--c-brand-700);
   text-decoration: underline;
   text-decoration-color: var(--c-brand-300);
   text-underline-offset: 3px;
-  color: var(--c-brand-700);
 }
 
-.queue-item__score {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 46px;
-  padding: 4px 8px;
-  border-radius: 9999px;
-  font-size: 12px;
-  font-weight: 700;
+.qd-card__time {
+  font-size: 11.5px;
+  color: var(--c-ink-muted);
   font-variant-numeric: tabular-nums;
-  border: 1px solid transparent;
-  background: var(--c-slate-100);
+  flex-shrink: 0;
+  padding-top: 3px;
+}
+
+.qd-card__company {
+  font-size: 13px;
   color: var(--c-ink-muted);
+  line-height: 1.45;
 }
 
-.queue-item__score--high {
-  background: linear-gradient(135deg, #047857 0%, #065f46 100%);
-  color: #ffffff;
-}
-
-.queue-item__score--mid {
-  background: linear-gradient(135deg, #137e7a 0%, #105971 100%);
-  color: #ffffff;
-}
-
-.queue-item__score--low {
-  background: #fef3c7;
-  color: #92400e;
-  border-color: #fde68a;
-}
-
-.queue-item__score--poor,
-.queue-item__score--unknown {
-  background: var(--c-slate-100);
-  color: var(--c-ink-muted);
-  border-color: var(--c-border);
-}
-
-.queue-item__company {
-  font-size: 13.5px;
-  color: var(--c-ink-soft);
-}
-
-.queue-item__reasons {
-  font-size: 12.5px;
-  color: var(--c-ink-muted);
-  line-height: 1.5;
-}
-
-.queue-item__foot {
+.qd-card__row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+
+/* Skill chips ------------------------------------------------------------- */
+
+.qd-card__tags {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.qd-card__tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: var(--r-pill);
+  background: var(--c-brand-50);
+  color: var(--c-brand-700);
+  border: 1px solid var(--c-brand-200);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.005em;
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Status pill (right side) ------------------------------------------------ */
+
+.qd-card__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: var(--r-pill);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.qd-card__status-icon {
+  font-size: 9px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.qd-card__status--comenzando {
+  background: rgba(255, 102, 0, 0.10);
+  color: var(--c-flame-500);
+  border-color: rgba(255, 102, 0, 0.30);
+}
+
+.qd-card__status--postulando_ahora {
+  background: rgba(112, 209, 198, 0.18);
+  color: var(--c-brand-700);
+  border-color: var(--c-brand-300);
+}
+
+.qd-card__status--aplicada {
+  background: rgba(16, 185, 129, 0.12);
+  color: #0e8e60;
+  border-color: rgba(16, 185, 129, 0.30);
+}
+
+/* Subtle pulse on the actively-applying card. Capped at 1.6s so it doesn't
+   feel frantic. Honors prefers-reduced-motion. */
+@media (prefers-reduced-motion: no-preference) {
+  .qd-card__status--postulando_ahora {
+    animation: qd-pulse-postulando 1.6s ease-in-out infinite;
+  }
+}
+
+@keyframes qd-pulse-postulando {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(112, 209, 198, 0.0);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(112, 209, 198, 0.30);
+  }
+}
+
+/* Card actions row (footer) ----------------------------------------------- */
+
+.qd-card__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
   margin-top: 4px;
+  flex-wrap: wrap;
 }
 
-.queue-item__when {
-  font-size: 12px;
-  color: var(--c-slate-500);
-  font-variant-numeric: tabular-nums;
-}
-
-.queue-item__remove {
+.qd-card__action {
   appearance: none;
   border: 1px solid var(--c-border);
   background: var(--c-surface);
   color: var(--c-ink-muted);
   border-radius: var(--r-sm);
-  font: 600 12.5px/1 inherit;
-  padding: 6px 10px;
+  font: 600 12px/1 inherit;
+  padding: 7px 12px;
   cursor: pointer;
-  transition: color 120ms cubic-bezier(0.4, 0, 0.2, 1), border-color 120ms cubic-bezier(0.4, 0, 0.2, 1), background 120ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition: color var(--t-fast), border-color var(--t-fast), background var(--t-fast), transform var(--t-fast);
+  font-family: inherit;
 }
 
-.queue-item__remove:hover:not(:disabled) {
+.qd-card__action:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.qd-card__action:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.qd-card__action:focus-visible {
+  outline: 2px solid var(--c-brand-300);
+  outline-offset: 2px;
+}
+
+.qd-card__action:disabled {
+  opacity: 0.55;
+  cursor: progress;
+  transform: none !important;
+}
+
+.qd-card__action--applied {
+  color: #0e8e60;
+  border-color: rgba(16, 185, 129, 0.40);
+  background: rgba(16, 185, 129, 0.08);
+}
+
+.qd-card__action--applied:hover:not(:disabled) {
+  background: rgba(16, 185, 129, 0.16);
+  border-color: rgba(16, 185, 129, 0.55);
+}
+
+.qd-card__action--remove:hover:not(:disabled) {
   color: var(--c-danger);
   border-color: #fecaca;
   background: var(--c-danger-soft);
 }
 
-.queue-item__remove:focus-visible {
-  outline: 2px solid var(--c-brand-300);
-  outline-offset: 2px;
-}
+/* Footer actions row ------------------------------------------------------ */
 
-.queue-item__remove:disabled {
-  opacity: 0.55;
-  cursor: progress;
-}
-
-.queue-actions {
+.qd-actions {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
   margin-top: 4px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 540px) {
+  .qd-card {
+    padding: 14px 14px;
+    gap: 12px;
+  }
+  .qd-card__head {
+    flex-wrap: wrap;
+  }
+  .qd-card__time {
+    flex-basis: 100%;
+    padding-top: 0;
+  }
+  .qd-counter {
+    font-size: 12px;
+    padding: 5px 12px;
+  }
+  .qd-card__row {
+    align-items: flex-start;
+  }
+  .qd-card__status {
+    align-self: flex-start;
+  }
 }
