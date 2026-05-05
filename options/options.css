@@ -2136,3 +2136,421 @@ code {
     align-self: flex-start;
   }
 }
+
+/* =============================================================================
+ * MODO AUTO CARD — Premium-only auto-submit toggle
+ * Spec: cyan/teal primary, flame accent for "Premium" badge + locked CTA.
+ * Variable convention here matches the rest of the file (--r-md, --t-fast,
+ * --sh-soft, --font-sans — no `--c-` prefix on radii / motion / font tokens).
+ * ============================================================================= */
+
+.auto-card__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.auto-card__head h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+}
+
+.auto-card__beta {
+  display: inline-flex;
+  align-items: center;
+  background: rgba(255, 102, 0, 0.10);
+  color: var(--c-flame-500);
+  border: 1px solid var(--c-flame-500);
+  border-radius: var(--r-pill);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.auto-card__counter {
+  display: inline-flex;
+  align-items: center;
+  background: var(--c-brand-50);
+  color: var(--c-brand-700);
+  border: 1px solid var(--c-brand-200);
+  border-radius: var(--r-pill);
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 4px 12px;
+  white-space: nowrap;
+}
+
+.auto-card__lead {
+  margin: 0 0 16px;
+  font-size: 14px;
+  color: var(--c-ink-soft);
+  line-height: 1.55;
+}
+
+.auto-card__toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 12px 0 18px;
+}
+
+/* iOS-style switch ----------------------------------------------------------- */
+
+.auto-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+}
+
+.auto-switch input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+  width: 0;
+  height: 0;
+}
+
+.auto-switch__track {
+  width: 48px;
+  height: 26px;
+  background: var(--c-slate-300);
+  border-radius: 13px;
+  position: relative;
+  flex-shrink: 0;
+  transition: background 180ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.auto-switch__thumb {
+  width: 22px;
+  height: 22px;
+  background: #ffffff;
+  border-radius: 11px;
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  transition: transform 180ms cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+}
+
+.auto-switch input:checked ~ .auto-switch__track {
+  background: var(--c-brand-300);
+}
+
+.auto-switch input:checked ~ .auto-switch__track .auto-switch__thumb {
+  transform: translateX(22px);
+}
+
+.auto-switch input:focus-visible ~ .auto-switch__track {
+  outline: 2px solid var(--c-brand-300);
+  outline-offset: 2px;
+}
+
+.auto-switch input:disabled ~ .auto-switch__track {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.auto-card__state {
+  font-size: 14.5px;
+  color: var(--c-ink);
+}
+
+.auto-card__state strong {
+  font-weight: 700;
+  color: var(--c-brand-700);
+}
+
+/* Per-portal breakdown grid -------------------------------------------------- */
+
+.auto-card__breakdown {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.auto-card__portal {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: var(--c-surface-soft);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  font-size: 12.5px;
+}
+
+.auto-card__portal-name {
+  font-weight: 600;
+  color: var(--c-ink);
+}
+
+.auto-card__portal-count {
+  color: var(--c-ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Locked state (non-Premium users) ------------------------------------------- */
+
+.auto-card__locked {
+  padding: 14px 16px;
+  background: rgba(255, 102, 0, 0.06);
+  border-left: 3px solid var(--c-flame-500);
+  border-radius: var(--r-md);
+  margin: 8px 0 14px;
+}
+
+.auto-card__locked p {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--c-ink-soft);
+}
+
+.auto-card__cta {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 14px;
+  background: var(--c-flame-500);
+  color: #ffffff;
+  border-radius: var(--r-md);
+  font-weight: 600;
+  font-size: 12.5px;
+  text-decoration: none;
+  transition: background var(--t-fast), transform var(--t-fast);
+}
+
+.auto-card__cta:hover {
+  background: #ff7a1f;
+  color: #ffffff;
+  text-decoration: none;
+}
+
+.auto-card__cta:active {
+  transform: scale(0.98);
+}
+
+/* Legal disclaimer footer ---------------------------------------------------- */
+
+.auto-card__legal {
+  margin: 8px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--c-border);
+  font-size: 12px;
+  color: var(--c-ink-muted);
+  line-height: 1.55;
+}
+
+.auto-card__status:empty {
+  display: none;
+}
+
+/* Card-enter animation ------------------------------------------------------- */
+
+@media (prefers-reduced-motion: no-preference) {
+  #autoModeCard:not([hidden]) {
+    animation: auto-card-enter 200ms cubic-bezier(0.4, 0, 0.2, 1) both;
+  }
+}
+
+@keyframes auto-card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Responsive: 1-col breakdown on narrow screens ------------------------------ */
+
+@media (max-width: 640px) {
+  .auto-card__breakdown {
+    grid-template-columns: 1fr;
+  }
+  .auto-card__head {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+}
+
+/* =============================================================================
+ * MODO AUTO DISCLAIMER MODAL — Shown on first activation of the toggle.
+ * Z-index uses the max 32-bit signed integer so we sit above any other UI
+ * (browser action overlay, floating FABs from content scripts, etc.).
+ * ============================================================================= */
+
+.auto-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.auto-modal[hidden] {
+  display: none;
+}
+
+.auto-modal__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 29, 44, 0.62);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+
+.auto-modal__panel {
+  position: relative;
+  max-width: 540px;
+  width: 100%;
+  max-height: 85vh;
+  overflow-y: auto;
+  background: #ffffff;
+  border-radius: var(--r-lg);
+  padding: 28px 32px;
+  box-shadow: 0 24px 64px rgba(15, 29, 44, 0.32);
+}
+
+.auto-modal__panel h2 {
+  margin: 0 0 18px;
+  font-size: 22px;
+  color: var(--c-ink);
+  letter-spacing: -0.012em;
+}
+
+.auto-modal__section {
+  margin-bottom: 12px;
+}
+
+.auto-modal__section h3 {
+  margin: 14px 0 8px;
+  font-size: 14.5px;
+  color: var(--c-ink);
+  font-weight: 700;
+}
+
+.auto-modal__section p {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--c-ink-soft);
+  line-height: 1.6;
+}
+
+.auto-modal__section ul {
+  margin: 0;
+  padding-left: 22px;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--c-ink-soft);
+}
+
+.auto-modal__section--warn {
+  background: rgba(252, 165, 165, 0.12);
+  padding: 12px 16px;
+  border-left: 3px solid #dc2626;
+  border-radius: var(--r-md);
+}
+
+.auto-modal__section--ok {
+  background: rgba(112, 209, 198, 0.10);
+  padding: 12px 16px;
+  border-left: 3px solid var(--c-brand-300);
+  border-radius: var(--r-md);
+}
+
+.auto-modal__hint {
+  margin: 14px 0;
+  font-size: 12.5px;
+  color: var(--c-ink-muted);
+  line-height: 1.55;
+}
+
+.auto-modal__actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 16px;
+  flex-wrap: wrap;
+}
+
+.btn--flame {
+  background: var(--c-flame-500);
+  color: #ffffff;
+  border: 0;
+  padding: 10px 18px;
+  border-radius: var(--r-md);
+  font-weight: 700;
+  font-size: 14.5px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background var(--t-fast), transform var(--t-fast);
+}
+
+.btn--flame:hover:not(:disabled) {
+  background: #ff7a1f;
+  transform: translateY(-1px);
+}
+
+.btn--flame:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.btn--flame:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Modal enter animation ------------------------------------------------------ */
+
+@media (prefers-reduced-motion: no-preference) {
+  .auto-modal:not([hidden]) .auto-modal__panel {
+    animation: auto-modal-enter 200ms cubic-bezier(0.4, 0, 0.2, 1) both;
+  }
+  .auto-modal:not([hidden]) .auto-modal__backdrop {
+    animation: auto-modal-fade 200ms cubic-bezier(0.4, 0, 0.2, 1) both;
+  }
+}
+
+@keyframes auto-modal-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes auto-modal-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (max-width: 640px) {
+  .auto-modal__panel {
+    padding: 22px 20px;
+  }
+  .auto-modal__actions {
+    justify-content: stretch;
+  }
+  .auto-modal__actions .btn,
+  .auto-modal__actions .btn--flame {
+    flex: 1 1 auto;
+  }
+}

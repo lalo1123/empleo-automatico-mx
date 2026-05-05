@@ -113,6 +113,25 @@ const prefModalityInputs = [
 const savePreferencesBtn = $("savePreferences");
 const preferencesStatus = $("preferencesStatus");
 
+// Modo Auto card refs. The card is Premium-only — toggling ON requires the
+// disclaimer modal to be accepted once (AUTO_DISCLAIMER_SEEN), and the plan
+// must be "premium" (or the locked CTA is shown instead). The auto-submit
+// logic itself lives in content/lapieza.js (next agent), this is UI plumbing.
+const autoModeCard = $("autoModeCard");
+const autoModeToggle = $("autoModeToggle");
+const autoStateLabel = $("autoStateLabel");
+const autoCounterTotal = $("autoCounterTotal");
+const autoBreakdown = $("autoBreakdown");
+const autoCardLocked = $("autoCardLocked");
+const autoToggleRow = $("autoToggleRow");
+const autoModeStatus = $("autoModeStatus");
+const autoDisclaimerModal = $("autoDisclaimerModal");
+
+// Module-scoped cache of the logged-in user — the Modo Auto toggle reads
+// plan from here on every change event so the handler can plan-gate
+// without a round-trip. Refreshed inside renderAuthLoggedIn / renderAuthLoggedOut.
+let currentUser = null;
+
 const exportBtn = $("exportProfile");
 const importBtn = $("importProfile");
 const importInput = $("importInput");
@@ -329,6 +348,9 @@ for (const btn of adminPlanButtons) {
 }
 
 function renderAuthLoggedIn(user, usage) {
+  // Cache the user so the Modo Auto toggle handler can plan-gate without
+  // re-fetching. Updated by every refreshAuthState call.
+  currentUser = user || null;
   authCard.classList.add("is-hidden");
   accountCard.classList.remove("is-hidden");
   nextStepsCard?.classList.remove("is-hidden");
@@ -358,6 +380,7 @@ function renderAuthLoggedIn(user, usage) {
 }
 
 function renderAuthLoggedOut() {
+  currentUser = null;
   authCard.classList.remove("is-hidden");
   accountCard.classList.add("is-hidden");
   nextStepsCard?.classList.add("is-hidden");
@@ -379,6 +402,9 @@ async function refreshAuthState() {
   } catch (_) {
     renderAuthLoggedOut();
   }
+  // Modo Auto card depends on plan \u2014 repaint after every auth change so the
+  // locked CTA / unlocked toggle stays consistent with the actual user state.
+  try { paintAutoMode(); } catch (_) { /* paintAutoMode defined below */ }
 }
 
 // ---------------------------------------------------------------------------
@@ -1058,6 +1084,304 @@ try {
 } catch (_) { /* ignore */ }
 
 // ---------------------------------------------------------------------------
+// Modo Auto (Premium-only auto-submit toggle)
+//
+// Storage keys (all in chrome.storage.local — read by content/lapieza.js
+// without a round-trip through the background worker):
+//   AUTO_MODE              boolean — master kill switch
+//   AUTO_DAILY             { date: "YYYY-MM-DD", count, perPortal: {...} }
+//   AUTO_DISCLAIMER_SEEN   boolean — first-time activation gate
+//   AUTO_LAST_SUBMIT_AT    used by the content script for inter-submit delay
+//   AUTO_DAY_PAUSE         set by the content script after CAPTCHA / cap hit
+//
+// This file is UI plumbing only. The auto-submit logic, counter increment,
+// and day-pause toast all live in content/lapieza.js (next agent).
+// ---------------------------------------------------------------------------
+
+// Per-portal cap. Mirrors lib/schemas.js → AUTO_MODE_DAILY_CAPS but kept
+// inline so the UI doesn't have to import the constants table.
+const AUTO_PER_PORTAL_CAP = 30;
+const AUTO_TOTAL_CAP = 120;
+
+// Local YYYY-MM-DD — used to detect a stale daily counter on paint.
+function todayKey() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function readAutoMode() {
+  return new Promise((resolve) => {
+    try {
+      chrome.storage.local.get([STORAGE_KEYS.AUTO_MODE], (r) => {
+        const v = r && r[STORAGE_KEYS.AUTO_MODE];
+        resolve(typeof v === "boolean" ? v : false);
+      });
+    } catch (_) {
+      resolve(false);
+    }
+  });
+}
+
+function writeAutoMode(value) {
+  return new Promise((resolve) => {
+    try {
+      chrome.storage.local.set({ [STORAGE_KEYS.AUTO_MODE]: !!value }, () => resolve());
+    } catch (_) {
+      resolve();
+    }
+  });
+}
+
+function readAutoDaily() {
+  return new Promise((resolve) => {
+    try {
+      chrome.storage.local.get([STORAGE_KEYS.AUTO_DAILY], (r) => {
+        const v = r && r[STORAGE_KEYS.AUTO_DAILY];
+        if (v && typeof v === "object") resolve(v);
+        else resolve({ date: todayKey(), count: 0, perPortal: {} });
+      });
+    } catch (_) {
+      resolve({ date: todayKey(), count: 0, perPortal: {} });
+    }
+  });
+}
+
+function readDisclaimerSeen() {
+  return new Promise((resolve) => {
+    try {
+      chrome.storage.local.get([STORAGE_KEYS.AUTO_DISCLAIMER_SEEN], (r) => {
+        const v = r && r[STORAGE_KEYS.AUTO_DISCLAIMER_SEEN];
+        resolve(typeof v === "boolean" ? v : false);
+      });
+    } catch (_) {
+      resolve(false);
+    }
+  });
+}
+
+function writeDisclaimerSeen(value) {
+  return new Promise((resolve) => {
+    try {
+      chrome.storage.local.set({ [STORAGE_KEYS.AUTO_DISCLAIMER_SEEN]: !!value }, () => resolve());
+    } catch (_) {
+      resolve();
+    }
+  });
+}
+
+// Paint the card based on:
+//   1) plan: premium unlocks, else locked CTA
+//   2) AUTO_MODE storage key: reflects in checkbox + ON/OFF label
+//   3) AUTO_DAILY: today's count rolled up across portals
+// Synchronously reads the cached values via helper promises — paint is async
+// but every entry point (init, change listener, toggle handler) awaits it.
+async function paintAutoMode() {
+  if (!autoModeCard) return;
+
+  const isPremium = currentUser?.plan === "premium";
+  const [autoOn, daily] = await Promise.all([readAutoMode(), readAutoDaily()]);
+
+  // Plan gate. Non-Premium: hide toggle row + breakdown, show locked CTA,
+  // disable the input so even keyboard users can't flip it accidentally.
+  if (!isPremium) {
+    if (autoToggleRow) autoToggleRow.hidden = true;
+    if (autoBreakdown) autoBreakdown.hidden = true;
+    if (autoCardLocked) autoCardLocked.hidden = false;
+    if (autoModeToggle) {
+      autoModeToggle.disabled = true;
+      autoModeToggle.checked = false;
+    }
+    if (autoStateLabel) autoStateLabel.textContent = "OFF";
+    if (autoCounterTotal) autoCounterTotal.textContent = `0/${AUTO_TOTAL_CAP} hoy`;
+    return;
+  }
+
+  // Premium path.
+  if (autoCardLocked) autoCardLocked.hidden = true;
+  if (autoToggleRow) autoToggleRow.hidden = false;
+  if (autoModeToggle) {
+    autoModeToggle.disabled = false;
+    autoModeToggle.checked = !!autoOn;
+  }
+  if (autoStateLabel) autoStateLabel.textContent = autoOn ? "ON" : "OFF";
+
+  // Breakdown is only meaningful when the toggle is ON. We hide it when
+  // OFF so the card has less visual weight in its default state.
+  if (autoBreakdown) autoBreakdown.hidden = !autoOn;
+
+  // Counter — only count today's value. If daily.date doesn't match today,
+  // treat as zero (the content script resets the counter on a new day).
+  const today = todayKey();
+  const sameDay = daily && daily.date === today;
+  const totalToday = sameDay ? Number(daily.count || 0) : 0;
+  const perPortal = sameDay && daily.perPortal && typeof daily.perPortal === "object"
+    ? daily.perPortal
+    : {};
+
+  if (autoCounterTotal) {
+    autoCounterTotal.textContent = `${totalToday}/${AUTO_TOTAL_CAP} hoy`;
+  }
+
+  // Per-portal counts — read from the breakdown rows by data-portal.
+  if (autoBreakdown) {
+    const rows = autoBreakdown.querySelectorAll(".auto-card__portal");
+    for (const row of rows) {
+      const portal = row.getAttribute("data-portal");
+      const count = Number(perPortal[portal] || 0);
+      const countEl = row.querySelector(".auto-card__portal-count");
+      if (countEl) countEl.textContent = `${count}/${AUTO_PER_PORTAL_CAP}`;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Disclaimer modal — focus trap + scroll lock + Escape to cancel.
+// ---------------------------------------------------------------------------
+
+let _autoModalPrevFocus = null;
+let _autoModalKeyHandler = null;
+
+function openAutoDisclaimerModal() {
+  if (!autoDisclaimerModal) return;
+  _autoModalPrevFocus = document.activeElement;
+  autoDisclaimerModal.hidden = false;
+  // Lock body scroll so the user can't lose context behind the backdrop.
+  document.body.style.overflow = "hidden";
+
+  // Focus the cancel button by default (less destructive than auto-focusing
+  // the flame "accept" button).
+  const cancelBtn = autoDisclaimerModal.querySelector('[data-action="cancel"]');
+  try { cancelBtn?.focus(); } catch (_) {}
+
+  // Escape → cancel. Tab cycling stays within the modal.
+  _autoModalKeyHandler = (ev) => {
+    if (ev.key === "Escape") {
+      ev.preventDefault();
+      closeAutoDisclaimerModal();
+      return;
+    }
+    if (ev.key !== "Tab") return;
+    const focusables = autoDisclaimerModal.querySelectorAll(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    );
+    if (!focusables.length) return;
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    if (ev.shiftKey && document.activeElement === first) {
+      ev.preventDefault();
+      try { last.focus(); } catch (_) {}
+    } else if (!ev.shiftKey && document.activeElement === last) {
+      ev.preventDefault();
+      try { first.focus(); } catch (_) {}
+    }
+  };
+  document.addEventListener("keydown", _autoModalKeyHandler);
+}
+
+function closeAutoDisclaimerModal() {
+  if (!autoDisclaimerModal) return;
+  autoDisclaimerModal.hidden = true;
+  document.body.style.overflow = "";
+  if (_autoModalKeyHandler) {
+    document.removeEventListener("keydown", _autoModalKeyHandler);
+    _autoModalKeyHandler = null;
+  }
+  if (_autoModalPrevFocus && typeof _autoModalPrevFocus.focus === "function") {
+    try { _autoModalPrevFocus.focus(); } catch (_) {}
+  }
+  _autoModalPrevFocus = null;
+}
+
+// Modal click delegation: backdrop / cancel / accept all carry data-action.
+if (autoDisclaimerModal) {
+  autoDisclaimerModal.addEventListener("click", async (ev) => {
+    const target = ev.target;
+    if (!(target instanceof HTMLElement)) return;
+    const action = target.closest("[data-action]")?.getAttribute("data-action");
+    if (!action) return;
+    if (action === "close" || action === "cancel") {
+      closeAutoDisclaimerModal();
+      return;
+    }
+    if (action === "accept") {
+      // Defensive: only Premium users get here, but double-check before
+      // flipping the master switch.
+      if (currentUser?.plan !== "premium") {
+        closeAutoDisclaimerModal();
+        setStatus(autoModeStatus, "err", "Modo Auto requiere plan Premium.");
+        return;
+      }
+      try {
+        await writeDisclaimerSeen(true);
+        await writeAutoMode(true);
+        await paintAutoMode();
+        setStatus(autoModeStatus, "ok", "Modo Auto activado.");
+      } catch (e) {
+        setStatus(autoModeStatus, "err", e?.message || "No se pudo activar Modo Auto.");
+      } finally {
+        closeAutoDisclaimerModal();
+      }
+    }
+  });
+}
+
+// Toggle change handler — gates on plan + disclaimer.
+if (autoModeToggle) {
+  autoModeToggle.addEventListener("change", async (ev) => {
+    const wantOn = ev.target.checked;
+
+    // OFF flow — no friction.
+    if (!wantOn) {
+      await writeAutoMode(false);
+      await paintAutoMode();
+      setStatus(autoModeStatus, "ok", "Modo Auto desactivado.");
+      return;
+    }
+
+    // ON flow — plan gate first.
+    if (currentUser?.plan !== "premium") {
+      ev.target.checked = false;
+      setStatus(autoModeStatus, "err", "Modo Auto requiere plan Premium.");
+      return;
+    }
+
+    // Disclaimer gate. If already accepted before, flip the switch directly.
+    const seen = await readDisclaimerSeen();
+    if (seen) {
+      await writeAutoMode(true);
+      await paintAutoMode();
+      setStatus(autoModeStatus, "ok", "Modo Auto activado.");
+      return;
+    }
+
+    // First-time activation — show the disclaimer modal and revert the
+    // toggle visual state until the user explicitly accepts.
+    ev.target.checked = false;
+    openAutoDisclaimerModal();
+  });
+}
+
+// Cross-tab + cross-script sync: when the content script increments the
+// daily counter, or another options window flips AUTO_MODE, repaint here.
+try {
+  if (chrome?.storage?.onChanged) {
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area !== "local") return;
+      if (
+        changes[STORAGE_KEYS.AUTO_MODE] ||
+        changes[STORAGE_KEYS.AUTO_DAILY] ||
+        changes[STORAGE_KEYS.AUTO_DISCLAIMER_SEEN]
+      ) {
+        paintAutoMode();
+      }
+    });
+  }
+} catch (_) { /* ignore */ }
+
+// ---------------------------------------------------------------------------
 // Initial load
 // ---------------------------------------------------------------------------
 
@@ -1116,6 +1440,17 @@ async function init() {
     if (profile) updatePreviewFromProfile(profile);
     await refreshExistingBanner();
     await refreshAuthState();
+
+    // Reveal the Modo Auto card (it's hidden in markup so the locked /
+    // unlocked decision is made AFTER auth resolves, instead of flashing
+    // an empty toggle). refreshAuthState already called paintAutoMode,
+    // but we call it again here as a no-op safety net in case the user is
+    // logged out (the card still renders, just locked).
+    if (autoModeCard) {
+      autoModeCard.hidden = false;
+      await paintAutoMode();
+    }
+
     // Queue paints last — it depends on chrome.storage.local, not on any
     // backend state, so it's safe even when offline / logged out.
     await paintQueue();

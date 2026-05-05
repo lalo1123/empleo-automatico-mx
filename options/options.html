@@ -326,6 +326,68 @@
         </div>
       </section>
 
+      <!-- ============ Card: Modo Auto (Premium-only) ============ -->
+      <!--
+        Premium-only auto-submit toggle. Toggling ON requires:
+          1) plan === "premium" (else the locked CTA is shown instead)
+          2) the disclaimer modal has been accepted (writeDisclaimerSeen)
+          3) AUTO_MODE flag flipped to true in chrome.storage.local
+        The lapieza content script reads STORAGE_KEYS.AUTO_MODE on submit and
+        the daily counter (AUTO_DAILY) is incremented from there. This file
+        is UI plumbing only — the auto-submit logic lives in content/lapieza.js.
+      -->
+      <section class="card" id="autoModeCard" hidden>
+        <div class="auto-card__head">
+          <h2>&#128640; Modo Auto <span class="auto-card__beta">Premium</span></h2>
+          <span class="auto-card__counter" id="autoCounterTotal">0/120 hoy</span>
+        </div>
+        <p class="auto-card__lead">
+          La extensi&oacute;n presiona &laquo;Finalizar&raquo; por ti en hasta <strong>30 vacantes/d&iacute;a por portal</strong>
+          en OCC, Computrabajo, Bumeran y LaPieza. Con salvaguardas activas y disclaimer transparente.
+        </p>
+
+        <div class="auto-card__toggle-row" id="autoToggleRow">
+          <label class="auto-switch" for="autoModeToggle">
+            <input type="checkbox" id="autoModeToggle" />
+            <span class="auto-switch__track" aria-hidden="true">
+              <span class="auto-switch__thumb"></span>
+            </span>
+            <span class="auto-card__state">Modo Auto: <strong id="autoStateLabel">OFF</strong></span>
+          </label>
+        </div>
+
+        <div class="auto-card__breakdown" id="autoBreakdown" hidden>
+          <div class="auto-card__portal" data-portal="lapieza">
+            <span class="auto-card__portal-name">LaPieza</span>
+            <span class="auto-card__portal-count">0/30</span>
+          </div>
+          <div class="auto-card__portal" data-portal="occ">
+            <span class="auto-card__portal-name">OCC</span>
+            <span class="auto-card__portal-count">0/30</span>
+          </div>
+          <div class="auto-card__portal" data-portal="computrabajo">
+            <span class="auto-card__portal-name">Computrabajo</span>
+            <span class="auto-card__portal-count">0/30</span>
+          </div>
+          <div class="auto-card__portal" data-portal="bumeran">
+            <span class="auto-card__portal-name">Bumeran</span>
+            <span class="auto-card__portal-count">0/30</span>
+          </div>
+        </div>
+
+        <div class="auto-card__locked" id="autoCardLocked" hidden>
+          <p>&#128274; <strong>Disponible en Premium.</strong> El plan Pro mantiene HITL (1 clic en Finalizar t&uacute;).</p>
+          <a class="auto-card__cta" href="https://empleo.skybrandmx.com/account/billing" target="_blank" rel="noopener">Ver planes &rarr;</a>
+        </div>
+
+        <p class="auto-card__legal">
+          &#128737;&#65039; <strong>NUNCA en LinkedIn ni Indeed</strong> &mdash; documentado 23% restricci&oacute;n en 90 d&iacute;as
+          (Growleads 2026). Excluido por seguridad.
+        </p>
+
+        <p class="auto-card__status status" id="autoModeStatus" aria-live="polite"></p>
+      </section>
+
       <!-- ============ Card: Mi cola de postulación (dashboard) ============ -->
       <!--
         Discovery / pre-selection dashboard. Populated by the listing-page
@@ -553,6 +615,46 @@
         Hecho con cari&ntilde;o en M&eacute;xico.
       </footer>
     </main>
+
+    <!-- Modo Auto disclaimer modal (Premium first-time activation). Initially
+         hidden via the [hidden] attribute. options.js opens/closes it via
+         openAutoDisclaimerModal/closeAutoDisclaimerModal. The whole markup
+         lives at the end of <body> so it overlays everything correctly even
+         when a card is scrolled. -->
+    <div class="auto-modal" id="autoDisclaimerModal" hidden role="dialog" aria-labelledby="autoDisclaimerTitle" aria-modal="true">
+      <div class="auto-modal__backdrop" data-action="close"></div>
+      <div class="auto-modal__panel">
+        <h2 id="autoDisclaimerTitle">&#128640; Modo Auto</h2>
+        <section class="auto-modal__section">
+          <h3>&iquest;Qu&eacute; hace?</h3>
+          <p>La extensi&oacute;n presiona &laquo;Finalizar&raquo; o &laquo;Enviar&raquo; por ti despu&eacute;s de llenar el formulario, en hasta <strong>30 vacantes/d&iacute;a por portal</strong> en OCC, Computrabajo, Bumeran y LaPieza.</p>
+        </section>
+        <section class="auto-modal__section auto-modal__section--warn">
+          <h3>&#9888;&#65039; Riesgos reales (transparentes)</h3>
+          <ul>
+            <li>Estudios independientes muestran que tools de auto-aplicaci&oacute;n generan restricciones en <strong>23% de cuentas en 90 d&iacute;as</strong> en LinkedIn.</li>
+            <li>Por eso EXCLUIMOS LinkedIn e Indeed &mdash; los m&aacute;s agresivos en detecci&oacute;n.</li>
+            <li>En OCC/Computrabajo/Bumeran/LaPieza el riesgo es menor pero no cero. Si tu cuenta del portal se ve afectada por uso intensivo, no es un bug &mdash; es el costo de la velocidad.</li>
+          </ul>
+        </section>
+        <section class="auto-modal__section auto-modal__section--ok">
+          <h3>&#128737;&#65039; Salvaguardas que aplicamos</h3>
+          <ul>
+            <li>Cap r&iacute;gido: 30 aplicaciones/d&iacute;a por portal (vs 750 de LazyApply)</li>
+            <li>Delay aleatorio 30-90s entre submits (parece humano)</li>
+            <li>Stop autom&aacute;tico si detectamos CAPTCHA o respuesta inusual</li>
+            <li>T&uacute; revisas los campos llenos antes de cada submit (3-5s window con Cancelar)</li>
+          </ul>
+        </section>
+        <p class="auto-modal__hint">
+          Si prefieres jugar 100% seguro: deja Modo Auto OFF. El default HITL (1 clic en Finalizar t&uacute;) sigue siendo lo m&aacute;s seguro.
+        </p>
+        <div class="auto-modal__actions">
+          <button type="button" class="btn btn--ghost" data-action="cancel">Cancelar</button>
+          <button type="button" class="btn btn--flame" data-action="accept">Lo entiendo, activar Modo Auto</button>
+        </div>
+      </div>
+    </div>
 
     <!-- pdf.js (UMD). Agent A may ship either .js or .mjs; options.js handles both. -->
     <script src="../vendor/pdf.min.js" onerror="window.__pdfScriptMissing = true"></script>
