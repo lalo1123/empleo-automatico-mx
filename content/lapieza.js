@@ -1083,20 +1083,40 @@
    * app shell sometimes has a "Guardar" button that's also type=submit).
    */
   function findLaPiezaSubmitButton() {
-    const candidates = Array.from(document.querySelectorAll(
+    // Mirror highlightExpressSubmitButton's selector cascade so the button
+    // Modo Auto clicks is the SAME one the user just saw glowing. Previously
+    // this used an anchored regex (^...$) which missed real LaPieza copy
+    // like "Finalizar postulación" or "Enviar postulación", causing a
+    // false-positive "no encontré el botón Finalizar" abort.
+    const form = (typeof findApplicationForm === "function") ? findApplicationForm() : null;
+    const scope = form || document;
+    const candidates = Array.from(scope.querySelectorAll(
       "button, input[type=submit], a[role=button]"
     )).filter((el) => {
       try { return isVisible(el); } catch (_) { return true; }
     });
-    const byText = candidates.find((el) => {
-      const t = ((el.textContent || el.value || "") + "").trim().toLowerCase();
-      return /^(finalizar|enviar|aplicar|postular|postularme|submit|apply)$/i.test(t);
+    const rx = /(finalizar|postularme|postular|enviar(?:\s+postulaci[oó]n)?|aplicar(?:\s+ahora)?|submit\s+application|send\s+application|apply)/i;
+    const matches = candidates.filter((el) => {
+      const t = ((el.textContent || el.value || "") + "").trim();
+      return rx.test(t);
     });
-    if (byText) return byText;
+    if (matches.length) {
+      // Pick the largest by area — same heuristic as highlightExpressSubmitButton
+      // so we click whatever the user is staring at.
+      matches.sort((a, b) => {
+        const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+        return (rb.width * rb.height) - (ra.width * ra.height);
+      });
+      return matches[0];
+    }
     // Fallback: any submit button inside an apply form.
-    const form = document.querySelector("form");
     if (form) {
       const sub = form.querySelector("button[type=submit], input[type=submit]");
+      if (sub) return sub;
+    }
+    const anyForm = document.querySelector("form");
+    if (anyForm) {
+      const sub = anyForm.querySelector("button[type=submit], input[type=submit]");
       if (sub) return sub;
     }
     return null;
