@@ -756,11 +756,26 @@
   function mountFab() {
     if (fabEl && document.body.contains(fabEl)) {
       // Already mounted — but the user may have navigated between modes
-      // without unmounting (SPA route change inside detectAndMount). Refresh
-      // the label so it stays accurate.
+      // without unmounting (SPA route change inside detectAndMount), OR
+      // another content-script re-injection cycle could leave us with a
+      // stale node whose original click listener has been lost (live test
+      // verified: dispatchEvent on the visible FAB confirmed click was
+      // received by the element, but onFabClick never ran). Defensive
+      // re-attach: remove + add is a no-op if the listener was still
+      // there, but recovers when it isn't.
+      try { fabEl.removeEventListener("click", onFabClick); } catch (_) {}
+      fabEl.addEventListener("click", onFabClick);
       paintFabLabel();
       return;
     }
+    // If a stale FAB from a previous content-script instance is still in
+    // the DOM (e.g. F5 re-injected the script but didn't clean up the
+    // previous DOM node), nuke it before creating a fresh one. Otherwise
+    // we'd end up with two FABs visually overlapping.
+    try {
+      const stale = document.querySelector(".eamx-fab");
+      if (stale) stale.parentNode?.removeChild(stale);
+    } catch (_) {}
     fabEl = document.createElement("button");
     fabEl.type = "button";
     fabEl.className = "eamx-fab";
