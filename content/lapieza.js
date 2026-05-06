@@ -4422,21 +4422,50 @@
 
   // Throttled re-scan. The MutationObserver below funnels every DOM change
   // through this so infinite-scroll, lazy-load, and React re-renders all
-  // converge to a single batched scan ~600ms after the latest change.
+  // converge to a single batched scan after the latest change.
+  //
+  // Bug history: the original implementation always cleared the pending
+  // timer on every call, which meant LaPieza's near-constant DOM mutations
+  // (animation classes, polling) would keep deferring the scan to "600ms
+  // from now" forever, and the FIRST scan never fired. As a result, the
+  // listing page rendered ZERO match badges even though all dependencies
+  // had loaded successfully.
+  //
+  // Fix: a scheduled scan that doesn't reset itself. The first call sets
+  // the timer; subsequent calls during the wait window are no-ops. After
+  // the scan runs the slot is freed for the next cycle. A small "trailing"
+  // re-scan handles late-arriving cards via a separate flag.
+  let listingScanPending = false;
+  let listingScanTrailing = false;
   function scheduleListingScan(delayMs = 600) {
-    if (listingScanTimer) clearTimeout(listingScanTimer);
+    if (listingScanPending) {
+      // Mark trailing — when the in-flight scan finishes we'll do one more.
+      listingScanTrailing = true;
+      return;
+    }
+    listingScanPending = true;
     listingScanTimer = setTimeout(async () => {
       listingScanTimer = null;
-      if (!isListingPath()) return;
-      const ok = await ensureDiscoveryDeps();
-      if (!ok) return;
-      // Refresh profile if not yet loaded — must happen before findVacancyCards
-      // injects badges.
-      if (!profileLoaded) await loadProfileOnce();
-      // Walk + inject. injectOverlay is async (it calls isInQueue) but we
-      // intentionally don't await — they run concurrently.
-      const cards = findVacancyCards();
-      cards.forEach((c) => { injectOverlay(c); });
+      try {
+        if (!isListingPath()) return;
+        const ok = await ensureDiscoveryDeps();
+        if (!ok) return;
+        // Refresh profile if not yet loaded — must happen before
+        // findVacancyCards injects badges.
+        if (!profileLoaded) await loadProfileOnce();
+        // Walk + inject. injectOverlay is async (it calls isInQueue) but
+        // we intentionally don't await — they run concurrently.
+        const cards = findVacancyCards();
+        cards.forEach((c) => { injectOverlay(c); });
+      } finally {
+        listingScanPending = false;
+        if (listingScanTrailing) {
+          listingScanTrailing = false;
+          // One trailing scan to catch cards that loaded during the
+          // first scan. delayMs = 800 to space them out.
+          setTimeout(() => scheduleListingScan(0), 800);
+        }
+      }
     }, delayMs);
   }
 
