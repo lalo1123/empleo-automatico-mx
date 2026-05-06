@@ -956,6 +956,34 @@
   // Express FAB click on /vacancy/<uuid>. Job-extract, persist, kick off
   // background draft generation, show a toast pointing at LaPieza's own
   // "Postularme" button. We do NOT auto-click that button — HITL.
+  // Read the auto-prewarm flag set by the matches panel's "⚡ Postular →"
+  // button. If set for THIS vacancy id, fire pre-warm without waiting for
+  // a manual FAB click and clear the flag. Best-effort — any failure just
+  // means the user has to click the FAB themselves (no harm done).
+  async function maybeAutoPrewarmFromQuickApply() {
+    if (!chrome?.storage?.session) return;
+    let id = "";
+    try { id = idFromUrl(location.href); } catch (_) {}
+    if (!id) return;
+    const key = `eamx:autoprewarm:${id}`;
+    let flag = null;
+    try {
+      flag = await new Promise((resolve) => {
+        chrome.storage.session.get([key], (r) => resolve(r && r[key]));
+      });
+    } catch (_) { return; }
+    if (!flag) return;
+    // Stale-flag guard: ignore if it was set more than 5 minutes ago.
+    if (Date.now() - (flag.setAt || 0) > 5 * 60_000) {
+      try { Promise.resolve(chrome.storage.session.remove(key)).catch(() => {}); } catch (_) {}
+      return;
+    }
+    // Clear the flag immediately so a page refresh doesn't re-fire.
+    try { Promise.resolve(chrome.storage.session.remove(key)).catch(() => {}); } catch (_) {}
+    // Fire the same flow as onFabClickExpressVacancy.
+    try { onFabClickExpressVacancy(); } catch (_) { /* ignore */ }
+  }
+
   async function onFabClickExpressVacancy() {
     let job, partial;
     try {
@@ -2284,6 +2312,26 @@
       try { location.href = "https://lapieza.io/vacantes"; } catch (_) {}
       return;
     }
+    if (what === "quick-apply") {
+      // "⚡ Postular" — open the vacancy in a new tab AND set a session
+      // flag so our content script auto-fires the Express pre-warm on
+      // arrival (skipping the FAB click). The flag is keyed on the
+      // vacancy id so it ONLY fires for the vacancy we just opened.
+      const jobId = action.getAttribute("data-job-id") || "";
+      if (jobId && chrome?.storage?.session) {
+        try {
+          Promise.resolve(
+            chrome.storage.session.set({
+              [`eamx:autoprewarm:${jobId}`]: { setAt: Date.now() }
+            })
+          ).catch(() => {});
+        } catch (_) {}
+      }
+      // Let the <a target="_blank"> open normally — don't preventDefault.
+      // The new tab loads /vacante/<id>, content script reads the flag,
+      // pre-warms automatically.
+      return;
+    }
     if (what === "load-more") {
       // Legacy single-shot load; kept as a fallback handler in case the
       // skeleton is ever re-rendered by an older code path. Modern panels
@@ -2854,7 +2902,11 @@
     const reasonsBlock = reasonItems
       ? `<ul class="eamx-match-item__reasons">${reasonItems}</ul>`
       : "";
-    const dotLoc = safeLoc ? ` · ${safeLoc}` : "";
+    // Location row — shown ONLY when we have one. Empresa always renders;
+    // location goes on its own line with a 📍 marker so it's scannable.
+    const locRow = safeLoc
+      ? `<div class="eamx-match-item__location"><span aria-hidden="true">📍</span><span>${safeLoc}</span></div>`
+      : "";
     return `
       <li class="eamx-match-item">
         <div class="eamx-match-item__rank" aria-hidden="true">${rank}</div>
@@ -2863,13 +2915,14 @@
             <span class="eamx-match-item__score eamx-match-item__score--${badgeLevel}">${score}%</span>
             <span class="eamx-match-item__title">${safeTitle}</span>
           </div>
-          <div class="eamx-match-item__company">${safeCompany}${dotLoc}</div>
+          <div class="eamx-match-item__company">${safeCompany}</div>
+          ${locRow}
           ${reasonsBlock}
           <div class="eamx-match-item__actions">
             <button type="button" data-action="mark" data-id="${safeId}" class="eamx-match-item__mark" aria-pressed="false">
               <span aria-hidden="true">⭐</span><span>Marcar</span>
             </button>
-            <a data-action="open" href="${safeUrl}" target="_blank" rel="noopener" class="eamx-match-item__open">Abrir vacante →</a>
+            <a data-action="quick-apply" href="${safeUrl}" target="_blank" rel="noopener" class="eamx-match-item__apply" data-job-id="${safeId}">⚡ Postular →</a>
           </div>
         </div>
       </li>
@@ -5209,6 +5262,15 @@
       // but it now returns true on listings too, so add an explicit gate.
       if (fabMode() !== "listing") {
         setTimeout(() => { maybeShowQueuedReminder(); }, 1200);
+      }
+      // Auto-prewarm hook — when the user clicked "⚡ Postular" in the
+      // matches panel, a session flag was set keyed on this vacancy's id.
+      // If the flag is present, fire the same flow as a manual FAB click
+      // (extractJob + persistJobToSession + prewarmExpressDraft + toast)
+      // without waiting for the click. Then clear the flag so refreshes
+      // don't re-fire.
+      if (fabMode() === "vacancy") {
+        setTimeout(() => maybeAutoPrewarmFromQuickApply(), 1500);
       }
     } else {
       unmountFab();
