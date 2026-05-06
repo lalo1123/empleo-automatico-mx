@@ -33,6 +33,30 @@ const PARSE_CV_SYSTEM =
 // must answer each one anchored in the candidate's profile + the vacancy.
 // Hard rules: no invention, fixed length (60-150 words), same array length
 // and order as the input.
+// Quiz answering system prompt.
+// Used when the application form embeds a knowledge-quiz with multiple-choice
+// items (LaPieza, OCC technical screens, etc). The candidate's profile is
+// passed only as context — the right answer is the right answer regardless
+// of who's filling the form, so we keep temperature low and frame Gemini as
+// a factual QA grader, not a "best fit" matcher.
+const ANSWER_QUIZ_SYSTEM =
+  "Eres un experto que responde tests de conocimiento técnico en formularios " +
+  "de aplicación a empleos en México. Recibes una pregunta y opciones " +
+  "múltiples. Tu trabajo es elegir la opción CORRECTA basándote en " +
+  "conocimiento factual del tema (no en el perfil del candidato). El perfil " +
+  "del candidato y la vacante se incluyen solo como contexto, no son " +
+  "determinantes — la respuesta correcta es la respuesta correcta " +
+  "independientemente de quién contesta.\n\n" +
+  "Reglas:\n" +
+  "1. Devuelve EXACTAMENTE una de las llaves de opción provistas (ej. " +
+  "\"A\", \"B\", \"C\", \"D\").\n" +
+  "2. Si la pregunta es ambigua o tiene más de una respuesta defendible, " +
+  "escoge la MÁS comúnmente aceptada como correcta en docs oficiales / " +
+  "práctica estándar de la industria.\n" +
+  "3. NUNCA inventes opciones nuevas. Solo escoge entre las que recibiste.\n" +
+  "4. Razón: 1-2 frases breves, español MX. No expliques toda la teoría — " +
+  "solo por qué esa opción es correcta.";
+
 const ANSWER_QUESTIONS_SYSTEM =
   "Eres un experto en redacción de respuestas para formularios de aplicación " +
   "a vacantes en México.\n" +
@@ -117,6 +141,15 @@ const ANSWER_QUESTIONS_SCHEMA = {
     answers: { type: "array", items: { type: "string" } }
   },
   required: ["answers"]
+} as const;
+
+const ANSWER_QUIZ_SCHEMA = {
+  type: "object",
+  properties: {
+    answerKey: { type: "string" },
+    reason: { type: "string" }
+  },
+  required: ["answerKey", "reason"]
 } as const;
 
 const PARSE_CV_SCHEMA = {
@@ -546,4 +579,115 @@ export async function answerQuestions(
   });
 
   return { answers };
+}
+
+// ---------------------------------------------------------------------------
+// Knowledge quiz answering (multiple-choice)
+// ---------------------------------------------------------------------------
+
+export interface AnswerQuizArgs {
+  apiKey: string;
+  model: string;
+  question: string;
+  options: Array<{ key: string; text: string }>;
+  profile: UserProfile;
+  job: JobPosting;
+}
+
+export interface AnswerQuizResult {
+  /** One of the input option keys, verified against the original list. */
+  answerKey: string;
+  /** 1-2 sentence Spanish-MX rationale, used for telemetry/debug only. */
+  reason: string;
+}
+
+/**
+ * Picks the correct answer for a single multiple-choice knowledge question
+ * shown inside an application form (e.g. LaPieza technical screens).
+ *
+ * The candidate's profile and the vacancy are passed in only as context —
+ * the right answer is the right answer regardless of who is filling the
+ * form, so we keep temperature low (0.1) and frame Gemini as a factual
+ * QA grader, not a "best fit" matcher.
+ *
+ * Quota model: this endpoint is **not** charged. The user already paid 1
+ * unit for the cover letter on the same application; quiz answering is
+ * part of completing that same application. The route still gates on
+ * `assertUnderLimit` to prevent free abuse.
+ *
+ * Output validation:
+ * - `answerKey` must be a non-empty string AND must match one of the
+ *   `options[i].key` values. If Gemini hallucinates a new key we throw
+ *   502 UPSTREAM_ERROR (no fallback — picking a wrong answer in a quiz
+ *   would actively hurt the user).
+ * - `reason` defaults to a generic Spanish-MX string if missing.
+ */
+export async function answerQuiz(
+  args: AnswerQuizArgs
+): Promise<AnswerQuizResult> {
+  const { apiKey, model, question, options, profile, job } = args;
+  if (!apiKey) throw new HttpError(500, "INTERNAL_ERROR", "Configuración del servicio incompleta.");
+  if (!profile) throw new HttpError(400, "VALIDATION_ERROR", "Falta el perfil del candidato.");
+  if (!job) throw new HttpError(400, "VALIDATION_ERROR", "Falta la información de la vacante.");
+  if (!question || !question.trim()) {
+    throw new HttpError(400, "VALIDATION_ERROR", "Falta la pregunta del quiz.");
+  }
+  if (!Array.isArray(options) || options.length === 0) {
+    throw new HttpError(400, "VALIDATION_ERROR", "Faltan las opciones del quiz.");
+  }
+
+  // Render options as a deterministic bullet list. Keep the keys verbatim so
+  // Gemini's response can be matched 1:1 against the input.
+  const optionsText = options
+    .map((o) => `- ${o.key}) ${o.text}`)
+    .join("\n");
+
+  // Truncate the profile JSON to keep prompt size predictable. The full
+  // profile is irrelevant for factual QA — we just want enough signal that
+  // Gemini can disambiguate domain-specific phrasing if needed.
+  const profileBlurb = JSON.stringify(profile, null, 2).slice(0, 800);
+
+  const userText =
+    `Pregunta: ${question}\n\n` +
+    `Opciones:\n${optionsText}\n\n` +
+    `Contexto (perfil del candidato, no determinante):\n${profileBlurb}\n\n` +
+    `Vacante:\n${job.title} en ${job.company}\n\n` +
+    `Devuelve la llave correcta y una razón de 1-2 frases.`;
+
+  const body = {
+    systemInstruction: { parts: [{ text: ANSWER_QUIZ_SYSTEM }] },
+    contents: [{ role: "user", parts: [{ text: userText }] }],
+    generationConfig: {
+      // Factual QA — keep creativity to a minimum so the model picks the
+      // canonically correct option instead of "an interesting one".
+      temperature: 0.1,
+      maxOutputTokens: 400,
+      thinkingConfig: { thinkingBudget: 0 },
+      responseMimeType: "application/json",
+      responseJsonSchema: ANSWER_QUIZ_SCHEMA
+    }
+  };
+
+  const res = await callGenerate(apiKey, model, body);
+  const out = extractJson<{ answerKey?: unknown; reason?: unknown }>(res);
+
+  const rawKey = typeof out.answerKey === "string" ? out.answerKey.trim() : "";
+  if (!rawKey) {
+    throw new HttpError(502, "UPSTREAM_ERROR", "La IA no devolvió una opción válida.");
+  }
+  // Verify the key is one of the input options. Gemini occasionally returns
+  // a letter the schema didn't include (e.g. "E" on a 4-option quiz); we
+  // refuse to relay that to the user since selecting the wrong option in a
+  // graded quiz is worse than failing fast.
+  const match = options.find((o) => o.key === rawKey);
+  if (!match) {
+    throw new HttpError(502, "UPSTREAM_ERROR", "La IA respondió con una opción inválida.");
+  }
+
+  const reason =
+    typeof out.reason === "string" && out.reason.trim()
+      ? out.reason.trim()
+      : "Respuesta seleccionada por la IA.";
+
+  return { answerKey: match.key, reason };
 }

@@ -13,6 +13,7 @@ import { authRequired } from "../middleware/auth.js";
 import { emailVerifiedRequired } from "../middleware/email-verified.js";
 import {
   answerQuestions,
+  answerQuiz,
   generateCoverLetter,
   generateTailoredCv,
   parseCvText
@@ -104,6 +105,37 @@ const answerQuestionsSchema = z.object({
     )
     .min(1, "Envía al menos una pregunta.")
     .max(12, "Máximo 12 preguntas por solicitud."),
+  profile: profileSchema,
+  job: jobSchema
+});
+
+// Answer-quiz: a single multiple-choice knowledge question + 2-8 options.
+// Question window 5-500 chars covers everything from "¿Qué es X?" to longer
+// scenario questions. Option keys are the literal labels rendered by the
+// form (usually "A"/"B"/"C"/"D" but LaPieza sometimes uses "1"/"2"/"3");
+// 1-3 chars uppercase tolerates both shapes without letting free-form text
+// through. Per-option text capped at 300 chars to drop pathological inputs.
+const answerQuizSchema = z.object({
+  question: z
+    .string()
+    .min(5, "La pregunta debe tener al menos 5 caracteres.")
+    .max(500, "La pregunta debe tener máximo 500 caracteres."),
+  options: z
+    .array(
+      z.object({
+        key: z
+          .string()
+          .min(1, "La llave de la opción no puede estar vacía.")
+          .max(3, "La llave de la opción debe tener máximo 3 caracteres.")
+          .regex(/^[A-Z0-9]+$/, "La llave de la opción debe ser alfanumérica en mayúsculas."),
+        text: z
+          .string()
+          .min(1, "El texto de la opción no puede estar vacío.")
+          .max(300, "El texto de la opción debe tener máximo 300 caracteres.")
+      })
+    )
+    .min(2, "Se requieren al menos 2 opciones.")
+    .max(8, "Máximo 8 opciones por pregunta."),
   profile: profileSchema,
   job: jobSchema
 });
@@ -316,6 +348,90 @@ applicationsRoutes.post(
       if (user) {
         console.log(
           `[answer-questions] fail user=${user.id} plan=${user.plan}`
+        );
+      }
+      return sendError(c, err);
+    }
+  }
+);
+
+// /answer-quiz picks the correct option for a single multiple-choice
+// knowledge question embedded in an application form (LaPieza, OCC tech
+// screens, etc).
+//
+// Quota model: charged as **0 units** — same rationale as /answer-questions.
+// The user already paid 1 unit for the cover letter on the same application;
+// quiz answering is part of completing that same application. We still gate
+// on `assertUnderLimit` so users already over quota cannot call this for
+// free, but never call `incrementUsage`.
+applicationsRoutes.post(
+  "/answer-quiz",
+  authRequired(),
+  emailVerifiedRequired(),
+  async (c) => {
+    try {
+      const body = await c.req.json().catch(() => null);
+      const parsed = answerQuizSchema.safeParse(body);
+      if (!parsed.success) {
+        throw new HttpError(
+          400,
+          "VALIDATION_ERROR",
+          parsed.error.issues[0]?.message ?? "Pregunta o opciones inválidas."
+        );
+      }
+
+      // Same pre-flight as /generate-cv and /answer-questions: a thin
+      // profile means we have no signal to provide as context. The quiz
+      // answer mostly relies on factual knowledge, but we keep the gate
+      // consistent across application endpoints so the extension can
+      // surface a single "complete your CV" affordance.
+      const { profile, job, question, options } = parsed.data;
+      if (!profile.experience || profile.experience.length === 0) {
+        throw new HttpError(
+          422,
+          "VALIDATION_ERROR",
+          "Tu perfil no tiene experiencia laboral. Completa tu CV antes de generar respuestas."
+        );
+      }
+      if (!profile.personal.fullName || !profile.personal.fullName.trim()) {
+        throw new HttpError(
+          422,
+          "VALIDATION_ERROR",
+          "Tu perfil no tiene nombre completo. Completa tu CV antes de generar respuestas."
+        );
+      }
+
+      const env = loadEnv();
+      const user = c.get("user");
+      // Gate on quota but DO NOT increment — see route comment above.
+      assertUnderLimit(user.id, user.plan);
+
+      const result = await answerQuiz({
+        apiKey: env.GEMINI_API_KEY,
+        model: env.GEMINI_MODEL,
+        question,
+        options,
+        profile,
+        job
+      });
+
+      // Log meta only — never log the question text or the chosen answer.
+      // Quiz content is often proprietary (employer-licensed test banks)
+      // and the chosen answer would let a leak reconstruct the question.
+      console.log(
+        `[answer-quiz] ok user=${user.id} plan=${user.plan} job=${job.source}:${job.id} q_len=${question.length} options=${options.length}`
+      );
+
+      return c.json({
+        ok: true,
+        answerKey: result.answerKey,
+        reason: result.reason
+      });
+    } catch (err) {
+      const user = c.get("user");
+      if (user) {
+        console.log(
+          `[answer-quiz] fail user=${user.id} plan=${user.plan}`
         );
       }
       return sendError(c, err);
