@@ -3599,7 +3599,15 @@
     }
 
     document.body.appendChild(el);
+    // Bug history: used requestAnimationFrame to defer the .show class one
+    // frame so the CSS transition fires from opacity:0 → 1. Live testing
+    // showed that on LaPieza the rAF callback was never invoked (toast
+    // stuck at opacity:0, transform:translateY(16px)) — possibly LaPieza
+    // suppresses rAF in some routes. Belt-and-suspenders: schedule via
+    // BOTH rAF and a 16ms setTimeout. Whichever fires first adds the
+    // class; the second is a no-op (classList.add is idempotent).
     requestAnimationFrame(() => el.classList.add("eamx-toast--show"));
+    setTimeout(() => el.classList.add("eamx-toast--show"), 16);
     const hasAction = !!(action && action.label && typeof action.onClick === "function");
     const duration = (action && Number.isFinite(action.durationMs))
       ? Math.max(800, action.durationMs | 0)
