@@ -707,13 +707,23 @@
   // Defaults to "vacancy" if we somehow can't classify (preserves old behavior).
   function fabMode() {
     if (isApplyPage()) return "apply";
-    // Match canonical vacancy detail URLs (/vacancy/<uuid>, /vacante/<uuid>).
-    // We deliberately don't reuse JOB_URL_PATTERNS here because that array
-    // also includes generic /jobs/<slug> shapes which appear on listing
-    // categories — for listings we always want "listing" mode.
-    if (/\/(vacancy|vacante)\/[a-f0-9][a-f0-9-]{7,}/i.test(location.href)) return "vacancy";
+    // Match vacancy detail URLs in BOTH formats:
+    //   /vacancy/<uuid>  — canonical (e.g. /vacancy/9726cb82-...)
+    //   /vacante/<slug>  — slug form with optional 6-hex suffix
+    //                     (e.g. /vacante/data-analyst-...-50ce33)
+    //
+    // Bug history: the previous regex required the segment to start
+    // with hex chars, which missed every slug-form vacancy URL — so
+    // the FAB on a real vacancy page said "Mejores matches" instead
+    // of "Postular con IA" because fabMode fell through to "listing".
+    //
+    // Now we accept any non-empty segment after /vacancy/ or /vacante/.
+    // Trailing-slash / empty-segment listing roots (/vacante, /vacante/)
+    // are still rejected by the [^/?#]+ requirement.
+    const path = location.pathname || "";
+    if (/\/(?:vacancy|vacante)\/[^/?#]+/i.test(path)) return "vacancy";
     if (isListingPage()) return "listing";
-    // Fallback — covers older /jobs/<slug>/, /empleos/<slug>/ detail pages.
+    // Fallback — older /jobs/<slug>/, /empleos/<slug>/ detail pages.
     if (JOB_URL_PATTERNS.some((re) => re.test(location.href))) return "vacancy";
     return "vacancy";
   }
