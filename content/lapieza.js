@@ -846,24 +846,9 @@
   //   - Express ON  + /apply/<uuid>   → run full Express fill (carta + cv + answers)
   //   - Express OFF (any non-listing) → legacy panel flow (current behavior)
   async function onFabClick() {
-    // Diagnostic — temporary while we cazamos the listener-not-firing issue.
-    const _diag = JSON.stringify({
-      fabEl: !!fabEl,
-      fabDisabled: fabEl?.disabled,
-      mode: (typeof fabMode === "function") ? fabMode() : "?",
-      isApply: (typeof isApplyPage === "function") ? isApplyPage() : "?",
-      url: location.href.slice(0, 100)
-    });
-    console.log("[EmpleoAutomatico] onFabClick:start", _diag);
-    if (!fabEl || fabEl.disabled) {
-      console.log("[EmpleoAutomatico] onFabClick:abort fab-state");
-      return;
-    }
+    if (!fabEl || fabEl.disabled) return;
     // Listing branch — Express toggle is irrelevant here, the panel is read-only.
-    if (fabMode() === "listing") {
-      console.log("[EmpleoAutomatico] onFabClick:branch listing");
-      return openBestMatchesPanel();
-    }
+    if (fabMode() === "listing") return openBestMatchesPanel();
 
     // If this vacancy is in the user's queue, mark it as "postulando_ahora"
     // so the dashboard pill flips to cyan-pulse in real time. We do this
@@ -878,11 +863,10 @@
         const id = idFromUrl(location.href);
         if (id) await queueModule.touchOpened(id, SOURCE);
       }
-    } catch (e) { console.log("[EmpleoAutomatico] onFabClick:touchOpened-err", e?.message); }
+    } catch (_) { /* swallow */ }
 
     let express = true;
     try { express = await readExpressMode(); } catch (_) { express = true; }
-    console.log("[EmpleoAutomatico] onFabClick:branch", { express, isApply: isApplyPage() });
     if (!express) return onFabClickReview();
     if (isApplyPage()) return onFabClickExpressApply();
     return onFabClickExpressVacancy();
@@ -932,18 +916,14 @@
   // background draft generation, show a toast pointing at LaPieza's own
   // "Postularme" button. We do NOT auto-click that button — HITL.
   async function onFabClickExpressVacancy() {
-    console.log("[EmpleoAutomatico] expressVacancy:enter");
     let job, partial;
     try {
       ({ job, partial } = extractJob());
-      console.log("[EmpleoAutomatico] expressVacancy:extracted", JSON.stringify({ partial, title: job?.title?.slice(0,60), company: job?.company?.slice(0,60) }));
-    } catch (e) {
-      console.log("[EmpleoAutomatico] expressVacancy:extractJob threw", e?.message);
+    } catch (_) {
       toast("No pudimos leer esta vacante. Intenta de nuevo.", "error");
       return;
     }
     if (partial && job.title === "(sin título)" && job.company === "(empresa desconocida)") {
-      console.log("[EmpleoAutomatico] expressVacancy:partial-empty");
       toast("Abre primero la vacante (página /vacancy/...) para que la IA la lea.", "info");
       return;
     }
@@ -953,9 +933,7 @@
     // navigate to /apply/<uuid> in that window. If they're faster, the
     // apply-side click will simply re-request.
     prewarmExpressDraft(job);
-    console.log("[EmpleoAutomatico] expressVacancy:toast-show");
     toast("⚡ Listo. Dale 'Postularme' y te lleno todo.", "info", { durationMs: 4000 });
-    console.log("[EmpleoAutomatico] expressVacancy:done");
   }
 
   // Express FAB click on /apply/<uuid>. Restore job + draft from session,
