@@ -847,15 +847,23 @@
   //   - Express OFF (any non-listing) → legacy panel flow (current behavior)
   async function onFabClick() {
     // Diagnostic — temporary while we cazamos the listener-not-firing issue.
-    console.log("[EmpleoAutomatico] onFabClick fired", {
+    const _diag = JSON.stringify({
       fabEl: !!fabEl,
       fabDisabled: fabEl?.disabled,
       mode: (typeof fabMode === "function") ? fabMode() : "?",
-      url: location.href
+      isApply: (typeof isApplyPage === "function") ? isApplyPage() : "?",
+      url: location.href.slice(0, 100)
     });
-    if (!fabEl || fabEl.disabled) return;
+    console.log("[EmpleoAutomatico] onFabClick:start", _diag);
+    if (!fabEl || fabEl.disabled) {
+      console.log("[EmpleoAutomatico] onFabClick:abort fab-state");
+      return;
+    }
     // Listing branch — Express toggle is irrelevant here, the panel is read-only.
-    if (fabMode() === "listing") return openBestMatchesPanel();
+    if (fabMode() === "listing") {
+      console.log("[EmpleoAutomatico] onFabClick:branch listing");
+      return openBestMatchesPanel();
+    }
 
     // If this vacancy is in the user's queue, mark it as "postulando_ahora"
     // so the dashboard pill flips to cyan-pulse in real time. We do this
@@ -870,10 +878,11 @@
         const id = idFromUrl(location.href);
         if (id) await queueModule.touchOpened(id, SOURCE);
       }
-    } catch (_) { /* swallow */ }
+    } catch (e) { console.log("[EmpleoAutomatico] onFabClick:touchOpened-err", e?.message); }
 
     let express = true;
     try { express = await readExpressMode(); } catch (_) { express = true; }
+    console.log("[EmpleoAutomatico] onFabClick:branch", { express, isApply: isApplyPage() });
     if (!express) return onFabClickReview();
     if (isApplyPage()) return onFabClickExpressApply();
     return onFabClickExpressVacancy();
