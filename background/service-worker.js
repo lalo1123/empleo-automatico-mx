@@ -411,6 +411,109 @@ async function handleAnswerQuestions(msg) {
   return { ok: true, answers };
 }
 
+// ANSWER_QUIZ handler. Mirrors handleAnswerQuestions one-for-one (auth gate,
+// profile gate, normalized job payload, typed errors) but for the multiple-
+// choice knowledge quizzes LaPieza puts on some apply forms (e.g. 15-question
+// Power BI test for a Data Analyst position). The content script's auto-quiz
+// loop calls this ONCE per question — the backend doesn't see the full quiz,
+// just the current question + its lettered options, plus enough job context
+// for domain disambiguation.
+//
+// Defensive: validate the answerKey is one of the option keys we sent.
+// Otherwise the content script's button-finder would fail silently and stall
+// the loop.
+async function handleAnswerQuiz(msg) {
+  const job = msg && msg.job;
+  const question = (msg && typeof msg.question === "string") ? msg.question.trim() : "";
+  const rawOptions = (msg && Array.isArray(msg.options)) ? msg.options : [];
+
+  if (!job) {
+    return { ok: false, error: ERROR_CODES.INVALID_INPUT, message: "Falta información de la vacante" };
+  }
+  if (!question) {
+    return { ok: false, error: ERROR_CODES.INVALID_INPUT, message: "La pregunta del quiz está vacía" };
+  }
+
+  // Normalize options: { key, text } only, both non-empty strings, dedup keys,
+  // cap at 8 (well above the 4-6 LaPieza typically uses; defensive).
+  const seenKeys = new Set();
+  const options = [];
+  for (const opt of rawOptions) {
+    if (!opt || typeof opt !== "object") continue;
+    const key = typeof opt.key === "string" ? opt.key.trim().toUpperCase() : "";
+    const text = typeof opt.text === "string" ? opt.text.trim() : "";
+    if (!key || !text) continue;
+    if (seenKeys.has(key)) continue;
+    seenKeys.add(key);
+    options.push({ key, text });
+    if (options.length >= 8) break;
+  }
+  if (options.length < 2) {
+    return { ok: false, error: ERROR_CODES.INVALID_INPUT, message: "El quiz necesita al menos 2 opciones" };
+  }
+
+  if (!(await auth.isLoggedIn())) {
+    return {
+      ok: false,
+      error: ERROR_CODES.UNAUTHORIZED,
+      message: "Inicia sesión en Opciones para responder el quiz con IA."
+    };
+  }
+
+  const profile = await storage.getProfile();
+  if (!profile) {
+    return {
+      ok: false,
+      error: ERROR_CODES.INVALID_INPUT,
+      message: "Sube tu CV en Opciones antes de responder el quiz con IA."
+    };
+  }
+
+  const normalizedJob = {
+    source: job.source || SOURCES.LAPIEZA,
+    url: job.url || "",
+    id: job.id || "",
+    title: job.title || "",
+    company: job.company || "",
+    location: job.location || "",
+    salary: job.salary == null ? null : job.salary,
+    modality: job.modality == null ? null : job.modality,
+    description: job.description || "",
+    requirements: Array.isArray(job.requirements) ? job.requirements : [],
+    extractedAt: job.extractedAt || nowISO()
+  };
+
+  let result;
+  try {
+    result = await backend.answerQuiz({ question, options, profile, job: normalizedJob });
+  } catch (e) {
+    if (e instanceof backend.PlanLimitError) {
+      return {
+        ok: false,
+        error: ERROR_CODES.PLAN_LIMIT_EXCEEDED,
+        message: "Llegaste al límite de tu plan. Upgrade en empleo.skybrandmx.com/account/billing"
+      };
+    }
+    return failFromError(e);
+  }
+
+  // Validate the returned answerKey is one we actually offered. If the LLM
+  // hallucinates a letter (e.g. "E" when we only sent A-D), treat it as a
+  // 502 — the content script can either skip or stop the loop.
+  const answerKey = (result && typeof result.answerKey === "string")
+    ? result.answerKey.trim().toUpperCase()
+    : "";
+  if (!answerKey || !seenKeys.has(answerKey)) {
+    return {
+      ok: false,
+      error: ERROR_CODES.SERVER_ERROR,
+      message: "El servicio de IA devolvió una respuesta inválida para el quiz."
+    };
+  }
+
+  return { ok: true, answerKey };
+}
+
 // Inject `<script>setTimeout(() => window.print(), 800)</script>` right
 // before </body> if the HTML doesn't already trigger window.print(). The
 // guard checks for the marker we attach (`__eamxAutoPrint`) — this means the
@@ -562,6 +665,8 @@ onMessage(async (msg) => {
       return handleOpenGeneratedCv(msg);
     case MESSAGE_TYPES.ANSWER_QUESTIONS:
       return handleAnswerQuestions(msg);
+    case MESSAGE_TYPES.ANSWER_QUIZ:
+      return handleAnswerQuiz(msg);
     default:
       return {
         ok: false,

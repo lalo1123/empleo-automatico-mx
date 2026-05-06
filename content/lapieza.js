@@ -27,7 +27,8 @@
     OPEN_BILLING: "OPEN_BILLING",
     GENERATE_CV: "GENERATE_CV",
     OPEN_GENERATED_CV: "OPEN_GENERATED_CV",
-    ANSWER_QUESTIONS: "ANSWER_QUESTIONS"
+    ANSWER_QUESTIONS: "ANSWER_QUESTIONS",
+    ANSWER_QUIZ: "ANSWER_QUIZ"
   };
   const ERR = { UNAUTHORIZED: "UNAUTHORIZED", PLAN_LIMIT_EXCEEDED: "PLAN_LIMIT_EXCEEDED", INVALID_INPUT: "INVALID_INPUT", SERVER_ERROR: "SERVER_ERROR" };
   // Modo Auto storage keys — must mirror lib/schemas.js STORAGE_KEYS exactly.
@@ -104,7 +105,8 @@
         OPEN_BILLING: mod.MESSAGE_TYPES.OPEN_BILLING,
         GENERATE_CV: mod.MESSAGE_TYPES.GENERATE_CV,
         OPEN_GENERATED_CV: mod.MESSAGE_TYPES.OPEN_GENERATED_CV,
-        ANSWER_QUESTIONS: mod.MESSAGE_TYPES.ANSWER_QUESTIONS
+        ANSWER_QUESTIONS: mod.MESSAGE_TYPES.ANSWER_QUESTIONS,
+        ANSWER_QUIZ: mod.MESSAGE_TYPES.ANSWER_QUIZ || "ANSWER_QUIZ"
       });
       if (mod && mod.ERROR_CODES) Object.assign(ERR, {
         UNAUTHORIZED: mod.ERROR_CODES.UNAUTHORIZED,
@@ -176,6 +178,45 @@
   let flowDebounceTimer = null;
   const FLOW_PROCESSED = new WeakSet(); // elements we've already attached to
   const FLOW_TIPS_SHOWN = new Set();    // dedupe tip-keys for one-shot toasts
+
+  // -----------------------------------------------------------------------
+  // Auto-quiz state. SECOND documented exception to HITL (after Modo Auto).
+  // Quiz auto-answer is allowed because:
+  //   1) The user explicitly opted into Express by clicking the FAB.
+  //   2) Quiz answers are FACTUAL public knowledge (Power Query, DAX, Excel,
+  //      JS, etc.), not deceptive — no recruiter is misled by a correct
+  //      multiple-choice tick.
+  //   3) The user can override at any time via three kill switches:
+  //        a) Esc key → cancels the loop, keeps the form fillable manually.
+  //        b) Clicking any quiz option themselves → loop detects the user-
+  //           initiated click (no eamx-quiz-clicking flag) and yields.
+  //        c) The FINAL submit-to-recruiter button is NOT auto-clicked —
+  //           the user always confirms the application herself.
+  //
+  // The loop is module-scoped (not inside a closure that runFlowDetectors
+  // creates fresh each call) so a single guard `quizLoopActive` reliably
+  // dedupes against the MutationObserver firing while we're mid-loop.
+  let quizLoopActive = false;
+  // Set when the user pressed Esc OR clicked a quiz option themselves. The
+  // loop checks this between every step. Reset when the loop starts.
+  let quizLoopAborted = false;
+  // Document-level Esc + click listeners. Stored so we can detach them
+  // when the loop ends. Single instance per loop run.
+  let quizEscListener = null;
+  let quizClickListener = null;
+  // Last counter we acted on, used to detect "next question rendered" by
+  // polling for a counter change. Format: { current, total } | null.
+  let quizLastCounter = null;
+  // Configurable cadence — visible delays so the user can see what's
+  // happening. Tuned by hand on the 15-question Power BI test.
+  const QUIZ_INTER_ANSWER_DELAY_MS = 1500;
+  const QUIZ_INTER_QUESTION_DELAY_MS = 1200;
+  const QUIZ_STALL_POLL_MS = 800;
+  const QUIZ_STALL_MAX_POLLS = 3;
+  const QUIZ_MAX_QUESTIONS = 30;
+  // Sticky toast handle. We update a single DOM node across the loop instead
+  // of spamming a fresh toast per question. Cleared on loop end.
+  let quizStickyToast = null;
 
   // =========================================================================
   // Detection & extraction
@@ -3710,6 +3751,16 @@
       ".eamx-flow-tooltip, .eamx-flow-paste-btn, .eamx-flow-hint"
     ).forEach((el) => { try { el.remove(); } catch (_) {} });
     FLOW_TIPS_SHOWN.clear();
+    // Auto-quiz cleanup. The loop respects quizLoopAborted between every
+    // step, so flipping it here lets an in-flight loop unwind safely on
+    // SPA navigation / cancel. The .finally() on runAutoQuizLoop also
+    // detaches kill switches and clears the sticky toast.
+    if (quizLoopActive) {
+      quizLoopAborted = true;
+    } else {
+      detachQuizKillSwitches();
+      clearQuizStickyToast();
+    }
   }
 
   function runFlowDetectors() {
@@ -3718,6 +3769,12 @@
       detectCoverLetterTextarea();
       detectQuestions();
       detectAdaptiveQuestions();
+      // Multiple-choice knowledge quiz auto-answer. The detector is cheap
+      // (one querySelector + a button-text scan), so it's safe to run on
+      // every MutationObserver tick. The actual loop only starts if a quiz
+      // question is detected AND quizLoopActive === false. Idempotency lives
+      // inside maybeStartAutoQuizLoop, not here.
+      maybeStartAutoQuizLoop();
       detectFinalSubmit();
     } catch (err) {
       console.warn("[EmpleoAutomatico] flow detector error", err);
@@ -4079,6 +4136,493 @@
         toast("Listo. Revisa todo y dale Enviar cuando estés conforme. Tú das el último clic.", "success");
       }
     }
+  }
+
+  // =========================================================================
+  // Multiple-choice quiz auto-answer
+  // =========================================================================
+  // SECOND documented exception to HITL. See module-level state notes for
+  // the rationale and the three kill switches. Lifecycle:
+  //   1) runFlowDetectors → maybeStartAutoQuizLoop (every observer tick).
+  //   2) If a quiz is detected and !quizLoopActive, we fire runAutoQuizLoop.
+  //   3) The loop walks question-by-question, sending each to the backend
+  //      (ANSWER_QUIZ → handleAnswerQuiz → backend.answerQuiz). On a valid
+  //      answerKey, click the matching button + the "Siguiente pregunta"
+  //      advance button.
+  //   4) The loop exits when the next button copy matches FINAL submit (we
+  //      stop and let the user click Finalizar) or when the counter shows
+  //      we've reached `total`.
+  //
+  // Why one-question-at-a-time (vs. batch ANSWER_QUESTIONS): the LaPieza UI
+  // ONLY shows one quiz question at a time. We can't batch without scraping
+  // future questions, which we can't see. Backend-side, single-question
+  // calls are also cheaper context — each prompt is small.
+
+  // Regex for the "advance to next question" button text (NOT the final
+  // submit button). Mid-quiz the button reads "Siguiente pregunta"; on the
+  // last question of the quiz it reads "Continuar". Both are auto-clickable.
+  // Anything matching FLOW_FINAL_RX above is a recruiter-side submit and
+  // we do NOT auto-click it.
+  const QUIZ_NEXT_RX = /^(siguiente\s+pregunta|continuar|siguiente|next)\s*$/i;
+  // Option button leading-letter parser. Matches "A)Campo de filtro",
+  // "B)foo", etc. — the format LaPieza emits. The capture group gives us
+  // the letter to send to the backend.
+  const QUIZ_OPTION_RX = /^([A-Z])\)(.*)$/s;
+  // Question-text heuristic. Length bounds keep us from mis-classifying
+  // a footer paragraph or a tiny tooltip as the question.
+  const QUIZ_QUESTION_MIN_LEN = 5;
+  const QUIZ_QUESTION_MAX_LEN = 300;
+  // Counter regex (e.g. "1 / 15", "  3/15  "). Captures both numbers.
+  const QUIZ_COUNTER_RX = /^\s*(\d+)\s*\/\s*(\d+)\s*$/;
+
+  /**
+   * Detect the current quiz state on the page. Returns null if no quiz is
+   * visible OR if the container has fewer than 2 options (we won't
+   * blindly answer a single-option question — could be a non-quiz UI we
+   * misclassified).
+   *
+   * Selector cascade — first match wins:
+   *   1) div.details__form__preguntas (the live-verified primary).
+   *   2) Any element containing ≥2 button.multi-select-button children.
+   *
+   * @returns {{
+   *   container: HTMLElement,
+   *   question: string,
+   *   counter: { current: number, total: number } | null,
+   *   options: Array<{ key: string, text: string, button: HTMLButtonElement }>,
+   *   nextButton: HTMLButtonElement | null
+   * } | null}
+   */
+  function detectQuizQuestion() {
+    let container = document.querySelector("div.details__form__preguntas");
+    if (!container || !isVisible(container)) {
+      // Fallback: any element with ≥2 visible multi-select buttons. We
+      // walk up from each button group to find the smallest common
+      // ancestor — that's most likely the quiz container.
+      const allOptions = Array.from(document.querySelectorAll("button.multi-select-button"))
+        .filter(isVisible);
+      if (allOptions.length < 2) return null;
+      // Cheap heuristic: take the first option's parent as the container.
+      // For LaPieza this matches in practice; if it doesn't, the question-
+      // text walk below will fail gracefully and we'll bail.
+      container = allOptions[0].parentElement || allOptions[0];
+    }
+
+    // Options — only direct or nested multi-select buttons inside this
+    // container. We re-query (vs. reusing allOptions) because the
+    // container fallback may have repositioned us.
+    const optionButtons = Array.from(container.querySelectorAll("button.multi-select-button"))
+      .filter(isVisible);
+    const options = [];
+    const seenKeys = new Set();
+    for (const btn of optionButtons) {
+      const text = (btn.textContent || "").trim();
+      const m = text.match(QUIZ_OPTION_RX);
+      if (!m) continue;
+      const key = m[1].toUpperCase();
+      if (seenKeys.has(key)) continue;
+      const optText = (m[2] || "").trim();
+      if (!optText) continue;
+      seenKeys.add(key);
+      options.push({ key, text: optText, button: btn });
+    }
+    if (options.length < 2) return null;
+
+    // Counter — walk the container looking for the X/Y pattern. Limit the
+    // scan depth so we don't pick up a footer pagination accidentally.
+    let counter = null;
+    const counterCandidates = container.querySelectorAll("p, span, div");
+    for (const el of counterCandidates) {
+      // Skip elements that aren't simple leaves — counter is always a
+      // bare "N / M" string in its own node.
+      if (el.children && el.children.length > 0) continue;
+      const txt = (el.textContent || "").trim();
+      const m = txt.match(QUIZ_COUNTER_RX);
+      if (m) {
+        const cur = parseInt(m[1], 10);
+        const tot = parseInt(m[2], 10);
+        if (Number.isFinite(cur) && Number.isFinite(tot) && tot > 0) {
+          counter = { current: cur, total: tot };
+          break;
+        }
+      }
+    }
+
+    // Question text — walk descendants for the first leaf-ish element
+    // ending with "?", within length bounds, that ISN'T one of our option
+    // buttons. Falling back to the FIRST such element on the document if
+    // the container scan finds nothing (LaPieza occasionally renders the
+    // question outside the .preguntas div).
+    let question = "";
+    const pickQuestion = (root) => {
+      const walker = root.querySelectorAll("p, div, span, h1, h2, h3, h4, h5, h6");
+      for (const el of walker) {
+        if (el.children && el.children.length > 0) continue;
+        if (el.tagName === "BUTTON") continue;
+        const txt = (el.textContent || "").trim();
+        if (!txt) continue;
+        if (txt.length < QUIZ_QUESTION_MIN_LEN || txt.length > QUIZ_QUESTION_MAX_LEN) continue;
+        if (!txt.endsWith("?")) continue;
+        if (!isVisible(el)) continue;
+        // Skip the counter line if it accidentally ends with "?".
+        if (QUIZ_COUNTER_RX.test(txt)) continue;
+        return txt;
+      }
+      return "";
+    };
+    question = pickQuestion(container) || pickQuestion(document.body);
+    if (!question) return null;
+
+    // Next button — visible <button> whose text matches QUIZ_NEXT_RX and
+    // ISN'T disabled. We scan globally because LaPieza renders the button
+    // outside the .preguntas container.
+    let nextButton = null;
+    const allButtons = Array.from(document.querySelectorAll("button"));
+    for (const btn of allButtons) {
+      if (!isVisible(btn)) continue;
+      const txt = (btn.textContent || "").trim();
+      if (!txt) continue;
+      if (!QUIZ_NEXT_RX.test(txt)) continue;
+      if (btn.disabled) continue;
+      if (btn.getAttribute("aria-disabled") === "true") continue;
+      const cls = btn.className || "";
+      if (typeof cls === "string" && /\bdisabled\b/i.test(cls)) continue;
+      nextButton = btn;
+      break;
+    }
+
+    return { container, question, counter, options, nextButton };
+  }
+
+  /**
+   * Idempotent entrypoint called from runFlowDetectors. Starts the loop only
+   * if (a) a quiz is currently visible, (b) we're not already running, and
+   * (c) we have lastJob + cachedProfile. Pre-flight checks for auth happen
+   * lazily — the first ANSWER_QUIZ call returns UNAUTHORIZED if the user is
+   * logged out, and we surface that via toast.
+   */
+  function maybeStartAutoQuizLoop() {
+    if (quizLoopActive) return;
+    const state = detectQuizQuestion();
+    if (!state) return;
+    // We have a quiz. Fire the loop (async, non-blocking). The loop itself
+    // sets quizLoopActive=true on entry so subsequent observer ticks bail
+    // here.
+    quizLoopActive = true;
+    quizLoopAborted = false;
+    quizLastCounter = null;
+    runAutoQuizLoop().catch((err) => {
+      console.warn("[EmpleoAutomatico] auto-quiz loop error", err);
+    }).finally(() => {
+      quizLoopActive = false;
+      detachQuizKillSwitches();
+      clearQuizStickyToast();
+    });
+  }
+
+  /**
+   * Sticky toast that updates in place across questions. We DOM-mutate the
+   * existing node instead of spawning a fresh toast — avoids stacking 15
+   * toasts on top of each other through a Power BI test.
+   */
+  function setQuizStickyToast(message, variant = "info") {
+    if (!quizStickyToast || !document.body.contains(quizStickyToast)) {
+      // Use the regular toast() helper for the first call so styling +
+      // animation match. Then capture the DOM node for in-place updates.
+      toast(message, variant, { durationMs: 60000 });
+      // The toast() helper appends to document.body; grab the most recent
+      // .eamx-toast we appended.
+      const all = document.querySelectorAll(".eamx-toast");
+      quizStickyToast = all.length ? all[all.length - 1] : null;
+      return;
+    }
+    // Update text in place. Keep the variant class accurate.
+    const span = quizStickyToast.querySelector("span");
+    if (span) span.textContent = message;
+    quizStickyToast.classList.remove("eamx-toast--info", "eamx-toast--success", "eamx-toast--error");
+    quizStickyToast.classList.add(
+      variant === "success" ? "eamx-toast--success"
+        : variant === "error" ? "eamx-toast--error" : "eamx-toast--info"
+    );
+  }
+
+  function clearQuizStickyToast() {
+    if (!quizStickyToast) return;
+    try {
+      quizStickyToast.classList.remove("eamx-toast--show");
+      const node = quizStickyToast;
+      setTimeout(() => { try { node.remove(); } catch (_) {} }, 400);
+    } catch (_) {}
+    quizStickyToast = null;
+  }
+
+  /**
+   * Three kill switches:
+   *   1) Esc key during the loop.
+   *   2) User clicks any quiz option themselves (detected by the absence of
+   *      our `data-eamx-quiz-clicking` flag, which we stamp milliseconds
+   *      before our programmatic click).
+   *   3) The FINAL submit-to-recruiter button is NEVER auto-clicked —
+   *      handled inside the loop by checking FLOW_FINAL_RX on the next
+   *      button text.
+   */
+  function attachQuizKillSwitches() {
+    detachQuizKillSwitches();
+    quizEscListener = (ev) => {
+      if (ev.key === "Escape" || ev.key === "Esc") {
+        if (!quizLoopActive) return;
+        quizLoopAborted = true;
+        toast("Auto-quiz cancelado. Continúa manual.", "info", { durationMs: 4000 });
+      }
+    };
+    quizClickListener = (ev) => {
+      if (!quizLoopActive) return;
+      const target = ev.target;
+      if (!target || !(target.closest)) return;
+      const btn = target.closest("button.multi-select-button");
+      if (!btn) return;
+      // If this click came from us (we set the flag before clicking) it's
+      // not a user takeover.
+      if (btn.dataset && btn.dataset.eamxQuizClicking === "true") return;
+      quizLoopAborted = true;
+      toast("Detecté que tomaste el control del quiz. Auto-quiz cancelado.", "info", { durationMs: 4000 });
+    };
+    document.addEventListener("keydown", quizEscListener, true);
+    document.addEventListener("click", quizClickListener, true);
+  }
+
+  function detachQuizKillSwitches() {
+    if (quizEscListener) {
+      try { document.removeEventListener("keydown", quizEscListener, true); } catch (_) {}
+      quizEscListener = null;
+    }
+    if (quizClickListener) {
+      try { document.removeEventListener("click", quizClickListener, true); } catch (_) {}
+      quizClickListener = null;
+    }
+  }
+
+  /**
+   * Wait for the next quiz question to render. We poll for either:
+   *   - the counter changing (current + 1, ideal)
+   *   - the question text changing (when no counter is rendered)
+   * Returns true on a successful advance, false on stall (3 stalled polls
+   * of QUIZ_STALL_POLL_MS each = ~2.4s total budget).
+   */
+  async function waitForNextQuizQuestion(prevQuestion, prevCounter) {
+    for (let i = 0; i < QUIZ_STALL_MAX_POLLS; i++) {
+      await new Promise((r) => setTimeout(r, QUIZ_STALL_POLL_MS));
+      if (quizLoopAborted) return false;
+      const next = detectQuizQuestion();
+      if (!next) {
+        // Container may be gone — quiz finished (we landed on a confirmation
+        // step or the next form section). Treat as success: the caller will
+        // re-evaluate and exit the loop cleanly.
+        return true;
+      }
+      const counterAdvanced = prevCounter && next.counter
+        && next.counter.current > prevCounter.current;
+      const questionChanged = next.question !== prevQuestion;
+      if (counterAdvanced || questionChanged) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Programmatically click an option button. We stamp a transient
+   * `data-eamx-quiz-clicking` flag a frame before dispatching the click so
+   * the document-level click kill switch knows this came from us.
+   */
+  function programmaticClick(btn) {
+    try {
+      if (btn && btn.dataset) btn.dataset.eamxQuizClicking = "true";
+      btn.click();
+    } finally {
+      // Clear the flag after the event has propagated. Use rAF + microtask
+      // so the kill-switch listener (capture phase) runs first and sees
+      // the flag, then we strip it before any future user click.
+      requestAnimationFrame(() => {
+        try { if (btn && btn.dataset) delete btn.dataset.eamxQuizClicking; } catch (_) {}
+      });
+    }
+  }
+
+  /**
+   * Main loop. See module-level docs for the HITL story. Stops on:
+   *   - quizLoopAborted (Esc / user click)
+   *   - QUIZ_MAX_QUESTIONS exceeded (defensive cap)
+   *   - Backend error (don't barrel through with bad answers)
+   *   - Next button matches FLOW_FINAL_RX (recruiter-side submit — user
+   *     confirms manually)
+   *   - Stall (3 polls without the counter advancing)
+   *   - No more quiz container detected (we cleared the form)
+   */
+  async function runAutoQuizLoop() {
+    // Pre-flight: lastJob + cachedProfile. The Express flow on /vacancy/<uuid>
+    // sets both; if we got here without them the apply-side cache restore
+    // didn't fire. Bail with an actionable toast.
+    if (!lastJob) {
+      toast("Auto-quiz: abre la vacante primero para que la IA la lea.", "info", { durationMs: 4500 });
+      return;
+    }
+    if (!cachedProfile) {
+      toast("Auto-quiz: sube tu CV en Opciones antes de empezar.", "info", { durationMs: 4500 });
+      return;
+    }
+    attachQuizKillSwitches();
+
+    let answeredOk = 0;
+    let totalSeen = 0;
+
+    for (let iter = 0; iter < QUIZ_MAX_QUESTIONS; iter++) {
+      if (quizLoopAborted) break;
+
+      const state = detectQuizQuestion();
+      if (!state) {
+        // Container is gone — quiz finished or LaPieza navigated away.
+        break;
+      }
+
+      // Track total from the counter, falling back to "?" if not visible.
+      if (state.counter && state.counter.total > 0) totalSeen = state.counter.total;
+      const currentNum = state.counter ? state.counter.current : (iter + 1);
+      const totalLabel = totalSeen || "?";
+
+      // Update sticky toast for THIS question.
+      setQuizStickyToast(`IA contestando pregunta ${currentNum}/${totalLabel}...`, "info");
+
+      // Build the request payload. options stripped to just {key, text}.
+      const payload = {
+        type: MSG.ANSWER_QUIZ,
+        question: state.question,
+        options: state.options.map((o) => ({ key: o.key, text: o.text })),
+        job: lastJob
+      };
+
+      let res;
+      try {
+        res = await sendMsg(payload);
+      } catch (err) {
+        toast(humanizeError(err), "error");
+        break;
+      }
+      if (!res || !res.ok) {
+        // Stop on first error — avoid clicking wrong answers in a panic.
+        if (res && res.error === ERR.UNAUTHORIZED) {
+          toast("Inicia sesión para continuar el quiz.", "error", {
+            label: "Iniciar sesión",
+            onClick: () => openOptionsPage()
+          });
+        } else if (res && res.error === ERR.PLAN_LIMIT_EXCEEDED) {
+          toast("Llegaste al límite de tu plan.", "error", {
+            label: "Ver planes",
+            onClick: () => openBilling()
+          });
+        } else {
+          toast((res && res.message) || "Auto-quiz: la IA no pudo responder.", "error");
+        }
+        break;
+      }
+
+      const answerKey = (res.answerKey || "").toUpperCase();
+      const choice = state.options.find((o) => o.key === answerKey);
+      if (!choice) {
+        // Backend returned a key we don't have in the DOM. Shouldn't happen
+        // (handler validates) but defend anyway.
+        toast(`Auto-quiz: la IA respondió "${answerKey}" pero no está en pantalla.`, "error");
+        break;
+      }
+
+      // Verify the option button is still in the DOM (LaPieza may have
+      // re-rendered between the request firing and the response landing).
+      if (!document.body.contains(choice.button)) {
+        // Re-detect and re-find by key.
+        const fresh = detectQuizQuestion();
+        const refreshed = fresh && fresh.options.find((o) => o.key === answerKey);
+        if (!refreshed) {
+          toast("Auto-quiz: el quiz cambió justo ahora. Revisa manualmente.", "info");
+          break;
+        }
+        choice.button = refreshed.button;
+      }
+
+      if (quizLoopAborted) break;
+
+      programmaticClick(choice.button);
+      answeredOk++;
+
+      // Visible pause so the user can see what we picked. Gives them a
+      // window to hit Esc if they disagree before we advance.
+      await new Promise((r) => setTimeout(r, QUIZ_INTER_ANSWER_DELAY_MS));
+      if (quizLoopAborted) break;
+
+      // Re-detect to find the now-enabled next button (LaPieza enables
+      // it only after an option is selected). We also re-check the
+      // question text to detect mid-tick re-renders.
+      const afterClick = detectQuizQuestion();
+      const nextBtn = (afterClick && afterClick.nextButton) || state.nextButton;
+      if (!nextBtn) {
+        // No advance button — likely the final state where the user has to
+        // manually click Finalizar. Stop the loop with a friendly toast.
+        setQuizStickyToast(
+          `✓ Quiz completo. ${answeredOk}/${totalSeen || answeredOk} respondidas. Revisa y dale Continuar.`,
+          "success"
+        );
+        // Convert sticky to auto-dismiss.
+        setTimeout(() => clearQuizStickyToast(), 6000);
+        return;
+      }
+
+      // FINAL submit guard. If the next button reads like a recruiter-side
+      // submit (Enviar postulación / Finalizar / Aplicar ahora), we DO NOT
+      // click it. The user always confirms the application herself.
+      const nextText = (nextBtn.textContent || "").trim();
+      if (FLOW_FINAL_RX.test(nextText)) {
+        setQuizStickyToast(
+          `✓ Quiz listo. ${answeredOk}/${totalSeen || answeredOk} respondidas. Revisa y dale Finalizar tú.`,
+          "success"
+        );
+        setTimeout(() => clearQuizStickyToast(), 6000);
+        return;
+      }
+
+      // Capture pre-advance signals so waitForNextQuizQuestion can detect
+      // the change.
+      const prevQuestion = state.question;
+      const prevCounter = state.counter;
+      quizLastCounter = prevCounter;
+
+      programmaticClick(nextBtn);
+
+      // Wait for either the counter to advance or the container to vanish.
+      const advanced = await waitForNextQuizQuestion(prevQuestion, prevCounter);
+      if (!advanced) {
+        toast("Auto-quiz: no detecté la siguiente pregunta. Revisa manualmente.", "info", { durationMs: 5000 });
+        break;
+      }
+
+      // Inter-question pause — gives the SPA time to settle and the user
+      // a brief window to scan what's about to happen.
+      await new Promise((r) => setTimeout(r, QUIZ_INTER_QUESTION_DELAY_MS));
+      if (quizLoopAborted) break;
+
+      // If the counter says we're done (current === total before this
+      // tick AND no quiz container after advance), we've already drifted
+      // past the final question. Re-check on next loop iteration; the
+      // detectQuizQuestion null-return up top handles it.
+    }
+
+    // Final summary.
+    if (quizLoopAborted) {
+      // Already toasted by the kill switch — just clean up.
+      clearQuizStickyToast();
+      return;
+    }
+    setQuizStickyToast(
+      `✓ Quiz completo. ${answeredOk}/${totalSeen || answeredOk} respondidas. Revisa y dale Continuar.`,
+      "success"
+    );
+    setTimeout(() => clearQuizStickyToast(), 6000);
   }
 
   // =========================================================================
