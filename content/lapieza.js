@@ -2275,6 +2275,15 @@
       renderMatchesPanelContent();
       return;
     }
+    if (what === "go-vacantes") {
+      // Take the user to LaPieza's main vacancy listing where the matches
+      // panel can actually find cards. Hard-navigate (not router-push) so
+      // the listing loads fresh and our content script re-runs the scan.
+      ev.preventDefault();
+      try { closeMatchesPanel(); } catch (_) {}
+      try { location.href = "https://lapieza.io/vacantes"; } catch (_) {}
+      return;
+    }
     if (what === "load-more") {
       // Legacy single-shot load; kept as a fallback handler in case the
       // skeleton is ever re-rendered by an older code path. Modern panels
@@ -2607,14 +2616,27 @@
     }
     if (cards.length > 100) cards = cards.slice(0, 100);
 
-    // Empty state #2 — no cards at all.
+    // Empty state #2 — no cards at all. Two flavors:
+    //  a) We're already on a listing route (/vacantes, /comunidad/jobs,
+    //     etc.) but no cards rendered → probably a transient/empty
+    //     filter result. CTA: "Volver a escanear".
+    //  b) We're on the homepage / company landing / unknown route → the
+    //     useful CTA is taking the user to the listing where vacancies
+    //     ARE shown. CTA: "Ir a Vacantes →".
     if (!cards.length) {
+      const onListingAlready = /^\/(?:vacantes|vacancies|jobs|empleos|comunidad)/i.test(location.pathname);
+      const headline = onListingAlready ? "No detecté vacantes" : "Estás en una página sin vacantes";
+      const body = onListingAlready
+        ? "No encontré cards de vacantes aquí. Si crees que es un bug, dame screenshot."
+        : "Para ver tus mejores matches, abre el listado de LaPieza. Te llevo:";
+      const ctaText = onListingAlready ? "Volver a escanear" : "Ir a Vacantes →";
+      const ctaAction = onListingAlready ? "rescan" : "go-vacantes";
       host.innerHTML = `
         <div class="eamx-matches-empty">
           <div class="eamx-matches-empty__icon" aria-hidden="true">🔍</div>
-          <h3>No detecté vacantes</h3>
-          <p>No detecté vacantes en esta página. Si crees que es un bug, dame screenshot.</p>
-          <button type="button" class="eamx-matches-empty__cta" data-action="rescan">Volver a escanear</button>
+          <h3>${headline}</h3>
+          <p>${body}</p>
+          <button type="button" class="eamx-matches-empty__cta" data-action="${ctaAction}">${ctaText}</button>
         </div>
       `;
       if (bulk) bulk.hidden = true;
