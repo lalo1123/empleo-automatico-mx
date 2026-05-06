@@ -301,18 +301,34 @@
 
   // Best-effort read of the Express toggle from chrome.storage.local. Default
   // is true (Express ON) when the key is missing — same default as options.js.
-  // Resolves to a boolean; never rejects.
+  // Resolves to a boolean; never rejects. Side effect: updates cachedExpressMode
+  // so synchronous code paths (like detectCoverLetterTextarea) can skip the
+  // legacy in-flow assistant when Express is on.
+  let cachedExpressMode = true;
   function readExpressMode() {
     return new Promise((resolve) => {
       try {
         if (!chrome?.storage?.local) { resolve(true); return; }
         chrome.storage.local.get([EXPRESS_MODE_STORAGE_KEY], (r) => {
           const v = r && r[EXPRESS_MODE_STORAGE_KEY];
-          resolve(typeof v === "boolean" ? v : true);
+          const resolved = typeof v === "boolean" ? v : true;
+          cachedExpressMode = resolved;
+          resolve(resolved);
         });
       } catch (_) { resolve(true); }
     });
   }
+  // Prime the cache on boot + react to changes in another tab/options page.
+  try {
+    readExpressMode();
+    if (chrome?.storage?.onChanged) {
+      chrome.storage.onChanged.addListener((changes, area) => {
+        if (area !== "local") return;
+        const c = changes[EXPRESS_MODE_STORAGE_KEY];
+        if (c && typeof c.newValue === "boolean") cachedExpressMode = c.newValue;
+      });
+    }
+  } catch (_) { /* ignore */ }
 
   function draftCacheKey(url) {
     const id = idFromUrl(url || location.href);
@@ -1529,7 +1545,40 @@
 
     // 5) CV pipeline. Open the generated HTML in a new tab with auto-print
     //    so the user just confirms the print dialog. Failure is non-blocking.
+    //
+    // Step-aware gate: LaPieza's apply form has multiple steps (cover-letter
+    // step → CV upload step → review). On the cover-letter / questions step,
+    // there's no file input visible and opening the CV in a new tab is
+    // confusing UX ("why did you open a CV when I'm answering a question?").
+    // We detect a CV file input on the current step; if absent, SKIP the
+    // CV generation entirely and toast a hint pointing the user to come
+    // back to the FAB on the next step. This keeps the user's quota
+    // unspent until they actually need the CV.
+    const hasCvFileInput = (() => {
+      const inputs = Array.from(document.querySelectorAll("input[type=file]"));
+      if (!inputs.length) return false;
+      // Filter to "looks like a CV upload": label/placeholder/name mentions
+      // CV / curriculum / resume / archivo. Otherwise we'd false-positive on
+      // generic file inputs.
+      const rx = /cv|curriculum|currículum|resume|hoja[\s-]de[\s-]vida|archivo/i;
+      return inputs.some((inp) => {
+        if (!isVisible(inp)) return false;
+        const aria = (inp.getAttribute("aria-label") || "") + " " +
+                     (inp.getAttribute("name") || "") + " " +
+                     (inp.getAttribute("placeholder") || "") + " " +
+                     (inp.id || "") + " " +
+                     (inp.parentElement?.textContent || "").slice(0, 200);
+        return rx.test(aria);
+      });
+    })();
     const cvPromise = (async () => {
+      // Step 1 (cover letter / questions): no CV upload field visible.
+      // Skip the generation — saves a Gemini call AND a confusing tab open.
+      if (!hasCvFileInput) {
+        overlay.markDone("cv", "Se generará cuando llegues al paso de subir CV");
+        status.cv = "skipped";
+        return null;
+      }
       overlay.markPending("cv");
       try {
         const res = await sendMsg({ type: MSG.GENERATE_CV, job });
@@ -3796,8 +3845,20 @@
   // ---------------------------------------------------------------------------
   // State 2 — Cover-letter / message textarea
   // ---------------------------------------------------------------------------
+  //
+  // Express-mode coexistence: when the user has Express ON, the floating
+  // FAB is the SINGLE entry point — it does cover letter + CV + adaptive
+  // questions in one shot. Showing the legacy "✨ Pegar carta IA" inline
+  // button on top of that confused users (they'd click the inline button,
+  // get only the cover letter, miss the rest of the Express fill).
+  //
+  // So: skip this detector entirely when Express is enabled. The floating
+  // FAB takes over. Users with Express OFF (legacy "Revisión completa"
+  // mode) still see the inline Pegar button as before.
   function detectCoverLetterTextarea() {
     if (!lastDraft?.coverLetter) return; // nothing to paste
+    // Express coexistence guard — read storage synchronously via cached flag.
+    if (cachedExpressMode === true) return;
     const candidates = Array.from(document.querySelectorAll("textarea"))
       .filter((t) => isVisible(t) && !FLOW_PROCESSED.has(t));
     if (!candidates.length) return;
