@@ -279,7 +279,12 @@
     if (!job || !chrome?.storage?.session) return;
     try {
       const key = jobCacheKey(job.url || location.href);
-      chrome.storage.session.set({ [key]: job });
+      // chrome.storage.session.set returns a Promise in MV3; without a
+      // .catch() handler the rejection becomes an unhandled exception
+      // ("Access to storage is not allowed from this context") that
+      // surfaced as a click-handler abort during live testing. Always
+      // attach a noop catch.
+      Promise.resolve(chrome.storage.session.set({ [key]: job })).catch(() => {});
     } catch (_) { /* ignore */ }
   }
   async function restoreJobFromSession() {
@@ -338,7 +343,7 @@
     if (!draft || !chrome?.storage?.session) return;
     try {
       const key = draftCacheKey(location.href);
-      chrome.storage.session.set({ [key]: draft });
+      Promise.resolve(chrome.storage.session.set({ [key]: draft })).catch(() => {});
     } catch (_) { /* ignore */ }
   }
   async function restoreDraftFromSession() {
@@ -356,7 +361,9 @@
   function clearDraftSession(url) {
     if (!chrome?.storage?.session) return;
     try {
-      chrome.storage.session.remove(draftCacheKey(url || location.href));
+      Promise.resolve(
+        chrome.storage.session.remove(draftCacheKey(url || location.href))
+      ).catch(() => {});
     } catch (_) { /* ignore */ }
   }
 
@@ -376,7 +383,9 @@
         try {
           if (chrome?.storage?.session) {
             const key = DRAFT_CACHE_PREFIX + idFromUrl(job.url || location.href);
-            chrome.storage.session.set({ [key]: { ...draft, id: res.draftId || draft.id || null } });
+            Promise.resolve(
+              chrome.storage.session.set({ [key]: { ...draft, id: res.draftId || draft.id || null } })
+            ).catch(() => {});
           }
         } catch (_) {}
       }
