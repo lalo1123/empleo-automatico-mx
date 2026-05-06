@@ -846,6 +846,13 @@
   //   - Express ON  + /apply/<uuid>   → run full Express fill (carta + cv + answers)
   //   - Express OFF (any non-listing) → legacy panel flow (current behavior)
   async function onFabClick() {
+    // Diagnostic — temporary while we cazamos the listener-not-firing issue.
+    console.log("[EmpleoAutomatico] onFabClick fired", {
+      fabEl: !!fabEl,
+      fabDisabled: fabEl?.disabled,
+      mode: (typeof fabMode === "function") ? fabMode() : "?",
+      url: location.href
+    });
     if (!fabEl || fabEl.disabled) return;
     // Listing branch — Express toggle is irrelevant here, the panel is read-only.
     if (fabMode() === "listing") return openBestMatchesPanel();
