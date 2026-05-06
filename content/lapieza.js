@@ -956,32 +956,170 @@
   // Express FAB click on /vacancy/<uuid>. Job-extract, persist, kick off
   // background draft generation, show a toast pointing at LaPieza's own
   // "Postularme" button. We do NOT auto-click that button — HITL.
-  // Read the auto-prewarm flag set by the matches panel's "⚡ Postular →"
-  // button. If set for THIS vacancy id, fire pre-warm without waiting for
-  // a manual FAB click and clear the flag. Best-effort — any failure just
-  // means the user has to click the FAB themselves (no harm done).
+  // Read the quick-apply flag set by the matches panel's "⚡ Postular →"
+  // button and chain the entire apply flow:
+  //   1. pre-warm cover letter
+  //   2. countdown 3s (Esc cancels — same kill switch contract as Modo Auto)
+  //   3. auto-click LaPieza's "¡Me quiero postular!" button
+  //   4. auto-confirm the location-warning modal if it appears
+  //   5. on /apply/<uuid> arrival, auto-fire Express fill (no FAB click)
+  //   6. auto-quiz already kicks in independently for the knowledge test
+  //   7. STOP at "Finalizar" — that's the user's HITL clic final
+  //
+  // Best-effort: any failure aborts gracefully and falls back to the
+  // user clicking the FAB / Postularme themselves.
+  let quickApplyAborted = false;
+  let quickApplyEscHandler = null;
   async function maybeAutoPrewarmFromQuickApply() {
     if (!chrome?.storage?.session) return;
     let id = "";
     try { id = idFromUrl(location.href); } catch (_) {}
     if (!id) return;
-    const key = `eamx:autoprewarm:${id}`;
+    // Two flag flavors for backwards compat. The new chain uses
+    // eamx:quickapply:<id>; older builds wrote eamx:autoprewarm:<id>.
+    const quickKey = `eamx:quickapply:${id}`;
+    const oldKey = `eamx:autoprewarm:${id}`;
     let flag = null;
+    let usedKey = "";
     try {
       flag = await new Promise((resolve) => {
-        chrome.storage.session.get([key], (r) => resolve(r && r[key]));
+        chrome.storage.session.get([quickKey, oldKey], (r) => {
+          if (r && r[quickKey]) { usedKey = quickKey; resolve(r[quickKey]); return; }
+          if (r && r[oldKey]) { usedKey = oldKey; resolve(r[oldKey]); return; }
+          resolve(null);
+        });
       });
     } catch (_) { return; }
     if (!flag) return;
-    // Stale-flag guard: ignore if it was set more than 5 minutes ago.
+    // Stale-flag guard.
     if (Date.now() - (flag.setAt || 0) > 5 * 60_000) {
-      try { Promise.resolve(chrome.storage.session.remove(key)).catch(() => {}); } catch (_) {}
+      try { Promise.resolve(chrome.storage.session.remove([quickKey, oldKey])).catch(() => {}); } catch (_) {}
       return;
     }
     // Clear the flag immediately so a page refresh doesn't re-fire.
-    try { Promise.resolve(chrome.storage.session.remove(key)).catch(() => {}); } catch (_) {}
-    // Fire the same flow as onFabClickExpressVacancy.
-    try { onFabClickExpressVacancy(); } catch (_) { /* ignore */ }
+    try { Promise.resolve(chrome.storage.session.remove([quickKey, oldKey])).catch(() => {}); } catch (_) {}
+
+    // Branch by flag type:
+    // - autoprewarm flag (legacy) → just pre-warm + toast
+    // - quickapply flag (new chain) → pre-warm + auto-click LaPieza CTAs
+    if (usedKey === oldKey) {
+      try { onFabClickExpressVacancy(); } catch (_) {}
+      return;
+    }
+    // New chain — full quick-apply.
+    try { onFabClickExpressVacancy(); } catch (_) {}
+    // 3s countdown with Esc kill switch, then click LaPieza's
+    // "¡Me quiero postular!" button.
+    quickApplyAborted = false;
+    quickApplyEscHandler = (ev) => {
+      if (ev.key === "Escape" || ev.key === "Esc") {
+        quickApplyAborted = true;
+        try { document.removeEventListener("keydown", quickApplyEscHandler, true); } catch (_) {}
+        quickApplyEscHandler = null;
+        toast("Postular cancelado. Continúa manual.", "info");
+      }
+    };
+    try { document.addEventListener("keydown", quickApplyEscHandler, true); } catch (_) {}
+    toast("⚡ Auto-postulando en 3s… (Esc cancela)", "info", { durationMs: 3500 });
+    await new Promise((r) => setTimeout(r, 3000));
+    if (quickApplyAborted) return;
+    // Find LaPieza's apply CTA.
+    const applyBtn = findLaPiezaApplyCTA();
+    if (!applyBtn) {
+      toast("No encontré el botón Postularme. Dale clic tú.", "info");
+      return;
+    }
+    // Set a generic "next /apply/ should auto-fire Express" flag BEFORE
+    // we click — the click triggers SPA navigation to /apply/<uuid>, and
+    // because the apply UUID differs from the /vacante/ slug-id, we can't
+    // re-use the per-id flag. The next-apply flag is consumed by
+    // maybeAutoFireExpressOnApply() on the apply page.
+    try {
+      Promise.resolve(
+        chrome.storage.session.set({
+          "eamx:quickapply:next-apply": { setAt: Date.now() }
+        })
+      ).catch(() => {});
+    } catch (_) {}
+    try { applyBtn.click(); } catch (_) {}
+    // Wait briefly for the location-warning modal to appear, then click
+    // "Sí, continuar con postulación" if visible.
+    for (let i = 0; i < 8; i++) {
+      if (quickApplyAborted) return;
+      await new Promise((r) => setTimeout(r, 350));
+      const continueBtn = findLaPiezaLocationContinueCTA();
+      if (continueBtn) {
+        try { continueBtn.click(); } catch (_) {}
+        break;
+      }
+      // If URL already changed to /apply/, no modal appeared — done.
+      if (isApplyPage()) break;
+    }
+    // Cleanup esc listener — the rest of the chain (Express on /apply/,
+    // auto-quiz on test) is handled independently.
+    try {
+      if (quickApplyEscHandler) document.removeEventListener("keydown", quickApplyEscHandler, true);
+    } catch (_) {}
+    quickApplyEscHandler = null;
+  }
+
+  // Apply-side handler for the quick-apply chain. Runs on /apply/<uuid>
+  // arrival. If the "next-apply" flag was set on /vacante/ during the
+  // chain (and is fresh — set within last 60s), auto-fire Express fill
+  // without waiting for a FAB click. Then clear the flag so a refresh
+  // doesn't re-fire.
+  //
+  // Idempotency: clears the flag immediately so this only ever fires
+  // once per chain. If anything throws, the user can still click the FAB
+  // manually as the fallback.
+  async function maybeAutoFireExpressOnApply() {
+    if (!chrome?.storage?.session) return;
+    const key = "eamx:quickapply:next-apply";
+    let flag = null;
+    try {
+      flag = await new Promise((resolve) => {
+        chrome.storage.session.get([key], (r) => resolve(r ? r[key] : null));
+      });
+    } catch (_) { return; }
+    if (!flag) return;
+    // Stale guard — 60s window between vacancy click and apply arrival.
+    if (Date.now() - (flag.setAt || 0) > 60_000) {
+      try { Promise.resolve(chrome.storage.session.remove([key])).catch(() => {}); } catch (_) {}
+      return;
+    }
+    // Clear immediately so refreshes don't re-fire.
+    try { Promise.resolve(chrome.storage.session.remove([key])).catch(() => {}); } catch (_) {}
+    // Give LaPieza a beat to render the apply form before we start
+    // querying fields.
+    await new Promise((r) => setTimeout(r, 800));
+    try { onFabClickExpressApply(); } catch (_) {}
+  }
+
+  // LaPieza's primary apply CTA on /vacante/<slug>. Text variants seen
+  // live: "¡Me quiero postular!", "Postularme", "Aplicar". Match any
+  // visible button containing those.
+  function findLaPiezaApplyCTA() {
+    const rx = /^[\s¡!]*me\s+quiero\s+postular[\s!.]*$|^postularme$|^aplicar(?:\s+ahora)?$/i;
+    const candidates = Array.from(document.querySelectorAll("button, a[role=button]"));
+    return candidates.find((el) => {
+      const t = (el.textContent || "").trim();
+      if (!rx.test(t)) return false;
+      try { return isVisible(el) && !el.disabled; } catch (_) { return false; }
+    }) || null;
+  }
+
+  // The location-mismatch warning modal LaPieza shows when the user's
+  // profile city differs from the vacancy's. Confirm CTA: "Sí, continuar
+  // con postulación" / variants. We look for a red-styled / primary
+  // button inside a visible modal.
+  function findLaPiezaLocationContinueCTA() {
+    const rx = /^s[ií],?\s+continuar(\s+con\s+postulaci[oó]n)?$/i;
+    const candidates = Array.from(document.querySelectorAll("button"));
+    return candidates.find((el) => {
+      const t = (el.textContent || "").trim();
+      if (!rx.test(t)) return false;
+      try { return isVisible(el) && !el.disabled; } catch (_) { return false; }
+    }) || null;
   }
 
   async function onFabClickExpressVacancy() {
@@ -2314,22 +2452,29 @@
     }
     if (what === "quick-apply") {
       // "⚡ Postular" — open the vacancy in a new tab AND set a session
-      // flag so our content script auto-fires the Express pre-warm on
-      // arrival (skipping the FAB click). The flag is keyed on the
-      // vacancy id so it ONLY fires for the vacancy we just opened.
+      // flag so our content script chains the FULL apply flow on arrival:
+      //   1. pre-warm cover letter
+      //   2. countdown 3s (Esc cancels)
+      //   3. auto-click "¡Me quiero postular!"
+      //   4. auto-confirm location-mismatch modal
+      //   5. on /apply/<uuid>, auto-fire Express fill (no FAB click needed)
+      //   6. auto-quiz already kicks in independently
+      //   7. STOP at "Finalizar" — that's the user's HITL clic final
+      // The flag is keyed on the vacancy id so it ONLY fires for the
+      // vacancy we just opened. See maybeAutoPrewarmFromQuickApply.
       const jobId = action.getAttribute("data-job-id") || "";
       if (jobId && chrome?.storage?.session) {
         try {
           Promise.resolve(
             chrome.storage.session.set({
-              [`eamx:autoprewarm:${jobId}`]: { setAt: Date.now() }
+              [`eamx:quickapply:${jobId}`]: { setAt: Date.now() }
             })
           ).catch(() => {});
         } catch (_) {}
       }
       // Let the <a target="_blank"> open normally — don't preventDefault.
       // The new tab loads /vacante/<id>, content script reads the flag,
-      // pre-warms automatically.
+      // chains the full flow.
       return;
     }
     if (what === "load-more") {
@@ -5265,12 +5410,14 @@
       }
       // Auto-prewarm hook — when the user clicked "⚡ Postular" in the
       // matches panel, a session flag was set keyed on this vacancy's id.
-      // If the flag is present, fire the same flow as a manual FAB click
-      // (extractJob + persistJobToSession + prewarmExpressDraft + toast)
-      // without waiting for the click. Then clear the flag so refreshes
-      // don't re-fire.
+      // On /vacante/, the chain pre-warms + auto-clicks "Me quiero
+      // postular" + auto-confirms the location modal. On /apply/, a
+      // separate handler reads the "next-apply" flag (set during the
+      // vacancy chain) and auto-fires Express fill.
       if (fabMode() === "vacancy") {
         setTimeout(() => maybeAutoPrewarmFromQuickApply(), 1500);
+      } else if (fabMode() === "apply") {
+        setTimeout(() => maybeAutoFireExpressOnApply(), 600);
       }
     } else {
       unmountFab();
