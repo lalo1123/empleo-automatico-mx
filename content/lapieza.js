@@ -2320,14 +2320,28 @@
   // hide them from the shortlist scoring. Returns the same shape as
   // findVacancyCards: [{ anchor, card }]. WeakSet de-dupes by node so
   // duplicate hrefs to the same card don't double-count.
+  // Guard — skip anchors that live INSIDE our own injected UI (matches
+  // panel, queued-reminder banner, etc.). The matches panel renders
+  // "Abrir vacante →" links pointing to /vacante/<id> URLs; without
+  // this guard, the listing scanner would treat each panel item as if
+  // it were a real LaPieza vacancy card and inject another overlay
+  // INSIDE the panel item — visually the rank circle, score badge,
+  // AND a duplicate Marcar button stack on top of the title.
+  function isInsideOurUI(el) {
+    if (!el) return false;
+    return !!el.closest(".eamx-matches-panel, .eamx-panel, .eamx-toast, .eamx-card-overlay");
+  }
+
   function findAllVacancyCards() {
     const seenAnchor = new WeakSet();
     const anchors = [];
     document.querySelectorAll("a.vacancy-card-link[href]").forEach((a) => {
+      if (isInsideOurUI(a)) return;
       if (!seenAnchor.has(a)) { seenAnchor.add(a); anchors.push(a); }
     });
     document.querySelectorAll("a[href]").forEach((a) => {
       if (seenAnchor.has(a)) return;
+      if (isInsideOurUI(a)) return;
       if (VACANCY_ANCHOR_RX.test(a.href || "")) {
         seenAnchor.add(a);
         anchors.push(a);
@@ -4894,13 +4908,19 @@
   function findVacancyCards() {
     const seenAnchor = new WeakSet();
     const anchors = [];
+    // Defensive: skip anchors inside our own injected UI. Same reasoning
+    // as findAllVacancyCards — the matches panel renders /vacante/ links
+    // that would otherwise be treated as real listing cards.
+    const skipOurs = (a) => isInsideOurUI(a);
     // Fast path: LaPieza emits <a class="vacancy-card-link">.
     document.querySelectorAll("a.vacancy-card-link[href]").forEach((a) => {
+      if (skipOurs(a)) return;
       if (!seenAnchor.has(a)) { seenAnchor.add(a); anchors.push(a); }
     });
     // Fallback: any <a> whose href matches the vacancy URL pattern.
     document.querySelectorAll("a[href]").forEach((a) => {
       if (seenAnchor.has(a)) return;
+      if (skipOurs(a)) return;
       if (VACANCY_ANCHOR_RX.test(a.href || "")) {
         seenAnchor.add(a);
         anchors.push(a);
