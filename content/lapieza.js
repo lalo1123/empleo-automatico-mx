@@ -3175,6 +3175,39 @@
         return;
       }
       setQuestionsState("success", { answers, error: "" });
+
+      // Auto-paste — for each detected question, pop the AI-generated
+      // answer into its form field. Skip fields we've already pasted
+      // this session (idempotency via data-eamx-q-pasted) so re-runs
+      // of the scan don't keep overwriting. Stagger 200ms between
+      // fields so the visual cyan-pulse fires sequentially, mimicking
+      // Express fill.
+      for (let i = 0; i < detectedQuestions.length; i++) {
+        // Sync the cached questionAnswers so pasteQuestionAnswer reads
+        // the right value when there's no panel textarea to source from.
+        questionAnswers[i] = answers[i] || "";
+      }
+      let pastedCount = 0;
+      for (let i = 0; i < detectedQuestions.length; i++) {
+        const q = detectedQuestions[i];
+        const target = q && resolveFieldRef(q.fieldRef);
+        // One-shot guard — don't re-paste into a field we already filled.
+        if (target?.dataset?.eamxQPasted === "true") continue;
+        await new Promise((r) => setTimeout(r, i === 0 ? 0 : 200));
+        try {
+          if (pasteQuestionAnswer(i)) {
+            pastedCount++;
+            try { if (target?.dataset) target.dataset.eamxQPasted = "true"; } catch (_) {}
+          }
+        } catch (_) { /* skip this field, continue with the rest */ }
+      }
+      if (pastedCount > 0) {
+        toast(
+          "✓ Respuesta IA pegada. Revisa y dale 'Finalizar' →",
+          "success",
+          { durationMs: 5000 }
+        );
+      }
     } catch (err) {
       setQuestionsState("error", { error: humanizeError(err) });
     }
@@ -3713,27 +3746,25 @@
     if (same && questionsState !== "idle") return;
 
     detectedQuestions = scanned;
-    // Surface a one-shot toast so the user knows we found something new.
+    renderQuestionsCard();
+
+    // Auto-fire — no manual "Generar respuestas" button. The user already
+    // gave consent by clicking the FAB / running Express; subsequent
+    // questions on later steps of the same form should fill themselves
+    // without an extra click. Toast is informational only.
     if (!FLOW_TIPS_SHOWN.has("adaptive-questions")) {
       FLOW_TIPS_SHOWN.add("adaptive-questions");
       toast(
-        "Detecté " + scanned.length + " pregunta" + (scanned.length === 1 ? "" : "s") +
-        " en este formulario. Genera respuestas con IA.",
+        "⚡ Generando respuesta a " + scanned.length + " pregunta" +
+        (scanned.length === 1 ? "" : "s") + " con IA…",
         "info",
-        {
-          label: "Generar respuestas",
-          onClick: () => {
-            // Re-open panel if it's been closed, else just kick off the fetch.
-            if (!panelEl && lastJob && lastDraft) {
-              openPanel({ job: lastJob, draft: lastDraft, partial: false });
-            }
-            fetchAnswersForDetectedQuestions();
-          }
-        }
+        { durationMs: 3500 }
       );
     }
-    // Repaint the panel if it's open right now so the new section is visible.
-    renderQuestionsCard();
+    // Kick off the fetch immediately. fetchAnswersForDetectedQuestions
+    // will auto-paste each answer once they come back (see the success
+    // branch of setQuestionsState).
+    fetchAnswersForDetectedQuestions();
   }
 
   // Visibility check — element is rendered and inside the viewport-eligible
