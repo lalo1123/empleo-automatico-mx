@@ -932,8 +932,18 @@
   // background draft generation, show a toast pointing at LaPieza's own
   // "Postularme" button. We do NOT auto-click that button — HITL.
   async function onFabClickExpressVacancy() {
-    const { job, partial } = extractJob();
+    console.log("[EmpleoAutomatico] expressVacancy:enter");
+    let job, partial;
+    try {
+      ({ job, partial } = extractJob());
+      console.log("[EmpleoAutomatico] expressVacancy:extracted", JSON.stringify({ partial, title: job?.title?.slice(0,60), company: job?.company?.slice(0,60) }));
+    } catch (e) {
+      console.log("[EmpleoAutomatico] expressVacancy:extractJob threw", e?.message);
+      toast("No pudimos leer esta vacante. Intenta de nuevo.", "error");
+      return;
+    }
     if (partial && job.title === "(sin título)" && job.company === "(empresa desconocida)") {
+      console.log("[EmpleoAutomatico] expressVacancy:partial-empty");
       toast("Abre primero la vacante (página /vacancy/...) para que la IA la lea.", "info");
       return;
     }
@@ -943,7 +953,9 @@
     // navigate to /apply/<uuid> in that window. If they're faster, the
     // apply-side click will simply re-request.
     prewarmExpressDraft(job);
+    console.log("[EmpleoAutomatico] expressVacancy:toast-show");
     toast("⚡ Listo. Dale 'Postularme' y te lleno todo.", "info", { durationMs: 4000 });
+    console.log("[EmpleoAutomatico] expressVacancy:done");
   }
 
   // Express FAB click on /apply/<uuid>. Restore job + draft from session,
