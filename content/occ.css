@@ -1875,19 +1875,18 @@
   --eamx-c-border: #e2e8f0;
 
   position: absolute;
+  /* Top-LEFT placement avoids collision with portal-native bookmark/save
+     icons that LaPieza, OCC, etc. all park at top-right of every card.
+     The badge + Marcar button live next to the company logo / image
+     where space is more predictable. */
   top: 8px;
-  right: 8px;
+  left: 8px;
   z-index: 2147483500;
   display: inline-flex;
   align-items: center;
   gap: 6px;
   font: 600 12.5px/1 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   pointer-events: auto;
-  /* Some portal cards have `overflow: hidden` on their inner wrapper,
-     which would clip parts of the badge or the "Marcar" button. We
-     can't override the host card directly without breaking its layout,
-     but we can ensure the overlay itself doesn't enforce any clip and
-     stays at its natural width. */
   white-space: nowrap;
   max-width: none;
   overflow: visible;
