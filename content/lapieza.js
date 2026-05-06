@@ -4166,22 +4166,55 @@
   // contains a heading. Bail at 8 levels — beyond that we'd just be picking
   // up sidebar containers.
   function findCardRoot(anchor) {
+    if (!anchor) return null;
+    // First, check if the anchor itself qualifies as the visual card root.
+    // On LaPieza, <a class="vacancy-card-link"> is rendered with display:
+    // block + height ~207px and contains the title heading directly. The
+    // styled-components wrapper around it is part of the listing GRID,
+    // NOT a per-card boundary, so walking up there is wrong.
+    //
+    // Live DOM check confirmed: walking up 5 levels from the anchor lands
+    // on the entire vacancies-grid wrapper (height ~2063px containing all
+    // 12 cards). Stamping that wrapper once meant all subsequent
+    // injectOverlay calls bailed via the data-eamx-card-overlay guard,
+    // and only ONE badge would render (or zero, if the wrapper had no
+    // single visible card).
+    //
+    // New strategy:
+    //   1) Try the anchor itself if it's card-shaped (80-600px tall).
+    //   2) Walk up, but ONLY accept ancestors whose height < 600px AND
+    //      whose subtree contains at most ONE other vacancy anchor
+    //      (otherwise we're hitting a multi-card grid).
+    const anchorRect = anchor.getBoundingClientRect();
+    if (anchorRect.height >= 80 && anchorRect.height <= 600) {
+      // The anchor IS the card. Done.
+      return anchor;
+    }
     let p = anchor.parentElement;
     let depth = 0;
-    while (p && depth < 8) {
+    while (p && depth < 6) {
       try {
         const cs = getComputedStyle(p);
         if (cs.display === "block" || cs.display === "flex" || cs.display === "grid") {
           const rect = p.getBoundingClientRect();
-          const tall = rect.height > 80;
+          const tall = rect.height > 80 && rect.height < 600;
           const hasH = !!p.querySelector("h1, h2, h3, h4, [class*='title' i]");
-          if (tall && hasH) return p;
+          // Reject multi-card wrappers: if this ancestor contains more
+          // than one vacancy-card-link, it's a grid not a card.
+          let cardCount = 0;
+          try {
+            cardCount = p.querySelectorAll("a.vacancy-card-link, a[href*='/vacancy/'], a[href*='/vacante/']").length;
+          } catch (_) {}
+          if (tall && hasH && cardCount <= 1) return p;
         }
       } catch (_) { /* getComputedStyle can throw on detached nodes */ }
       p = p.parentElement;
       depth++;
     }
-    return null;
+    // Last-resort fallback: the anchor itself even if it's outside the
+    // 80-600px range. Better to attach the overlay to a slightly-wrong
+    // element than to skip the card entirely.
+    return anchor;
   }
 
   // Build a jobLite from a card. This is intentionally cheap: we only need
