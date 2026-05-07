@@ -1089,10 +1089,163 @@
     }
     // Clear immediately so refreshes don't re-fire.
     try { Promise.resolve(chrome.storage.session.remove([key])).catch(() => {}); } catch (_) {}
-    // Give LaPieza a beat to render the apply form before we start
-    // querying fields.
+    // Give LaPieza a beat to render the apply form before we start.
     await new Promise((r) => setTimeout(r, 800));
-    try { onFabClickExpressApply(); } catch (_) {}
+    // Run the multi-step chain: walk through CV step → cover letter →
+    // Q&A → quiz (auto-quiz handles) → STOP at Finalizar.
+    try { chainApplyStepsToFinalize(); } catch (_) {}
+  }
+
+  // Multi-step apply-flow chain. LaPieza's apply form has multiple
+  // sub-steps on the same /apply/<uuid> URL — content swaps per step:
+  //
+  //   1. CV selection      → no fillable fields, just click Continuar
+  //   2. Cover letter      → Express fills via prewarmed draft + Continuar
+  //   3. Adaptive Q&A      → Express fills via answer-questions API
+  //   4. Knowledge quiz    → auto-quiz module handles its own loop
+  //   5. Final review      → STOP, highlight Finalizar (HITL)
+  //
+  // We poll once per step (cap 8 iterations as a safety net), call
+  // runExpressFill ONLY when there's actual work to do (skip noisy
+  // overlay on CV/review steps), and click Continuar to advance. We
+  // never click Finalizar — that's the user's HITL contract.
+  //
+  // Kill switches:
+  //   - Esc during any wait → quickApplyAborted = true, exit
+  //   - Page leaves /apply/  → exit (user navigated away)
+  //   - 8 iterations         → toast + exit (safety cap)
+  async function chainApplyStepsToFinalize() {
+    quickApplyAborted = false;
+    quickApplyEscHandler = (ev) => {
+      if (ev.key === "Escape" || ev.key === "Esc") {
+        quickApplyAborted = true;
+        try { document.removeEventListener("keydown", quickApplyEscHandler, true); } catch (_) {}
+        quickApplyEscHandler = null;
+        toast("Cadena cancelada. Continúa manual.", "info");
+      }
+    };
+    try { document.addEventListener("keydown", quickApplyEscHandler, true); } catch (_) {}
+
+    toast("⚡ Cadena: te llevo paso a paso… (Esc cancela)", "info", { durationMs: 4500 });
+
+    for (let i = 0; i < 8; i++) {
+      if (quickApplyAborted) break;
+      if (!isApplyPage()) break;
+
+      // Wait for current step's DOM to settle before scanning. After a
+      // Continuar click LaPieza needs ~600-1200ms to swap step content;
+      // 1000ms is a safe middle ground.
+      await new Promise((r) => setTimeout(r, 1000));
+      if (quickApplyAborted) break;
+      if (!isApplyPage()) break;
+
+      // Quiz step → auto-quiz module handles. Wait for its radios to
+      // disappear before we look for Continuar. Cap wait at 90s in case
+      // the quiz hangs.
+      if (looksLikeQuizStep()) {
+        const startedAt = Date.now();
+        while (looksLikeQuizStep() && Date.now() - startedAt < 90_000) {
+          if (quickApplyAborted) break;
+          await new Promise((r) => setTimeout(r, 1500));
+        }
+        if (quickApplyAborted) break;
+        continue;
+      }
+
+      // Final step → STOP. Highlight + tell user to dale Finalizar.
+      if (findApplyFlowFinalizeBtn()) {
+        try { highlightExpressSubmitButton(); } catch (_) {}
+        toast("✓ Listo. Revisa todo y dale Finalizar.", "success", { durationMs: 6000 });
+        break;
+      }
+
+      // Has fillable fields on THIS step? Run Express fill (opens overlay,
+      // generates cover letter / Q&A answers, fills them). Skip when there's
+      // nothing to fill (CV step, review step) so we don't show a noisy
+      // overlay on every step.
+      let hasCover = false, hasQuestions = false;
+      try { hasCover = !!findExpressCoverLetterField(); } catch (_) {}
+      try { hasQuestions = (scanQuestionFields() || []).length > 0; } catch (_) {}
+      if (hasCover || hasQuestions) {
+        try { await onFabClickExpressApply(); } catch (_) {}
+        // runExpressFill ends with overlay.hide() ~1.5s after the final
+        // toast. Wait for that to clear before we click Continuar so the
+        // user can see what got filled.
+        await new Promise((r) => setTimeout(r, 2200));
+        if (quickApplyAborted) break;
+        if (!isApplyPage()) break;
+      }
+
+      // Click Continuar to advance.
+      const continueBtn = findApplyFlowContinueBtn();
+      if (continueBtn) {
+        try { continueBtn.click(); } catch (_) {}
+      }
+      // If neither Continuar nor Finalizar is visible, we'll loop again
+      // (the DOM may still be settling after a previous click).
+    }
+
+    // Cleanup esc listener.
+    try {
+      if (quickApplyEscHandler) document.removeEventListener("keydown", quickApplyEscHandler, true);
+    } catch (_) {}
+    quickApplyEscHandler = null;
+  }
+
+  // Heuristic: are we on a quiz step? Quiz steps have multiple visible
+  // radio buttons inside option-card structures. CV-selection radios
+  // (also radios) live inside cards labelled "PRINCIPAL" / "CV - ...";
+  // we exclude those.
+  function looksLikeQuizStep() {
+    let radios = [];
+    try { radios = Array.from(document.querySelectorAll('input[type="radio"]')); } catch (_) { return false; }
+    let count = 0;
+    for (const r of radios) {
+      try {
+        if (!isVisible(r)) continue;
+      } catch (_) { continue; }
+      const ctx = r.closest("label, [class*='option' i], [class*='question' i], [class*='quiz' i], [class*='answer' i]");
+      if (!ctx) continue;
+      const txt = (ctx.textContent || "").toLowerCase();
+      // Exclude CV-selection cards.
+      if (/principal|hoja\s*de\s*vida|^cv\s*-/i.test(txt)) continue;
+      count++;
+      if (count >= 2) return true;
+    }
+    return false;
+  }
+
+  // Match LaPieza's apply-flow "Continuar" button (NOT the final submit).
+  // Strict text match so we don't grab "Continuar leyendo" or similar
+  // unrelated CTAs. Excludes our own UI by class.
+  function findApplyFlowContinueBtn() {
+    const rx = /^continuar$|^siguiente$|^next$/i;
+    const candidates = Array.from(document.querySelectorAll("button, a[role=button]"));
+    return candidates.find((el) => {
+      try {
+        if (el.closest(".eamx-fab, .eamx-panel, .eamx-overlay, .eamx-matches-panel, .eamx-toast, [data-eamx]")) return false;
+      } catch (_) { /* ignore */ }
+      const t = (el.textContent || "").trim();
+      if (!rx.test(t)) return false;
+      try { return isVisible(el) && !el.disabled; } catch (_) { return false; }
+    }) || null;
+  }
+
+  // Match LaPieza's FINAL submit button (Finalizar / Enviar postulación).
+  // Stricter than findLaPiezaSubmitButton — that one matches "postular"
+  // too and would false-positive on our own FAB ("Postular con IA").
+  // Used by the chain to detect "we're at the final step, STOP".
+  function findApplyFlowFinalizeBtn() {
+    const rx = /^finalizar(\s+postulaci[oó]n)?$|^enviar(\s+postulaci[oó]n)?$/i;
+    const candidates = Array.from(document.querySelectorAll("button, a[role=button], input[type=submit]"));
+    return candidates.find((el) => {
+      try {
+        if (el.closest(".eamx-fab, .eamx-panel, .eamx-overlay, .eamx-matches-panel, .eamx-toast, [data-eamx]")) return false;
+      } catch (_) { /* ignore */ }
+      const t = ((el.textContent || el.value || "")).trim();
+      if (!rx.test(t)) return false;
+      try { return isVisible(el) && !el.disabled; } catch (_) { return false; }
+    }) || null;
   }
 
   // LaPieza's primary apply CTA on /vacante/<slug>. Text variants seen
