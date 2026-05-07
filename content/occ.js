@@ -55,8 +55,35 @@
   const TIP_DISMISS_KEY = "eamx_panel_tips_dismissed";
   const TIP_MAX_SHOWS = 3;
   const REGEN_CAP = 5;
-  const MSG = { GENERATE_DRAFT: "GENERATE_DRAFT", APPROVE_DRAFT: "APPROVE_DRAFT", REJECT_DRAFT: "REJECT_DRAFT", OPEN_BILLING: "OPEN_BILLING" };
-  const ERR = { UNAUTHORIZED: "UNAUTHORIZED", PLAN_LIMIT_EXCEEDED: "PLAN_LIMIT_EXCEEDED" };
+  const MSG = {
+    GENERATE_DRAFT: "GENERATE_DRAFT",
+    APPROVE_DRAFT: "APPROVE_DRAFT",
+    REJECT_DRAFT: "REJECT_DRAFT",
+    OPEN_BILLING: "OPEN_BILLING",
+    ANSWER_QUESTIONS: "ANSWER_QUESTIONS"
+  };
+  const ERR = {
+    UNAUTHORIZED: "UNAUTHORIZED",
+    PLAN_LIMIT_EXCEEDED: "PLAN_LIMIT_EXCEEDED",
+    INVALID_INPUT: "INVALID_INPUT",
+    SERVER_ERROR: "SERVER_ERROR"
+  };
+  // Modo Auto storage keys — must mirror lib/schemas.js STORAGE_KEYS.
+  // Hardcoded so the auto-submit gates work synchronously without waiting for
+  // the dynamic import to settle. The syncSchema() block below overwrites these
+  // from the live schemas module on a best-effort basis.
+  const STORAGE_KEYS = {
+    AUTO_MODE: "eamx:settings:autoMode",
+    AUTO_DAILY: "eamx:auto:daily",
+    AUTO_DISCLAIMER_SEEN: "eamx:auto:disclaimerSeen",
+    AUTO_LAST_SUBMIT_AT: "eamx:auto:lastSubmitAt",
+    AUTO_DAY_PAUSE: "eamx:auto:dayPause"
+  };
+  // Per-portal Modo Auto caps. Hardcoded fallbacks mirror lib/schemas.js — OCC
+  // gets 20/day comfortable; total cap 110 across 6 portals.
+  let AUTO_PORTAL_CAPS = { linkedin: 15, indeed: 15, occ: 20, computrabajo: 20, bumeran: 20, lapieza: 20 };
+  let AUTO_PORTAL_ORDER = ["linkedin", "indeed", "occ", "computrabajo", "bumeran", "lapieza"];
+  let AUTO_TOTAL_CAP = 110;
   const BILLING_URL = "https://empleo.skybrandmx.com/account/billing";
 
   // Inline icons (lucide-style, 16px, stroke 1.75) — avoid external libs.
@@ -85,6 +112,24 @@
     /\/vacante\//i
   ];
 
+  // Apply-form URL patterns. When we're on these, the FAB+panel must mount
+  // and we expect to restore lastJob from session storage (cached when the
+  // user was previously on the matching job-detail page). If no cache exists
+  // we still mount: extractJob will pull whatever metadata it can from the
+  // apply sidebar.
+  // OCC apply routes (heuristic — confirmed via UI text only, not live DOM):
+  //   /empleos/postular/<id>, /postular/<id>, /aplicar/<id>, /apply/<id>
+  const APPLY_URL_PATTERNS = [
+    /\/empleos\/postular\//i,
+    /\/empleo\/postular\//i,
+    /\/postular\/[^/?#]+/i,
+    /\/postularse\/[^/?#]+/i,
+    /\/aplicar\/[^/?#]+/i,
+    /\/apply\/[^/?#]+/i,
+    /\/postulacion\/[^/?#]+/i,
+    /\/application\/[^/?#]+/i
+  ];
+
   // Listing path detection — search results, category pages, etc. The OCC
   // listings live under /empleos/ with optional category/location suffixes,
   // and a few legacy aliases (/empleos-en-, /empleos-de-) we keep for safety.
@@ -103,6 +148,12 @@
   // Storage key for user preferences (city, modality, salary). Mirrors lib/schemas.js.
   const PREFERENCES_STORAGE_KEY = "eamx:preferences";
 
+  // Session-storage prefixes — used by Express prewarm/restore on apply pages.
+  const JOB_CACHE_PREFIX = "eamx:occ:job:";
+  const DRAFT_CACHE_PREFIX = "eamx:occ:draft:";
+  // Express toggle key — mirrors STORAGE_KEYS.EXPRESS_MODE in lib/schemas.js.
+  const EXPRESS_MODE_STORAGE_KEY = "eamx:settings:expressMode";
+
   // Dynamic import of the shared schemas module — content scripts cannot
   // declare ES-module imports via manifest, but runtime dynamic import works
   // in MV3. If it fails we keep the hardcoded MSG mirror above.
@@ -113,12 +164,31 @@
         GENERATE_DRAFT: mod.MESSAGE_TYPES.GENERATE_DRAFT,
         APPROVE_DRAFT: mod.MESSAGE_TYPES.APPROVE_DRAFT,
         REJECT_DRAFT: mod.MESSAGE_TYPES.REJECT_DRAFT,
-        OPEN_BILLING: mod.MESSAGE_TYPES.OPEN_BILLING
+        OPEN_BILLING: mod.MESSAGE_TYPES.OPEN_BILLING,
+        ANSWER_QUESTIONS: mod.MESSAGE_TYPES.ANSWER_QUESTIONS || "ANSWER_QUESTIONS"
       });
       if (mod && mod.ERROR_CODES) Object.assign(ERR, {
         UNAUTHORIZED: mod.ERROR_CODES.UNAUTHORIZED,
-        PLAN_LIMIT_EXCEEDED: mod.ERROR_CODES.PLAN_LIMIT_EXCEEDED
+        PLAN_LIMIT_EXCEEDED: mod.ERROR_CODES.PLAN_LIMIT_EXCEEDED,
+        INVALID_INPUT: mod.ERROR_CODES.INVALID_INPUT || ERR.INVALID_INPUT,
+        SERVER_ERROR: mod.ERROR_CODES.SERVER_ERROR || ERR.SERVER_ERROR
       });
+      if (mod && mod.STORAGE_KEYS) Object.assign(STORAGE_KEYS, {
+        AUTO_MODE: mod.STORAGE_KEYS.AUTO_MODE || STORAGE_KEYS.AUTO_MODE,
+        AUTO_DAILY: mod.STORAGE_KEYS.AUTO_DAILY || STORAGE_KEYS.AUTO_DAILY,
+        AUTO_DISCLAIMER_SEEN: mod.STORAGE_KEYS.AUTO_DISCLAIMER_SEEN || STORAGE_KEYS.AUTO_DISCLAIMER_SEEN,
+        AUTO_LAST_SUBMIT_AT: mod.STORAGE_KEYS.AUTO_LAST_SUBMIT_AT || STORAGE_KEYS.AUTO_LAST_SUBMIT_AT,
+        AUTO_DAY_PAUSE: mod.STORAGE_KEYS.AUTO_DAY_PAUSE || STORAGE_KEYS.AUTO_DAY_PAUSE
+      });
+      if (mod && mod.AUTO_PORTAL_CAPS && typeof mod.AUTO_PORTAL_CAPS === "object") {
+        AUTO_PORTAL_CAPS = mod.AUTO_PORTAL_CAPS;
+      }
+      if (mod && Array.isArray(mod.AUTO_PORTAL_ORDER)) {
+        AUTO_PORTAL_ORDER = mod.AUTO_PORTAL_ORDER;
+      }
+      if (mod && typeof mod.AUTO_TOTAL_CAP === "number") {
+        AUTO_TOTAL_CAP = mod.AUTO_TOTAL_CAP;
+      }
     } catch (_) { /* fall back to hardcoded */ }
   })();
 
@@ -147,14 +217,39 @@
   let matchesEscHandler = null;
   let matchesCurrentTopN = [];
 
+  // Adaptive open-ended questions detected on the apply form. Mirrors lapieza:
+  //   detectedQuestions: [{ el, question, fieldRef }] — el is a soft reference;
+  //   questionAnswers: string[] aligned by index with detectedQuestions;
+  //   questionsState: "idle" | "loading" | "success" | "error"
+  let detectedQuestions = [];
+  let questionAnswers = [];
+  let questionsState = "idle";
+  let questionsError = "";
+  let questionRefSeq = 0;
+
+  // Express Mode toggle cache. Default true (Express ON) when storage missing
+  // — same default as options.js.
+  let cachedExpressMode = true;
+  // Track user edits so Express doesn't clobber what the user typed.
+  let _userEditListenerAttached = false;
+
   // =========================================================================
   // Detection & extraction
   // =========================================================================
+
+  // True when the user is on an OCC apply form (post-click on Postularme).
+  // Apply pages always count for FAB mounting — Express fill needs them.
+  function isApplyPage() {
+    return APPLY_URL_PATTERNS.some((re) => re.test(location.href));
+  }
 
   function isJobDetailPage() {
     // OCC uses /empleo/oferta/... for direct detail pages AND /empleos/... for
     // search results with a split-pane right panel showing the selected job.
     // Both expose a "Postularme" button and a heading — that's enough signal.
+    // Apply pages also count: the FAB needs to mount there even though the
+    // page has no JSON-LD or job description (we restore from session cache).
+    if (isApplyPage()) return true;
     const urlMatches = JOB_URL_PATTERNS.some((re) => re.test(location.href));
     const onAnOccPage = /(^|\.)occ\.com\.mx$/i.test(location.hostname);
     const hasHeading = !!document.querySelector(
@@ -469,10 +564,11 @@
     }
   }
 
-  // FAB mode resolver: "listing" on search/category pages (best-matches
-  // panel), "vacancy" on job-detail (legacy single-job panel), null when
-  // we shouldn't be visible at all.
+  // FAB mode resolver: "apply" on apply forms (Express fill), "listing" on
+  // search/category pages (best-matches panel), "vacancy" on job-detail
+  // (single-job panel), null when we shouldn't be visible at all.
   function fabMode() {
+    if (isApplyPage()) return "apply";
     if (isListingPage() && !isJobDetailPage()) return "listing";
     if (isJobDetailPage()) return "vacancy";
     return null;
@@ -482,19 +578,23 @@
     if (!fabEl) return;
     const lbl = fabEl.querySelector(".eamx-fab__label");
     if (!lbl) return;
-    if (fabMode() === "listing") {
+    const mode = fabMode();
+    if (mode === "listing") {
       lbl.textContent = "Mejores matches";
       fabEl.setAttribute("aria-label", "Ver mejores matches en esta página");
+    } else if (mode === "apply") {
+      lbl.textContent = "Llenar con IA";
+      fabEl.setAttribute("aria-label", "Llenar formulario con IA");
     } else {
       lbl.textContent = "Postular con IA";
       fabEl.setAttribute("aria-label", "Postular con IA");
     }
+    try { fabEl.dataset.eamxFabMode = mode || ""; } catch (_) {}
   }
 
   async function onFabClick() {
     if (!fabEl || fabEl.disabled) return;
-    // Listing-page click → open best-matches panel. Vacancy-page click →
-    // existing single-job draft flow. fabMode resolves which one we're on.
+    // Listing-page click → open best-matches panel.
     if (fabMode() === "listing") {
       try { await openBestMatchesPanel(); }
       catch (err) {
@@ -503,11 +603,38 @@
       }
       return;
     }
-    const { job, partial } = extractJob();
+    // Mark queue item as "postulando_ahora" so the dashboard pill flips to
+    // cyan-pulse in real time. Best-effort — load failure silently skips.
+    try {
+      await ensureDiscoveryDeps();
+      if (queueModule && typeof queueModule.touchOpened === "function") {
+        const id = idFromUrl(location.href);
+        if (id) await queueModule.touchOpened(id, SOURCE);
+      }
+    } catch (_) { /* swallow */ }
+
+    let express = true;
+    try { express = await readExpressMode(); } catch (_) { express = true; }
+    if (!express) return onFabClickReview();
+    if (isApplyPage()) return onFabClickExpressApply();
+    return onFabClickExpressVacancy();
+  }
+
+  // Legacy "Revisión completa" path. Identical to the original onFabClick:
+  // generate the draft, open the panel, let the user review/edit/approve.
+  async function onFabClickReview() {
+    let { job, partial } = extractJob();
+    if (isApplyPage()) {
+      const cached = await restoreJobFromSession();
+      if (cached) {
+        job = cached;
+        partial = false;
+      }
+    }
     lastJob = job;
-    // Graceful degradation: if we extracted essentially nothing, tell the user.
+    persistJobToSession(job);
     if (partial && job.title === "(sin título)" && job.company === "(empresa desconocida)") {
-      toast("No pudimos leer esta vacante automáticamente. Cópiala o postula manualmente.", "info");
+      toast("Abre primero la vacante y dale Postularme; te lleno todo allí.", "info");
       return;
     }
     setFabBusy(true);
@@ -518,6 +645,62 @@
       lastDraft = res.draft || null;
       openPanel({ job, draft: lastDraft, partial });
     } catch (err) {
+      toast(humanizeError(err), "error");
+    } finally {
+      setFabBusy(false);
+    }
+  }
+
+  // Express FAB click on a job-detail page (vacancy). Extract + cache the job,
+  // kick off a background draft generation, show a hint pointing the user at
+  // OCC's own "Postularme" button. We do NOT auto-click that button — HITL.
+  async function onFabClickExpressVacancy() {
+    let job, partial;
+    try {
+      ({ job, partial } = extractJob());
+    } catch (_) {
+      toast("No pudimos leer esta vacante. Intenta de nuevo.", "error");
+      return;
+    }
+    if (partial && job.title === "(sin título)" && job.company === "(empresa desconocida)") {
+      toast("No pudimos leer esta vacante automáticamente.", "info");
+      return;
+    }
+    lastJob = job;
+    persistJobToSession(job);
+    // Fire-and-forget — generation typically takes 6-15s; the user will
+    // navigate to the apply page in that window.
+    prewarmExpressDraft(job);
+    toast("⚡ Listo. Dale 'Postularme' y te lleno todo.", "info");
+  }
+
+  // Express FAB click on an apply page. Restore job + draft from session,
+  // show progress overlay, fire parallel requests, fill fields as each
+  // resolves. See runExpressFill for full guarantees.
+  async function onFabClickExpressApply(opts = {}) {
+    const { job: extracted, partial } = extractJob();
+    let job = extracted;
+    const cached = await restoreJobFromSession();
+    if (cached) {
+      job = cached;
+    } else if (partial && job.title === "(sin título)" && job.company === "(empresa desconocida)") {
+      toast("Abre primero la vacante en OCC para que lea el contexto, luego Postularme.", "info");
+      return;
+    }
+    lastJob = job;
+    persistJobToSession(job);
+
+    const prewarmed = await restoreDraftFromSession();
+    if (prewarmed) {
+      lastDraft = prewarmed;
+      activeDraftId = prewarmed.id || null;
+    }
+
+    setFabBusy(true);
+    try {
+      await runExpressFill({ job, prewarmedDraft: prewarmed });
+    } catch (err) {
+      console.warn("[EmpleoAutomatico] Express fill threw", err);
       toast(humanizeError(err), "error");
     } finally {
       setFabBusy(false);
@@ -1068,6 +1251,1070 @@
     btn.scrollIntoView({ behavior: "smooth", block: "center" });
     btn.classList.add("eamx-submit-pulse");
     setTimeout(() => btn.classList.remove("eamx-submit-pulse"), 12000);
+  }
+
+  // =========================================================================
+  // Express Mode — toggle + session caches (job + pre-warmed draft)
+  // =========================================================================
+  // Mirrors content/lapieza.js. We persist the extracted job under
+  // chrome.storage.session keyed by the job id so /empleos/postular/<id>
+  // (or whatever the apply route is) can restore it without re-extracting.
+  // Best-effort: if session isn't available the FAB still works, just
+  // without the prewarm.
+
+  function jobCacheKey(url) {
+    const id = idFromUrl(url || location.href);
+    return JOB_CACHE_PREFIX + id;
+  }
+  function persistJobToSession(job) {
+    if (!job || !chrome?.storage?.session) return;
+    try {
+      const key = jobCacheKey(job.url || location.href);
+      Promise.resolve(chrome.storage.session.set({ [key]: job })).catch(() => {});
+    } catch (_) { /* ignore */ }
+  }
+  async function restoreJobFromSession() {
+    if (!chrome?.storage?.session) return null;
+    try {
+      const key = jobCacheKey(location.href);
+      const obj = await new Promise((resolve) => {
+        chrome.storage.session.get([key], (r) => resolve(r || {}));
+      });
+      const job = obj && obj[key];
+      if (job && typeof job === "object" && job.title) return job;
+    } catch (_) { /* ignore */ }
+    return null;
+  }
+
+  function readExpressMode() {
+    return new Promise((resolve) => {
+      try {
+        if (!chrome?.storage?.local) { resolve(true); return; }
+        chrome.storage.local.get([EXPRESS_MODE_STORAGE_KEY], (r) => {
+          const v = r && r[EXPRESS_MODE_STORAGE_KEY];
+          const resolved = typeof v === "boolean" ? v : true;
+          cachedExpressMode = resolved;
+          resolve(resolved);
+        });
+      } catch (_) { resolve(true); }
+    });
+  }
+  // Prime cache on boot + react to changes in another tab/options page.
+  try {
+    readExpressMode();
+    if (chrome?.storage?.onChanged) {
+      chrome.storage.onChanged.addListener((changes, area) => {
+        if (area !== "local") return;
+        const c = changes[EXPRESS_MODE_STORAGE_KEY];
+        if (c && typeof c.newValue === "boolean") cachedExpressMode = c.newValue;
+      });
+    }
+  } catch (_) { /* ignore */ }
+
+  function draftCacheKey(url) {
+    const id = idFromUrl(url || location.href);
+    return DRAFT_CACHE_PREFIX + id;
+  }
+  function persistDraftToSession(draft) {
+    if (!draft || !chrome?.storage?.session) return;
+    try {
+      const key = draftCacheKey(location.href);
+      Promise.resolve(chrome.storage.session.set({ [key]: draft })).catch(() => {});
+    } catch (_) { /* ignore */ }
+  }
+  async function restoreDraftFromSession() {
+    if (!chrome?.storage?.session) return null;
+    try {
+      const key = draftCacheKey(location.href);
+      const obj = await new Promise((resolve) => {
+        chrome.storage.session.get([key], (r) => resolve(r || {}));
+      });
+      const draft = obj && obj[key];
+      if (draft && typeof draft === "object" && (draft.coverLetter || draft.id)) return draft;
+    } catch (_) { /* ignore */ }
+    return null;
+  }
+  function clearDraftSession(url) {
+    if (!chrome?.storage?.session) return;
+    try {
+      Promise.resolve(
+        chrome.storage.session.remove(draftCacheKey(url || location.href))
+      ).catch(() => {});
+    } catch (_) { /* ignore */ }
+  }
+
+  // Pre-warm the cover-letter generation in the background while the user is
+  // on the job-detail page. By the time they click "Postularme" → land on the
+  // apply form, the draft is already in chrome.storage.session and the
+  // Express fill can paste it instantly. Silent on errors — the apply-page
+  // FAB click will fall back to a fresh request.
+  async function prewarmExpressDraft(job) {
+    if (!job || !job.title) return;
+    try {
+      const res = await sendMsg({ type: MSG.GENERATE_DRAFT, job });
+      if (!res || !res.ok) return;
+      const draft = res.draft || null;
+      if (draft) {
+        try {
+          if (chrome?.storage?.session) {
+            const key = DRAFT_CACHE_PREFIX + idFromUrl(job.url || location.href);
+            Promise.resolve(
+              chrome.storage.session.set({
+                [key]: { ...draft, id: res.draftId || draft.id || null }
+              })
+            ).catch(() => {});
+          }
+        } catch (_) {}
+      }
+    } catch (_) { /* silent */ }
+  }
+
+  // =========================================================================
+  // Adaptive question scanner
+  // =========================================================================
+  // OCC apply forms (and ATSes generally) sometimes inject open-ended
+  // question fields ("¿Por qué eres ideal?", "Cuéntanos tu experiencia con
+  // X"). We can't enumerate these client-side, so we ship a heuristic
+  // scanner: walk all <textarea> and long <input type="text"> nodes,
+  // classify each by surrounding text, batch the survivors to the backend.
+  // Cap at 10 to bound Gemini cost.
+
+  // Question heuristic: text length > 25, ends in "?" or contains question
+  // words. Greedy on purpose — false positives waste a Gemini call but
+  // false negatives leave the user stuck typing manually.
+  const QUESTION_WORDS_RX = /\b(por\s*qu[eé]|qu[eé]|c[oó]mo|cu[aá]l|cu[aá]les|describe|explica|cu[eé]ntanos|comparte|dinos|platic[ae]nos|h[aá]blanos|qu[eé]\s+te|por\s*qu[eé])\b/i;
+  function looksLikeQuestion(text) {
+    if (!text) return false;
+    const t = text.trim();
+    if (t.length < 6) return false;
+    if (t.length > 25) return true;
+    if (/\?\s*$/.test(t)) return true;
+    if (QUESTION_WORDS_RX.test(t)) return true;
+    return false;
+  }
+
+  // Skip-list for fields that look like basic profile info — we already fill
+  // those via fillForm/buildFormFields. The match is deliberately broad: a
+  // single token hit is enough to skip the field.
+  const QUESTION_SKIP_RX = /\b(nombre|name|email|correo|phone|tel[eé]fono|celular|m[oó]vil|whats?app|ubicaci[oó]n|location|ciudad|direcci[oó]n|address|zip|postal|c[oó]digo\s*postal|edad|age|rfc|curp|fecha\s+de\s+nacimiento|birthdate|birth[- ]?date|date\s+of\s+birth|cv|curriculum|currículum|resume|hoja\s+de\s+vida|linkedin|website|sitio\s*web|portafolio|portfolio|salario|sueldo|expectativa|salary|password|contraseña|usuario|username)\b/i;
+
+  // Pull the most-likely question text for a given field. Priority:
+  //  1) <label for=fieldId> textContent
+  //  2) wrapping <label>
+  //  3) the field's `placeholder`
+  //  4) the field's `aria-label`
+  //  5) a sibling/parent heading (h1-h4) within 4 DOM levels
+  function questionTextFor(el) {
+    const tryText = (s) => (s || "").replace(/\s+/g, " ").trim();
+    if (el.id) {
+      try {
+        const lbl = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+        if (lbl) {
+          const t = tryText(lbl.textContent);
+          if (t) return t;
+        }
+      } catch (_) {}
+    }
+    const wrap = el.closest("label");
+    if (wrap) {
+      const t = tryText(wrap.textContent);
+      if (t) return t;
+    }
+    const ph = tryText(el.getAttribute("placeholder"));
+    if (ph) return ph;
+    const al = tryText(el.getAttribute("aria-label"));
+    if (al) return al;
+    let p = el.parentElement;
+    let depth = 0;
+    while (p && depth < 4) {
+      const h = p.querySelector("h1, h2, h3, h4, legend");
+      if (h && h.contains(el) === false) {
+        const t = tryText(h.textContent);
+        if (t && t.length < 280) return t;
+      }
+      const prev = p.previousElementSibling;
+      if (prev && /^(H[1-4]|LEGEND|P|DIV|SPAN)$/i.test(prev.tagName)) {
+        const t = tryText(prev.textContent);
+        if (t && t.length < 280) return t;
+      }
+      p = p.parentElement;
+      depth++;
+    }
+    return "";
+  }
+
+  // Stable identifier for a field so we can re-resolve it after the panel
+  // re-renders or after a brief SPA repaint. Prefer existing `id`; otherwise
+  // stamp a fresh data-eamx-q-id attribute.
+  function ensureFieldRef(el) {
+    if (el.id) return el.id;
+    const existing = el.getAttribute("data-eamx-q-id");
+    if (existing) return existing;
+    questionRefSeq += 1;
+    const ref = `eamx-q-${Date.now().toString(36)}-${questionRefSeq}`;
+    try { el.setAttribute("data-eamx-q-id", ref); } catch (_) {}
+    return ref;
+  }
+
+  // Resolve a fieldRef back to a live DOM node.
+  function resolveFieldRef(ref) {
+    if (!ref) return null;
+    try {
+      const byId = document.getElementById(ref);
+      if (byId) return byId;
+    } catch (_) {}
+    try {
+      const escaped = (typeof CSS !== "undefined" && CSS.escape) ? CSS.escape(ref) : ref.replace(/"/g, "\\\"");
+      return document.querySelector(`[data-eamx-q-id="${escaped}"]`);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // Visibility check — element is rendered with non-zero area.
+  function isVisible(el) {
+    if (!el || !(el instanceof Element)) return false;
+    if (el.offsetParent === null && el.tagName !== "BODY") {
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 && r.height === 0) return false;
+    }
+    const r = el.getBoundingClientRect();
+    return r.width > 0 || r.height > 0;
+  }
+
+  // Scan the live DOM for open-ended question fields. Returns up to 10
+  // candidates ordered roughly by document order. Idempotent.
+  function scanQuestionFields() {
+    const candidates = Array.from(document.querySelectorAll(
+      "textarea, input[type='text']"
+    ));
+    const out = [];
+    const seenRefs = new Set();
+    for (const el of candidates) {
+      if (out.length >= 10) break;
+      if (!isVisible(el)) continue;
+      if (el.disabled || el.readOnly) continue;
+      const question = questionTextFor(el);
+      if (!question) continue;
+      const ctxHay = `${question} ${el.name || ""} ${el.id || ""} ${el.getAttribute("placeholder") || ""}`;
+      if (QUESTION_SKIP_RX.test(ctxHay)) continue;
+      if (!looksLikeQuestion(question)) continue;
+      const fieldRef = ensureFieldRef(el);
+      if (seenRefs.has(fieldRef)) continue;
+      seenRefs.add(fieldRef);
+      out.push({ el, question, fieldRef });
+    }
+    return out;
+  }
+
+  // Detect "user-edited" fields so Express doesn't clobber what the user
+  // typed before clicking. We tag fields with data-eamx-user-edited="true".
+  function isUserEdited(el) {
+    if (!el) return false;
+    if (el.dataset && el.dataset.eamxUserEdited === "true") return true;
+    const v = (el.value || "").trim();
+    if (v.length > 30) return true;
+    return false;
+  }
+
+  function attachUserEditListener() {
+    if (_userEditListenerAttached) return;
+    _userEditListenerAttached = true;
+    document.addEventListener("input", (ev) => {
+      const t = ev.target;
+      if (!t) return;
+      if (!(t instanceof HTMLInputElement) && !(t instanceof HTMLTextAreaElement)) return;
+      if (t.dataset && t.dataset.eamxFilling === "true") return;
+      try { t.dataset.eamxUserEdited = "true"; } catch (_) {}
+    }, true);
+  }
+
+  // Set the field value + dispatch input/change/blur (React-friendly) +
+  // briefly add the `.eamx-field-typing` class so the user sees the field
+  // pulse. The class is removed after 1.6s.
+  function fillFieldWithPulse(el, value) {
+    if (!el) return;
+    attachUserEditListener();
+    try {
+      try { el.dataset.eamxFilling = "true"; } catch (_) {}
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+        setNativeValue(el, value);
+      } else if (el.isContentEditable) {
+        el.textContent = value;
+      } else {
+        try { el.value = value; } catch (_) {}
+      }
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      try { el.dispatchEvent(new Event("blur", { bubbles: true })); } catch (_) {}
+      try {
+        el.classList.add("eamx-field-typing");
+        setTimeout(() => { try { el.classList.remove("eamx-field-typing"); } catch (_) {} }, 1600);
+      } catch (_) {}
+    } finally {
+      setTimeout(() => { try { delete el.dataset.eamxFilling; } catch (_) {} }, 50);
+    }
+  }
+
+  // Find OCC's cover-letter target textarea on the apply page. Heuristic:
+  //   1) textarea whose label/placeholder matches carta / presentación /
+  //      motivación / cover / por qué / ideal / mensaje
+  //   2) otherwise, the largest visible textarea on the page (by area)
+  function findExpressCoverLetterField() {
+    const textareas = Array.from(document.querySelectorAll("textarea"))
+      .filter((t) => isVisible(t) && !t.disabled && !t.readOnly);
+    if (!textareas.length) return null;
+    const rx = /carta|presentaci[oó]n|motivaci[oó]n|cover\s*letter|motivation|por\s*qu[eé]|ideal|mensaje/i;
+    const labelHay = (t) => {
+      const parts = [
+        t.getAttribute("placeholder") || "",
+        t.getAttribute("aria-label") || "",
+        t.name || "",
+        t.id || ""
+      ];
+      if (t.id) {
+        try {
+          const lbl = document.querySelector(`label[for="${CSS.escape(t.id)}"]`);
+          if (lbl) parts.push(lbl.textContent || "");
+        } catch (_) {}
+      }
+      const wrap = t.closest("label");
+      if (wrap) parts.push(wrap.textContent || "");
+      return parts.join(" ").toLowerCase();
+    };
+    const matched = textareas.find((t) => rx.test(labelHay(t)));
+    if (matched) return matched;
+    textareas.sort((a, b) => {
+      const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+      return (rb.width * rb.height) - (ra.width * ra.height);
+    });
+    return textareas[0] || null;
+  }
+
+  // Find OCC's Postularme/Enviar/Aplicar submit button + apply
+  // .eamx-submit-highlight. Mirrors LaPieza's selector cascade.
+  function findOccSubmitButton() {
+    const form = findApplicationForm();
+    const scope = form || document;
+    const candidates = Array.from(scope.querySelectorAll(
+      "button, input[type=submit], a[role=button]"
+    )).filter((el) => {
+      try { return isVisible(el); } catch (_) { return true; }
+    });
+    const rx = /(postularme|postular|enviar(?:\s+postulaci[oó]n)?|aplicar(?:\s+ahora)?|finalizar|submit\s+application|send\s+application|apply)/i;
+    const matches = candidates.filter((el) => {
+      const t = ((el.textContent || el.value || "") + "").trim();
+      // Exclude our own UI by class.
+      try {
+        if (el.closest(".eamx-fab, .eamx-panel, .eamx-overlay, .eamx-matches-panel, .eamx-toast, [data-eamx]")) return false;
+      } catch (_) {}
+      return rx.test(t);
+    });
+    if (matches.length) {
+      matches.sort((a, b) => {
+        const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+        return (rb.width * rb.height) - (ra.width * ra.height);
+      });
+      return matches[0];
+    }
+    if (form) {
+      const sub = form.querySelector("button[type=submit], input[type=submit]");
+      if (sub) return sub;
+    }
+    const anyForm = document.querySelector("form");
+    if (anyForm) {
+      const sub = anyForm.querySelector("button[type=submit], input[type=submit]");
+      if (sub) return sub;
+    }
+    return null;
+  }
+
+  function highlightExpressSubmitButton() {
+    const btn = findOccSubmitButton();
+    if (!btn) {
+      toast("No encontré el botón de Enviar — postula manualmente.", "info");
+      return;
+    }
+    try {
+      btn.scrollIntoView({ behavior: "smooth", block: "center" });
+      btn.classList.add("eamx-submit-highlight");
+    } catch (_) { /* ignore */ }
+  }
+
+  // Surface a typed error from a failed GENERATE_DRAFT inside Express.
+  function handleExpressDraftFailure(res) {
+    const code = res?.error;
+    const message = res?.message || "No se pudo generar la carta.";
+    if (code === ERR.PLAN_LIMIT_EXCEEDED) {
+      toast("Llegaste al límite de tu plan.", "error", {
+        label: "Ver planes",
+        onClick: () => openBilling()
+      });
+      return;
+    }
+    if (code === ERR.UNAUTHORIZED) {
+      toast("Inicia sesión para continuar.", "error", {
+        label: "Inicia sesión",
+        onClick: () => openOptionsPage()
+      });
+      return;
+    }
+    if (code === ERR.INVALID_INPUT && /perfil|cv|profile/i.test(message)) {
+      toast("Sube un CV más completo en Opciones.", "info", {
+        label: "Abrir Opciones",
+        onClick: () => openOptionsPage()
+      });
+      return;
+    }
+    toast(message, "error");
+  }
+
+  // -------------------------------------------------------------------------
+  // Express progress overlay — small floating card pinned above the FAB.
+  // Steps: cover ("Carta de presentación"), questions ("Respuestas").
+  // States: pending (⏳), done (✓), error (×).
+  // -------------------------------------------------------------------------
+  function buildExpressOverlay({ hasCover, hasQuestions }) {
+    let host = document.querySelector(".eamx-express-overlay");
+    if (host) try { host.remove(); } catch (_) {}
+    host = document.createElement("div");
+    host.className = "eamx-express-overlay";
+    host.setAttribute("role", "status");
+    host.setAttribute("aria-live", "polite");
+
+    const steps = [];
+    if (hasCover) steps.push({ key: "cover", label: "Carta de presentación" });
+    if (hasQuestions) steps.push({ key: "questions", label: "Respuestas" });
+
+    let inner = '<div class="eamx-express-overlay__title">⚡ Llenando…</div>';
+    for (const s of steps) {
+      inner += `<div class="eamx-express-overlay__step eamx-express-overlay__step--pending" data-step="${escapeHtml(s.key)}">` +
+        '<span class="eamx-express-overlay__icon" aria-hidden="true">⏳</span>' +
+        `<span class="eamx-express-overlay__label">${escapeHtml(s.label)}</span>` +
+        '<span class="eamx-express-overlay__detail"></span>' +
+      '</div>';
+    }
+    host.innerHTML = inner;
+    document.documentElement.appendChild(host);
+
+    function find(stepKey) { return host.querySelector(`[data-step="${stepKey}"]`); }
+    function setIcon(stepEl, icon) {
+      const i = stepEl.querySelector(".eamx-express-overlay__icon");
+      if (i) i.textContent = icon;
+    }
+    function setDetail(stepEl, detail) {
+      const d = stepEl.querySelector(".eamx-express-overlay__detail");
+      if (d) d.textContent = detail ? ` ${detail}` : "";
+    }
+
+    return {
+      show: () => { /* already mounted */ },
+      hide: () => { try { host.remove(); } catch (_) {} },
+      markPending: (key, detail) => {
+        const el = find(key); if (!el) return;
+        el.classList.remove("eamx-express-overlay__step--done", "eamx-express-overlay__step--error");
+        el.classList.add("eamx-express-overlay__step--pending");
+        setIcon(el, "⏳");
+        if (detail !== undefined) setDetail(el, detail);
+      },
+      markDone: (key, detail) => {
+        const el = find(key); if (!el) return;
+        el.classList.remove("eamx-express-overlay__step--pending", "eamx-express-overlay__step--error");
+        el.classList.add("eamx-express-overlay__step--done");
+        setIcon(el, "✓");
+        if (detail !== undefined) setDetail(el, detail);
+      },
+      markError: (key, detail) => {
+        const el = find(key); if (!el) return;
+        el.classList.remove("eamx-express-overlay__step--pending", "eamx-express-overlay__step--done");
+        el.classList.add("eamx-express-overlay__step--error");
+        setIcon(el, "×");
+        if (detail !== undefined) setDetail(el, detail);
+      }
+    };
+  }
+
+  /**
+   * Run the Express fill flow on an OCC apply page. Auto-fills the
+   * cover-letter textarea and the per-question answers. The user does the
+   * final review and clicks OCC's own submit button.
+   *
+   * HITL guarantees (NEVER violated, except via Modo Auto — see below):
+   *   - We NEVER click OCC's "Postularme"/"Enviar" button programmatically.
+   *   - We NEVER fire form.submit() programmatically.
+   *   - We only modify field values + dispatch input/change/blur events
+   *     (React-friendly).
+   *   - The user always clicks the platform's CTA themselves.
+   *
+   * Documented exception — Modo Auto: gated 4 ways, 5 kill switches.
+   * See maybeAutoSubmit below.
+   */
+  async function runExpressFill({ job, prewarmedDraft }) {
+    if (!job || !job.title) {
+      toast("No tengo la vacante. Abre la oferta primero.", "info");
+      return;
+    }
+
+    // 1) Scan the form right now (synchronous — apply forms are usually
+    //    server-rendered).
+    const scanned = scanQuestionFields();
+    detectedQuestions = scanned;
+
+    // 2) Locate the cover-letter target field.
+    const coverField = findExpressCoverLetterField();
+
+    // Build the progress overlay aligned with the FAB.
+    const overlay = buildExpressOverlay({
+      hasCover: !!coverField,
+      hasQuestions: scanned.length > 0
+    });
+    overlay.show();
+
+    const status = { cover: "skipped", questions: "skipped" };
+    const errors = [];
+
+    // 3) Cover-letter pipeline.
+    const coverPromise = (async () => {
+      if (!coverField) return null;
+      try {
+        let draft = prewarmedDraft;
+        if (!draft || !draft.coverLetter) {
+          overlay.markPending("cover");
+          const res = await sendMsg({ type: MSG.GENERATE_DRAFT, job });
+          if (!res || !res.ok) {
+            handleExpressDraftFailure(res);
+            overlay.markError("cover", "No se pudo generar la carta");
+            errors.push("draft");
+            status.cover = "error";
+            return null;
+          }
+          draft = res.draft || null;
+          activeDraftId = res.draftId || draft?.id || null;
+          lastDraft = draft;
+          persistDraftToSession(draft);
+        } else {
+          activeDraftId = draft.id || activeDraftId;
+          lastDraft = draft;
+        }
+        const cover = (draft && draft.coverLetter) ? String(draft.coverLetter) : "";
+        if (!cover) {
+          overlay.markError("cover", "Carta vacía");
+          status.cover = "error";
+          return null;
+        }
+        if (!isUserEdited(coverField)) {
+          fillFieldWithPulse(coverField, cover);
+          status.cover = "ok";
+          overlay.markDone("cover");
+        } else {
+          overlay.markDone("cover", "Respetado (lo editaste)");
+          status.cover = "ok";
+        }
+        return cover;
+      } catch (err) {
+        console.warn("[EmpleoAutomatico] Express cover failed", err);
+        overlay.markError("cover", humanizeError(err));
+        errors.push("draft");
+        status.cover = "error";
+        return null;
+      }
+    })();
+
+    // 4) Questions pipeline. Skipped when no questions detected.
+    const questionsPromise = (async () => {
+      if (!scanned.length) return null;
+      overlay.markPending("questions", `0/${scanned.length}`);
+      try {
+        const res = await sendMsg({
+          type: MSG.ANSWER_QUESTIONS,
+          job,
+          questions: scanned.map((q) => q.question)
+        });
+        if (!res || !res.ok) {
+          overlay.markError("questions", "No se generaron — escríbelas tú");
+          errors.push("questions");
+          status.questions = "error";
+          return null;
+        }
+        const answers = Array.isArray(res.answers) ? res.answers : [];
+        questionAnswers = answers.slice();
+        questionsState = "success";
+
+        let filled = 0;
+        for (let i = 0; i < scanned.length; i++) {
+          const q = scanned[i];
+          const value = answers[i];
+          if (!value) continue;
+          const target = resolveFieldRef(q.fieldRef);
+          if (!target) continue;
+          if (isUserEdited(target)) continue;
+          fillFieldWithPulse(target, value);
+          filled++;
+          overlay.markPending("questions", `${filled}/${scanned.length}`);
+          await new Promise((r) => setTimeout(r, 200));
+        }
+        overlay.markDone("questions", `${filled}/${scanned.length}`);
+        status.questions = "ok";
+        return answers;
+      } catch (err) {
+        console.warn("[EmpleoAutomatico] Express questions failed", err);
+        overlay.markError("questions", "Error generando respuestas");
+        errors.push("questions");
+        status.questions = "error";
+        return null;
+      }
+    })();
+
+    // 5) Wait for both to settle.
+    await Promise.allSettled([coverPromise, questionsPromise]);
+
+    // 6) If the cover letter failed AND there was a draft path, open the
+    //    review panel for retry.
+    if (status.cover === "error" && coverField) {
+      try {
+        if (lastDraft) {
+          openPanel({ job, draft: lastDraft, partial: false });
+        } else {
+          openPanel({ job, draft: { coverLetter: "" }, partial: false });
+        }
+      } catch (_) { /* ignore */ }
+      setTimeout(() => overlay.hide(), 1500);
+      return;
+    }
+
+    // 7) Highlight OCC's submit button + show final toast.
+    setTimeout(() => overlay.hide(), 1500);
+    highlightExpressSubmitButton();
+
+    let toastMsg = "✓ Listo. Revisa los campos y dale 'Enviar' →";
+    let toastVariant = "success";
+    if (status.questions === "error" && status.cover === "ok") {
+      toastMsg = "Algunas respuestas no se generaron, llénalas manualmente.";
+      toastVariant = "info";
+    }
+    toast(toastMsg, toastVariant);
+
+    // 8) Modo Auto — Premium-only optional auto-submit. Reads its own gates
+    //    (plan + toggle + disclaimer + cap + sanity) and is a no-op for
+    //    free/pro users or when the toggle is off. Documented exception to
+    //    the HITL guarantees in this function's JSDoc.
+    if (typeof maybeAutoSubmit === "function") {
+      maybeAutoSubmit(extractJobLiteFromUrl(job)).catch(() => {});
+    }
+  }
+
+  // Adaptive in-flow question detection. Re-runs as the SPA mutates the
+  // apply form. Idempotent: bails if a fetch is in flight or no new
+  // questions appeared since the last scan.
+  function detectAdaptiveQuestions() {
+    if (questionsState === "loading") return;
+    const scanned = scanQuestionFields();
+    if (!scanned.length) return;
+    const oldRefs = new Set(detectedQuestions.map((q) => q.fieldRef));
+    const newRefs = new Set(scanned.map((q) => q.fieldRef));
+    let same = oldRefs.size === newRefs.size;
+    if (same) {
+      for (const r of newRefs) { if (!oldRefs.has(r)) { same = false; break; } }
+    }
+    if (same && questionsState !== "idle") return;
+
+    detectedQuestions = scanned;
+    fetchAnswersForDetectedQuestions();
+  }
+
+  // Fire ANSWER_QUESTIONS for the currently detected list. Re-entrant.
+  async function fetchAnswersForDetectedQuestions() {
+    if (!lastJob) return;
+    if (!detectedQuestions.length) return;
+    if (questionsState === "loading") return;
+    const questions = detectedQuestions.map((q) => q.question);
+    questionsState = "loading";
+    questionsError = "";
+    try {
+      const res = await sendMsg({
+        type: MSG.ANSWER_QUESTIONS,
+        questions,
+        job: lastJob
+      });
+      if (!res || !res.ok) {
+        const code = res && res.error;
+        if (code === ERR.UNAUTHORIZED) {
+          questionsState = "error";
+          questionsError = "Inicia sesión para continuar.";
+        } else if (code === ERR.PLAN_LIMIT_EXCEEDED) {
+          questionsState = "error";
+          questionsError = "Llegaste al límite de tu plan.";
+        } else if (code === ERR.SERVER_ERROR) {
+          questionsState = "error";
+          questionsError = "Servicio temporalmente no disponible.";
+        } else {
+          questionsState = "idle";
+          detectedQuestions = [];
+          questionAnswers = [];
+        }
+        return;
+      }
+      const answers = Array.isArray(res.answers) ? res.answers : [];
+      if (answers.length !== questions.length) {
+        questionsState = "error";
+        questionsError = "Servicio de IA temporalmente no disponible. Intenta de nuevo.";
+        return;
+      }
+      questionAnswers = answers.slice();
+      questionsState = "success";
+
+      // Auto-paste each answer.
+      let pastedCount = 0;
+      for (let i = 0; i < detectedQuestions.length; i++) {
+        const q = detectedQuestions[i];
+        const target = q && resolveFieldRef(q.fieldRef);
+        if (target?.dataset?.eamxQPasted === "true") continue;
+        await new Promise((r) => setTimeout(r, i === 0 ? 0 : 200));
+        try {
+          if (pasteQuestionAnswer(i)) {
+            pastedCount++;
+            try { if (target?.dataset) target.dataset.eamxQPasted = "true"; } catch (_) {}
+          }
+        } catch (_) { /* skip */ }
+      }
+      if (pastedCount > 0) {
+        toast("✓ Respuestas IA pegadas. Revisa y dale 'Enviar' →", "success");
+      }
+    } catch (err) {
+      questionsState = "error";
+      questionsError = humanizeError(err);
+    }
+  }
+
+  // Paste the answer for question index `i` into its resolved DOM field.
+  function pasteQuestionAnswer(i) {
+    const q = detectedQuestions[i];
+    if (!q) return false;
+    const value = (questionAnswers[i] || "");
+    if (!value.trim()) return false;
+    const target = resolveFieldRef(q.fieldRef);
+    if (!target) return false;
+    try {
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+        setNativeValue(target, value);
+      } else if (target.isContentEditable) {
+        target.textContent = value;
+      } else {
+        try { target.value = value; } catch (_) {}
+      }
+      target.dispatchEvent(new Event("input", { bubbles: true }));
+      target.dispatchEvent(new Event("change", { bubbles: true }));
+      try { target.dispatchEvent(new Event("blur", { bubbles: true })); } catch (_) {}
+    } catch (err) {
+      console.warn("[EmpleoAutomatico] paste-question failed", err);
+      return false;
+    }
+    try {
+      target.classList.add("eamx-paste-success");
+      setTimeout(() => { try { target.classList.remove("eamx-paste-success"); } catch (_) {} }, 1500);
+    } catch (_) {}
+    return true;
+  }
+
+  // =========================================================================
+  // Modo Auto — premium-only optional auto-submit (gated 4 ways, 5 kill
+  // switches). Mirrors content/lapieza.js.
+  //
+  // Gates (ALL must be true):
+  //   1) cachedProfile.plan === "premium"
+  //   2) chrome.storage.local[AUTO_MODE] === true
+  //   3) chrome.storage.local[AUTO_DISCLAIMER_SEEN] === true
+  //   4) under daily cap (110 total / 20 per portal) AND not day-paused AND
+  //      30s+ since last submit on any portal.
+  //
+  // Kill switches:
+  //   1) Escape key during countdown
+  //   2) Sanity recheck after countdown (URL drift, CAPTCHA, button gone)
+  //   3) CAPTCHA detection
+  //   4) Day-pause after 2 consecutive failures in the same session
+  //   5) Inter-submit delay (30s minimum)
+  // =========================================================================
+
+  async function readAutoMode() {
+    return new Promise((resolve) => {
+      try {
+        chrome.storage.local.get([STORAGE_KEYS.AUTO_MODE], (r) => {
+          resolve(!!(r && r[STORAGE_KEYS.AUTO_MODE]));
+        });
+      } catch (_) { resolve(false); }
+    });
+  }
+
+  async function readDisclaimerSeen() {
+    return new Promise((resolve) => {
+      try {
+        chrome.storage.local.get([STORAGE_KEYS.AUTO_DISCLAIMER_SEEN], (r) => {
+          resolve(!!(r && r[STORAGE_KEYS.AUTO_DISCLAIMER_SEEN]));
+        });
+      } catch (_) { resolve(false); }
+    });
+  }
+
+  function autoTodayKey() {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${dd}`;
+  }
+
+  async function readAutoDaily() {
+    return new Promise((resolve) => {
+      try {
+        chrome.storage.local.get([STORAGE_KEYS.AUTO_DAILY], (r) => {
+          const v = r && r[STORAGE_KEYS.AUTO_DAILY];
+          if (v && v.date === autoTodayKey()) resolve(v);
+          else resolve({ date: autoTodayKey(), count: 0, perPortal: {} });
+        });
+      } catch (_) { resolve({ date: autoTodayKey(), count: 0, perPortal: {} }); }
+    });
+  }
+
+  async function writeAutoDaily(value) {
+    return new Promise((resolve) => {
+      try {
+        chrome.storage.local.set({ [STORAGE_KEYS.AUTO_DAILY]: value }, () => resolve());
+      } catch (_) { resolve(); }
+    });
+  }
+
+  async function readDayPause() {
+    return new Promise((resolve) => {
+      try {
+        chrome.storage.local.get([STORAGE_KEYS.AUTO_DAY_PAUSE], (r) => {
+          const v = r && r[STORAGE_KEYS.AUTO_DAY_PAUSE];
+          if (v && v.date === autoTodayKey()) resolve(v);
+          else resolve(null);
+        });
+      } catch (_) { resolve(null); }
+    });
+  }
+
+  async function setDayPause(reason) {
+    return autoWriteStorage(STORAGE_KEYS.AUTO_DAY_PAUSE, { date: autoTodayKey(), reason });
+  }
+
+  async function readLastSubmitAt() {
+    return new Promise((resolve) => {
+      try {
+        chrome.storage.local.get([STORAGE_KEYS.AUTO_LAST_SUBMIT_AT], (r) => {
+          resolve(Number(r && r[STORAGE_KEYS.AUTO_LAST_SUBMIT_AT]) || 0);
+        });
+      } catch (_) { resolve(0); }
+    });
+  }
+
+  async function autoWriteStorage(key, value) {
+    return new Promise((resolve) => {
+      try { chrome.storage.local.set({ [key]: value }, () => resolve()); }
+      catch (_) { resolve(); }
+    });
+  }
+
+  async function autoIsPremium() {
+    await loadProfileOnce();
+    return cachedProfile && cachedProfile.plan === "premium";
+  }
+
+  async function canAutoSubmitNow() {
+    const dp = await readDayPause();
+    if (dp) return { ok: false, reason: `Pausado hoy: ${dp.reason}` };
+    const daily = await readAutoDaily();
+    const total = daily.count || 0;
+    const portalCap = AUTO_PORTAL_CAPS[SOURCE] ?? 20;
+    const portalCount = (daily.perPortal && daily.perPortal[SOURCE]) || 0;
+    if (total >= AUTO_TOTAL_CAP) {
+      return { ok: false, reason: `Cap diario total alcanzado (${AUTO_TOTAL_CAP})` };
+    }
+    if (portalCount >= portalCap) {
+      return { ok: false, reason: `Cap diario alcanzado en ${SOURCE} (${portalCap})` };
+    }
+    const last = await readLastSubmitAt();
+    const elapsed = Date.now() - last;
+    if (elapsed < 30000) {
+      return { ok: false, reason: `Espera ${Math.ceil((30000 - elapsed) / 1000)}s antes del siguiente auto-submit` };
+    }
+    return { ok: true, daily, portalCount, portalCap };
+  }
+
+  function detectCaptcha() {
+    return document.querySelector(
+      'iframe[src*="captcha"], iframe[src*="recaptcha"], iframe[src*="hcaptcha"], ' +
+      '[class*="captcha"], [class*="recaptcha"], [class*="hcaptcha"], ' +
+      '[id*="captcha"], [id*="recaptcha"], [id*="hcaptcha"]'
+    );
+  }
+
+  function autoSubmitSanityCheck() {
+    if (!isApplyPage()) return { ok: false, reason: "Ya no estás en la página de postulación" };
+    const tas = Array.from(document.querySelectorAll("textarea"));
+    const hasContent = tas.some((t) => (t.value || "").trim().length > 20);
+    if (tas.length > 0 && !hasContent) return { ok: false, reason: "Los campos están vacíos" };
+    if (detectCaptcha()) return { ok: false, reason: "CAPTCHA detectado, completa manual" };
+    if (!findOccSubmitButton()) return { ok: false, reason: "No encontré el botón de Enviar" };
+    return { ok: true };
+  }
+
+  function showAutoSubmitCountdown(seconds) {
+    let cancelled = false;
+    let escHandler = null;
+    const controller = {
+      cancel: () => {
+        if (cancelled) return;
+        cancelled = true;
+        if (escHandler) {
+          try { document.removeEventListener("keydown", escHandler, true); } catch (_) {}
+          escHandler = null;
+        }
+      },
+      promise: null
+    };
+    controller.promise = new Promise((resolve) => {
+      let elapsed = 0;
+      const tick = setInterval(() => {
+        elapsed += 1;
+        if (cancelled) {
+          clearInterval(tick);
+          if (escHandler) {
+            try { document.removeEventListener("keydown", escHandler, true); } catch (_) {}
+            escHandler = null;
+          }
+          resolve(false);
+          return;
+        }
+        if (elapsed >= seconds) {
+          clearInterval(tick);
+          if (escHandler) {
+            try { document.removeEventListener("keydown", escHandler, true); } catch (_) {}
+            escHandler = null;
+          }
+          resolve(true);
+        }
+      }, 1000);
+      escHandler = (ev) => {
+        if (ev.key === "Escape") {
+          controller.cancel();
+          clearInterval(tick);
+          resolve(false);
+        }
+      };
+      try { document.addEventListener("keydown", escHandler, true); } catch (_) {}
+      toast(`⚡ Modo Auto: enviando en ${seconds}s... (Esc para cancelar)`, "info");
+    });
+    return controller;
+  }
+
+  function extractJobLiteFromUrl(jobOverride) {
+    const j = jobOverride || lastJob || null;
+    return {
+      id: idFromUrl(location.href),
+      source: SOURCE,
+      url: location.href,
+      title: (j && j.title) || "",
+      company: (j && j.company) || ""
+    };
+  }
+
+  let autoSubmitFailStreak = 0;
+
+  async function markAutoSubmitFailure() {
+    autoSubmitFailStreak++;
+    if (autoSubmitFailStreak >= 2) {
+      await setDayPause("Dos errores consecutivos del portal");
+      toast("⛔ Modo Auto pausado el resto del día. Vuelve mañana o aplica manual.", "error");
+      autoSubmitFailStreak = 0;
+    }
+  }
+
+  async function incrementAutoDaily() {
+    const daily = await readAutoDaily();
+    daily.count = (daily.count || 0) + 1;
+    daily.perPortal = daily.perPortal || {};
+    daily.perPortal[SOURCE] = (daily.perPortal[SOURCE] || 0) + 1;
+    await writeAutoDaily(daily);
+    return daily;
+  }
+
+  /**
+   * Main hook. Called from runExpressFill AFTER both pipelines settle. No-op
+   * for free/pro, disclaimer-not-seen, toggle-off, day-paused, capped, or
+   * inter-submit throttled. Otherwise: 3-5s countdown → re-sanity → click →
+   * verify → log. Errors NEVER throw.
+   */
+  async function maybeAutoSubmit(jobLite) {
+    try {
+      if (!(await readAutoMode())) return;
+      if (!(await readDisclaimerSeen())) return;
+      if (!(await autoIsPremium())) return;
+      const cap = await canAutoSubmitNow();
+      if (!cap.ok) {
+        toast(`Modo Auto: ${cap.reason}`, "info");
+        return;
+      }
+      const sanity = autoSubmitSanityCheck();
+      if (!sanity.ok) {
+        toast(`Modo Auto cancelado: ${sanity.reason}`, "info");
+        return;
+      }
+      const seconds = 3 + Math.floor(Math.random() * 3);
+      const cd = showAutoSubmitCountdown(seconds);
+      const proceed = await cd.promise;
+      if (!proceed) {
+        toast("Modo Auto cancelado por ti.", "info");
+        return;
+      }
+      const sanity2 = autoSubmitSanityCheck();
+      if (!sanity2.ok) {
+        toast(`Modo Auto cancelado: ${sanity2.reason}`, "info");
+        return;
+      }
+      const btn = findOccSubmitButton();
+      if (!btn) {
+        toast("Modo Auto: no encontré el botón Enviar", "error");
+        return;
+      }
+      console.log("[EmpleoAutomatico] auto-submit fired:", { portal: SOURCE, jobId: jobLite && jobLite.id });
+      try { btn.click(); } catch (clickErr) {
+        console.warn("[EmpleoAutomatico] auto-submit click threw", clickErr);
+        toast("Modo Auto: el clic en Enviar falló. Revisa manualmente.", "error");
+        await markAutoSubmitFailure();
+        return;
+      }
+      await new Promise((r) => setTimeout(r, 3000));
+      const stillOnApply = isApplyPage();
+      const errorVisible = !!document.querySelector('[class*="error" i]:not([class*="border" i])');
+      if (errorVisible) {
+        toast("Modo Auto: el portal devolvió un error. No incrementé el contador.", "error");
+        await markAutoSubmitFailure();
+        return;
+      }
+      if (stillOnApply) {
+        toast("Modo Auto: el envío no se confirmó. Revisa manualmente.", "info");
+        await markAutoSubmitFailure();
+        return;
+      }
+      autoSubmitFailStreak = 0;
+      await incrementAutoDaily();
+      await autoWriteStorage(STORAGE_KEYS.AUTO_LAST_SUBMIT_AT, Date.now());
+      if (jobLite && jobLite.id && queueModule && typeof queueModule.markApplied === "function") {
+        try { await queueModule.markApplied(jobLite.id, SOURCE); } catch (_) {}
+      }
+      const daily = await readAutoDaily();
+      const portalCount = (daily.perPortal && daily.perPortal[SOURCE]) || 0;
+      const portalCap = AUTO_PORTAL_CAPS[SOURCE] ?? 20;
+      const company = (jobLite && jobLite.company) || "esta vacante";
+      toast(
+        `✓ Auto-aplicado a ${company}. ${portalCount}/${portalCap} hoy en ${SOURCE}`,
+        "success"
+      );
+    } catch (err) {
+      console.warn("[EmpleoAutomatico] maybeAutoSubmit failed", err);
+    }
   }
 
   // =========================================================================
@@ -2052,10 +3299,23 @@
   // =========================================================================
 
   function detectAndMount() {
-    // FAB mounts on BOTH listing and vacancy routes (different labels).
+    // FAB mounts on apply, vacancy, and listing routes (different labels).
     if (isJobDetailPage() || isListingPage()) {
       mountFab();
       paintFabLabel();
+      // On vacancy pages, eagerly extract & cache the job so it survives
+      // navigation to the apply page. Best-effort; runs after a short delay
+      // to let SPA hydration finish.
+      if (fabMode() === "vacancy") {
+        setTimeout(() => {
+          try {
+            const { job, partial } = extractJob();
+            if (!partial && job && job.title && job.title !== "(sin título)") {
+              persistJobToSession(job);
+            }
+          } catch (_) { /* ignore */ }
+        }, 1500);
+      }
     } else {
       unmountFab();
       closePanel();
@@ -2075,6 +3335,19 @@
     } else {
       stopListingObserver();
     }
+
+    // Apply-page adaptive Q&A: kick off a scan if we have a cached job and
+    // any open-ended questions are visible. The user already opted in by
+    // clicking the FAB on the vacancy page (which prewarmed); subsequent
+    // questions on later steps fill themselves without an extra click.
+    if (isApplyPage()) {
+      setTimeout(async () => {
+        if (!lastJob) {
+          try { lastJob = await restoreJobFromSession(); } catch (_) {}
+        }
+        if (lastJob) detectAdaptiveQuestions();
+      }, 1200);
+    }
   }
 
   function throttle(fn, ms) {
@@ -2092,6 +3365,9 @@
       if (location.href !== lastUrl) {
         lastUrl = location.href;
         activeDraftId = null; lastDraft = null; lastJob = null;
+        // Adaptive questions cache is per-page — drop on SPA route change.
+        // Old fieldRefs would resolve to nothing once the form unmounts.
+        detectedQuestions = []; questionAnswers = []; questionsState = "idle"; questionsError = "";
         // Tear down listing overlays — they're tied to the previous route's
         // DOM. detectAndMount() below re-arms them if we're still on a
         // listing path.
@@ -2126,6 +3402,10 @@
 
   function boot() {
     try {
+      // Wire up the user-edit detector early so any text the user types
+      // BEFORE the FAB click is preserved by Express fill (we won't clobber
+      // a field whose data-eamx-user-edited === "true").
+      attachUserEditListener();
       // storage.onChanged listener — re-render listing badges + matches
       // panel when the user uploads a new CV / changes prefs / removes
       // from the queue in another tab.
