@@ -2391,10 +2391,11 @@
       matchesScrollDebounce = null;
     }
     matchesCurrentTopN = [];
-    // Drop the wider-search pool on close so the next panel open starts
-    // fresh from live cards. The user can click "Buscar más amplio" again
-    // if they want to re-aggregate.
-    widerSearchPool = null;
+    // Keep widerSearchPool alive across user-initiated close → reopen so
+    // they don't lose their accumulated 100-vacancy sweep just by closing
+    // the panel (Buscar más amplio is a 30-90s loop — re-doing it on
+    // every close is brutal). The pool is dropped explicitly on SPA
+    // route change in onChange() — see "spa nav watching" section.
     try { matchesPanelEl.classList.remove("eamx-matches-panel--open"); } catch (_) {}
     const node = matchesPanelEl;
     matchesPanelEl = null;
@@ -3021,7 +3022,15 @@
     // more headroom to grow.
     const loadMore = matchesPanelEl?.querySelector("[data-eamx-matches-loadmore]");
     if (loadMore) {
-      loadMore.hidden = cards.length < 5 || cards.length >= 100;
+      // Visibility uses the larger of (live cards, pool size). When the
+      // user reopens the panel after a previous wider-search, pool.size
+      // is the meaningful number — we already have N vacancies cached,
+      // so "Buscar más amplio" should hide once we hit the 100 ceiling.
+      const effective = Math.max(
+        cards.length,
+        (widerSearchPool && widerSearchPool.size) || 0
+      );
+      loadMore.hidden = effective < 5 || effective >= 100;
     }
 
     // Wire the scroll re-populate handler when there are too few cards.
@@ -5420,6 +5429,10 @@
         setTimeout(() => maybeAutoFireExpressOnApply(), 600);
       }
     } else {
+      // Left the job-detail / listing context entirely — drop the
+      // wider-search pool too, since it's listing-scoped and the user's
+      // filters may differ on a return visit.
+      widerSearchPool = null;
       unmountFab();
       closePanel();
       closeMatchesPanel();
@@ -5474,7 +5487,10 @@
         // freshly-rendered inputs/textareas/buttons.
         stopFlowAssistant();
         // Best-matches panel is page-scoped. If the user navigates away
-        // mid-shortlist we close it — the underlying cards are gone.
+        // mid-shortlist we close it AND drop the wider-search pool — the
+        // underlying cards are gone, the user's filters may have changed,
+        // and the pool would be misleading on the new route.
+        widerSearchPool = null;
         closeMatchesPanel();
         setTimeout(detectAndMount, 300);
         setTimeout(detectAndMount, 1200);
@@ -5491,7 +5507,7 @@
       const want = isJobDetailPage();
       const have = !!(fabEl && document.body.contains(fabEl));
       if (want && !have) mountFab();
-      else if (!want && have) { unmountFab(); closePanel(); closeMatchesPanel(); }
+      else if (!want && have) { widerSearchPool = null; unmountFab(); closePanel(); closeMatchesPanel(); }
       else if (want && have) {
         // Same page, but maybe the mode changed (e.g. vacancy page → listing
         // via a SPA nav that didn't fire popstate first). Repaint the label
