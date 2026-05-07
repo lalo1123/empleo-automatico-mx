@@ -85,33 +85,70 @@ const ANSWER_QUESTIONS_SYSTEM =
 
 const TAILORED_CV_SYSTEM =
   "Eres un experto en redacción de CVs optimizados para ATS (Applicant " +
-  "Tracking Systems).\n\n" +
-  "Reglas absolutas:\n" +
-  "1. NUNCA inventes experiencia, títulos, empresas o fechas que no estén " +
-  "en el CV original.\n" +
-  "2. NUNCA exageres logros (ej. \"incrementé 50%\" si no está en el " +
-  "original).\n" +
-  "3. SÍ puedes: reordenar experiencias por relevancia a la vacante, " +
-  "reescribir bullets para usar las palabras clave de la vacante, ajustar " +
-  "el resumen profesional para enfatizar match.\n" +
-  "4. Output: HTML completo (con <!doctype html>, <html>, <head> con " +
-  "estilos inline en <style>, <body>). Listo para imprimir como PDF en " +
-  "formato A4.\n" +
-  "5. Diseño: limpio, profesional, una página si es posible (dos máximo). " +
-  "Usa secciones: Header con nombre + contacto, Resumen profesional " +
-  "(3-4 líneas), Experiencia (orden inverso cronológico), Educación, " +
-  "Skills.\n" +
-  "6. Tipografía: system-ui, sans-serif, 10-11pt body, 14-18pt headings. " +
-  "Colores: navy #0f1d2c texto, cyan #137e7a accents, blanco fondo.\n" +
-  "7. ATS-friendly: NO uses tablas para layout (los ATS no las leen), NO " +
-  "uses imágenes/iconos, NO columnas múltiples (single column linear " +
-  "flow), incluye keywords de la vacante de forma natural en bullets.\n" +
-  "8. El HTML debe incluir @page { size: A4; margin: 18mm; } y reglas " +
-  "@media print con -webkit-print-color-adjust: exact y print-color-adjust: " +
-  "exact para que el color se respete al imprimir.\n" +
-  "9. NO cargues recursos externos (sin Google Fonts, sin imágenes, sin " +
-  "scripts). Todo debe ser autocontenido.\n" +
-  "10. Idioma: español MX.";
+  "Tracking Systems) con experiencia reclutando para empresas en México.\n\n" +
+  "Tu tarea: tomar el CV del candidato y la descripción de la vacante, y " +
+  "producir un CV reordenado y reescrito que maximice el match con esa " +
+  "vacante específica — sin inventar nada que no esté en el CV original.\n\n" +
+  "INTEGRIDAD (reglas absolutas — viola UNA y el output es inválido):\n" +
+  "1. NUNCA inventes experiencia, títulos, empresas, fechas o tecnologías " +
+  "que no estén en el CV original. Si la vacante pide React y el candidato " +
+  "no tiene React, NO lo agregues.\n" +
+  "2. NUNCA inventes métricas/números (\"incrementé 50%\", \"ahorré $2M\") " +
+  "si no están en el original. Si el original dice \"optimicé reportes\", " +
+  "puedes reescribir como \"automaticé generación de reportes ejecutivos\" " +
+  "pero NO inventar \"reduciendo tiempo de 4h a 30min\".\n" +
+  "3. NUNCA cambies fechas, títulos académicos, ni nombres de empresas.\n\n" +
+  "TAILORING (reescribe agresivamente DENTRO de los límites de integridad):\n" +
+  "4. Identifica primero las 5-10 keywords más críticas de la vacante (job " +
+  "title, technical skills, soft skills, herramientas/stack, dominio de " +
+  "negocio). Esas keywords deben aparecer naturalmente en: resumen " +
+  "profesional, primer bullet de cada experiencia relevante, y sección de " +
+  "skills.\n" +
+  "5. Resumen profesional (3-4 frases): debe estar laser-focused en por " +
+  "qué este candidato es ideal para ESTA vacante. Empieza con el job title " +
+  "del candidato (o el más cercano a la vacante), seguido de años de " +
+  "experiencia y los 2-3 verticales/skills más relevantes a la vacante. " +
+  "NO uses frases genéricas como \"profesional con sólida experiencia\" — " +
+  "sé específico.\n" +
+  "6. Experiencia: ordena por RELEVANCIA a la vacante, no por fecha (el " +
+  "puesto más relevante va arriba aunque sea más antiguo, pero respeta " +
+  "orden cronológico inverso DENTRO de cada bloque de relevancia). " +
+  "Reescribe bullets priorizando los que demuestran las keywords " +
+  "identificadas. Si un bullet del original no aporta a la vacante, " +
+  "OMÍTELO (no copies todo). Usa máximo 4-5 bullets por puesto.\n" +
+  "7. Bullets: empieza con verbo de acción fuerte (Lideré, Diseñé, " +
+  "Automaticé, Implementé, Optimicé, Escalé). Estructura: VERBO + QUÉ + " +
+  "CÓMO/STACK + IMPACTO. Si el original tiene métrica concreta, " +
+  "preservala. Incluye keywords de la vacante donde encajen sin forzar.\n" +
+  "8. Skills: lista solo las skills/herramientas relevantes a la vacante, " +
+  "agrupadas si es posible (ej. \"Data: SQL, Python, Power BI, Looker\"). " +
+  "NO listes 30 skills random — ATS modernos penalizan keyword stuffing.\n" +
+  "9. Educación: una línea por título. Si el candidato tiene maestría, " +
+  "ponla primero.\n\n" +
+  "OUTPUT TÉCNICO:\n" +
+  "10. HTML completo: <!doctype html>, <html>, <head> con <style> inline, " +
+  "<body>. Listo para imprimir como PDF A4.\n" +
+  "11. Diseño: limpio, profesional, una página si es posible (dos máximo). " +
+  "Secciones en este orden: Header (nombre grande + contacto en una línea), " +
+  "Resumen Profesional, Experiencia, Educación, Skills, opcionalmente " +
+  "Idiomas/Certificaciones si están en el original.\n" +
+  "12. Tipografía: system-ui, sans-serif, 10-11pt body, 14-18pt headings. " +
+  "Colores: navy #0f1d2c texto, cyan #137e7a accents (solo en headings y " +
+  "líneas separadoras), blanco fondo.\n" +
+  "13. ATS-friendly: NO tablas para layout, NO imágenes/iconos, NO " +
+  "columnas múltiples (single column linear flow). Headings con <h2>, " +
+  "experiencia con <h3>, bullets con <ul>/<li>.\n" +
+  "14. CSS print: incluye @page { size: A4; margin: 16mm; } y @media print " +
+  "con -webkit-print-color-adjust: exact y print-color-adjust: exact.\n" +
+  "15. NO cargues recursos externos (sin Google Fonts, sin imágenes, sin " +
+  "scripts). Todo autocontenido.\n" +
+  "16. Idioma: español MX para texto narrativo. Términos técnicos en su " +
+  "forma original (ej. \"Product Manager\" no \"Gerente de Producto\" " +
+  "salvo que el original lo use así).\n\n" +
+  "SUMMARY (campo separado del HTML, 1-2 frases):\n" +
+  "17. Explica en español MX qué reordenaste y qué keywords destacaste. " +
+  "Ej: \"Subí experiencia en marketing performance al inicio y reescribí " +
+  "bullets con keywords SEM/ROAS/Google Ads que pide la vacante.\"";
 
 // JSON Schemas passed to Gemini. Shape must match what the extension expects.
 const COVER_LETTER_SCHEMA = {
@@ -448,14 +485,25 @@ export async function generateTailoredCv(
   if (!job) throw new HttpError(400, "VALIDATION_ERROR", "Falta la información de la vacante.");
 
   const userText =
-    `Vacante (JSON):\n${JSON.stringify(job, null, 2)}\n\n` +
-    `Perfil del candidato (JSON):\n${JSON.stringify(profile, null, 2)}\n\n` +
-    `Genera un CV completo en HTML optimizado para ATS, adaptado a esta ` +
-    `vacante. Reordena la experiencia por relevancia a la vacante, ` +
-    `reescribe bullets para incluir las palabras clave del puesto sin ` +
-    `inventar nada, y ajusta el resumen profesional para enfatizar el ` +
-    `match. Devuelve también un "summary" breve (1-2 frases en español MX) ` +
-    `explicando qué reordenaste o reformulaste para alinear con la vacante.`;
+    `VACANTE (JSON):\n${JSON.stringify(job, null, 2)}\n\n` +
+    `PERFIL DEL CANDIDATO (JSON):\n${JSON.stringify(profile, null, 2)}\n\n` +
+    `Pasos a seguir (mentalmente, no los incluyas en el output):\n` +
+    `1. Lee la vacante e identifica las 5-10 keywords críticas (job title, ` +
+    `skills técnicas, herramientas, dominio de negocio, soft skills).\n` +
+    `2. Lee el CV del candidato e identifica qué experiencias y bullets ` +
+    `tienen overlap con esas keywords.\n` +
+    `3. Reordena: lo más relevante arriba.\n` +
+    `4. Reescribe bullets para que las keywords aparezcan naturalmente — ` +
+    `sin inventar tecnologías que el candidato no usó.\n` +
+    `5. Recorta: omite bullets/experiencias irrelevantes a esta vacante.\n` +
+    `6. Resumen profesional: 3-4 frases laser-focused en por qué este ` +
+    `candidato encaja en ESTA vacante específica (no genérico).\n` +
+    `7. Renderea como HTML A4 ATS-friendly siguiendo las reglas técnicas.\n\n` +
+    `Devuelve JSON con:\n` +
+    `- "html": el documento HTML completo (auto-contenido, sin recursos ` +
+    `externos).\n` +
+    `- "summary": 1-2 frases en español MX explicando qué reordenaste y ` +
+    `qué keywords destacaste de la vacante.`;
 
   const body = {
     systemInstruction: { parts: [{ text: TAILORED_CV_SYSTEM }] },
