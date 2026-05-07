@@ -35,12 +35,16 @@ export const metadata: Metadata = {
 
 const FAQ_ITEMS = [
   {
+    q: "¿En qué se diferencia de AIApply, LazyApply o Sonara?",
+    a: "Esas herramientas postulan automáticamente sin que veas nada. Suena rápido, pero el resultado en la práctica son cartas genéricas idénticas para 700 vacantes y cuentas restringidas: estudios de 2026 reportan que ~23% de los usuarios de auto-apply tienen su cuenta de LinkedIn restringida en los primeros 90 días. Empleo Automático MX hace lo opuesto: 1 carta personalizada por vacante con tu CV real, el botón de enviar lo activas tú, y nunca te van a banear porque cada postulación se ve como una sesión humana normal.",
+  },
+  {
     q: "¿Es legal?",
     a: "Sí. Empleo Automático MX no envía postulaciones sin tu aprobación. Siempre eres tú quien revisa la carta y da el último clic para enviar. No hacemos scraping masivo ni automatizamos envíos sin supervisión humana.",
   },
   {
     q: "¿Qué pasa si los portales bloquean cuentas por bots?",
-    a: "No hay riesgo. La extensión funciona como una ayuda dentro de tu sesión normal en el navegador. Generamos la carta y rellenamos el formulario, pero el botón de enviar solo lo activas tú. Cada portal ve una sesión humana normal. En LinkedIn además aplicamos un límite responsable de 15 cartas al día para proteger tu cuenta.",
+    a: "No hay riesgo. La extensión funciona como una ayuda dentro de tu sesión normal en el navegador. Generamos la carta y rellenamos el formulario, pero el botón de enviar solo lo activas tú. Cada portal ve una sesión humana normal. En LinkedIn e Indeed además aplicamos un límite responsable de 15 cartas al día para proteger tu cuenta.",
   },
   {
     q: "¿Puedo cancelar cuando quiera?",
@@ -232,15 +236,16 @@ export default function LandingPage() {
                 Por SkyBrandMX
               </span>
               <h1 className="mt-5 text-balance text-4xl font-bold tracking-tight text-[color:var(--color-ink)] sm:text-5xl md:text-6xl">
-                Postúlate a más empleos{" "}
+                Postúlate más rápido{" "}
                 <span className="bg-gradient-to-r from-[#70d1c6] to-[#105971] bg-clip-text text-transparent">
-                  en menos tiempo.
+                  sin perder calidad.
                 </span>
               </h1>
               <p className="mx-auto mt-5 max-w-2xl text-pretty text-base leading-relaxed text-[color:var(--color-ink-soft)] sm:text-lg">
-                Copiloto con IA que escribe cartas de presentación
-                personalizadas y llena formularios en OCC, Computrabajo,
-                Bumeran, Indeed y LinkedIn. Tú solo das el último clic.
+                Copiloto con IA que escribe cartas personalizadas y llena
+                formularios en OCC, Computrabajo, Bumeran, LaPieza, Indeed y
+                LinkedIn. Una postulación bien hecha vence a 50 genéricas —
+                tú das el último clic.
               </p>
               <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
                 <CtaLink href="/signup" size="lg">
@@ -416,8 +421,8 @@ export default function LandingPage() {
 
             <div className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
               <FeatureCard
-                title="Humano al volante"
-                description="Nunca enviamos nada sin tu revisión. Tú siempre das el último clic."
+                title="No te van a banear"
+                description="Cada postulación se ve como sesión humana normal. Cero riesgo de que LinkedIn restrinja tu cuenta como pasa con las herramientas que postulan en automático."
                 icon={
                   <svg
                     viewBox="0 0 24 24"
@@ -452,8 +457,8 @@ export default function LandingPage() {
                 }
               />
               <FeatureCard
-                title="Cartas que no son spam"
-                description="La IA usa tu CV contra cada vacante específica. No es una plantilla genérica."
+                title="Cartas que sí abren puertas"
+                description="La IA cruza tu CV con cada vacante específica. Una postulación bien hecha vence a 50 genéricas — y los reclutadores lo notan."
                 icon={
                   <svg
                     viewBox="0 0 24 24"

@@ -1,6 +1,23 @@
 # Empleo Automático MX — por SkyBrandMX
 
-Extensión de Chrome: copiloto con IA para postularte a empleos en México.
+Extensión de Chrome: copiloto con IA para postularte a empleos en México **sin que te baneen**.
+
+## Por qué no es como AIApply / LazyApply / Sonara
+
+Esas herramientas postulan automáticamente sin que veas nada. En la práctica:
+
+- 23% de los usuarios de auto-apply tienen su cuenta de LinkedIn restringida en los primeros 90 días (Growleads, 2026).
+- Las cartas son plantillas idénticas para 700 vacantes — los reclutadores las marcan como spam.
+- Cuando el portal detecta el patrón, baja tu visibilidad en búsquedas o cierra tu cuenta.
+
+**Empleo Automático MX hace lo opuesto:**
+
+- 1 carta personalizada por vacante con tu CV real (no plantillas).
+- Cada postulación se ve como sesión humana normal — los portales no detectan nada anómalo.
+- Tú das el último clic — siempre. Cero envíos automáticos en planes Free/Pro.
+- En LinkedIn e Indeed: límite responsable de 15/día (recomendación industry-standard de seguridad).
+
+**Una postulación bien hecha vence a 50 genéricas.** Los datos lo respaldan: tasas de respuesta de cartas personalizadas son ~5x más altas que plantillas.
 
 ## Estado
 
