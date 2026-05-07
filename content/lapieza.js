@@ -1163,11 +1163,17 @@
       // generates cover letter / Q&A answers, fills them). Skip when there's
       // nothing to fill (CV step, review step) so we don't show a noisy
       // overlay on every step.
+      //
+      // skipCv:true → the chain NEVER triggers our CV generation pipeline
+      // (which opens a print-to-PDF tab, jarring during an automated flow
+      // and the user already has LaPieza's "PRINCIPAL" CV pre-selected).
+      // The FAB still triggers tailored CV generation manually if the
+      // user wants it.
       let hasCover = false, hasQuestions = false;
       try { hasCover = !!findExpressCoverLetterField(); } catch (_) {}
       try { hasQuestions = (scanQuestionFields() || []).length > 0; } catch (_) {}
       if (hasCover || hasQuestions) {
-        try { await onFabClickExpressApply(); } catch (_) {}
+        try { await onFabClickExpressApply({ skipCv: true }); } catch (_) {}
         // runExpressFill ends with overlay.hide() ~1.5s after the final
         // toast. Wait for that to clear before we click Continuar so the
         // user can see what got filled.
@@ -1299,7 +1305,11 @@
   // Express FAB click on /apply/<uuid>. Restore job + draft from session,
   // show progress overlay, fire 3 parallel requests, fill fields as each
   // resolves. See runExpressFill JSDoc for full guarantees.
-  async function onFabClickExpressApply() {
+  //
+  // opts.skipCv (default false) → don't run the CV-generation pipeline.
+  // Used by the quick-apply chain to avoid opening a print-to-PDF tab
+  // mid-flow when LaPieza already has a "PRINCIPAL" CV pre-selected.
+  async function onFabClickExpressApply(opts = {}) {
     const { job: extracted, partial } = extractJob();
     let job = extracted;
     const cached = await restoreJobFromSession();
@@ -1325,7 +1335,7 @@
 
     setFabBusy(true);
     try {
-      await runExpressFill({ job, prewarmedDraft: prewarmed });
+      await runExpressFill({ job, prewarmedDraft: prewarmed, skipCv: !!opts.skipCv });
     } catch (err) {
       console.warn("[EmpleoAutomatico] Express fill threw", err);
       toast(humanizeError(err), "error");
@@ -1807,7 +1817,7 @@
    * @param {Object|null} opts.prewarmedDraft — draft cached from /vacancy/<uuid>,
    *        or null if the user came in cold.
    */
-  async function runExpressFill({ job, prewarmedDraft }) {
+  async function runExpressFill({ job, prewarmedDraft, skipCv = false }) {
     if (!job || !job.title) {
       toast("No tengo la vacante. Abre /vacancy/<id> primero.", "info");
       return;
@@ -1962,6 +1972,15 @@
       });
     })();
     const cvPromise = (async () => {
+      // Quick-apply chain explicitly opts out of CV generation: LaPieza
+      // already has a "PRINCIPAL" CV pre-selected, and opening a
+      // print-to-PDF tab mid-chain breaks the automated flow. Tailored
+      // CV generation is still available via a manual FAB click.
+      if (skipCv) {
+        overlay.markDone("cv", "Usa tu CV principal de LaPieza");
+        status.cv = "skipped";
+        return null;
+      }
       // Step 1 (cover letter / questions): no CV upload field visible.
       // Skip the generation — saves a Gemini call AND a confusing tab open.
       if (!hasCvFileInput) {
@@ -4027,10 +4046,25 @@
   //   - { durationMs } — no action button, custom duration
   // When no third arg: 4s info / 4s success / 4s error.
   function toast(message, variant = "info", action) {
+    // Single-toast policy: clear any previously-shown toasts so we don't
+    // stack on top. All toasts share `position:fixed; left:24px; bottom:24px`,
+    // so multiple visible toasts overlap and become unreadable. Sticky
+    // toasts (the auto-quiz progress ticker) opt out of cleanup via the
+    // .eamx-toast--sticky class so they survive concurrent toast() calls.
+    try {
+      document.querySelectorAll(".eamx-toast:not(.eamx-toast--sticky)").forEach((t) => {
+        try {
+          t.classList.remove("eamx-toast--show");
+          setTimeout(() => { try { t.remove(); } catch (_) {} }, 200);
+        } catch (_) {}
+      });
+    } catch (_) { /* ignore */ }
+
     const el = document.createElement("div");
     const v = variant === "success" ? "eamx-toast--success"
       : variant === "error" ? "eamx-toast--error" : "eamx-toast--info";
     el.className = `eamx-toast ${v}`;
+    if (action && action.sticky === true) el.classList.add("eamx-toast--sticky");
     el.setAttribute("role", "status");
 
     const msgSpan = document.createElement("span");
@@ -4725,7 +4759,9 @@
     if (!quizStickyToast || !document.body.contains(quizStickyToast)) {
       // Use the regular toast() helper for the first call so styling +
       // animation match. Then capture the DOM node for in-place updates.
-      toast(message, variant, { durationMs: 60000 });
+      // sticky:true flags the node with .eamx-toast--sticky so future
+      // toast() calls don't clobber the in-place quiz progress ticker.
+      toast(message, variant, { durationMs: 60000, sticky: true });
       // The toast() helper appends to document.body; grab the most recent
       // .eamx-toast we appended.
       const all = document.querySelectorAll(".eamx-toast");
