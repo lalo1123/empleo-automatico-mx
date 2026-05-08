@@ -999,68 +999,12 @@
     // Clear the flag immediately so a page refresh doesn't re-fire.
     try { Promise.resolve(chrome.storage.session.remove([quickKey, oldKey])).catch(() => {}); } catch (_) {}
 
-    // Branch by flag type:
-    // - autoprewarm flag (legacy) → just pre-warm + toast
-    // - quickapply flag (new chain) → pre-warm + auto-click LaPieza CTAs
-    if (usedKey === oldKey) {
-      try { onFabClickExpressVacancy(); } catch (_) {}
-      return;
-    }
-    // New chain — full quick-apply.
+    // Both flag types funnel through onFabClickExpressVacancy, which now
+    // does prewarm + runVacancyAutoChain (3s countdown + Esc + auto-click
+    // Postularme + auto-confirm location modal + set next-apply flag).
+    // Legacy autoprewarm flag also gets the full chain — anyone who
+    // clicked ⚡ Postular signaled intent for the full automation.
     try { onFabClickExpressVacancy(); } catch (_) {}
-    // 3s countdown with Esc kill switch, then click LaPieza's
-    // "¡Me quiero postular!" button.
-    quickApplyAborted = false;
-    quickApplyEscHandler = (ev) => {
-      if (ev.key === "Escape" || ev.key === "Esc") {
-        quickApplyAborted = true;
-        try { document.removeEventListener("keydown", quickApplyEscHandler, true); } catch (_) {}
-        quickApplyEscHandler = null;
-        toast("Postular cancelado. Continúa manual.", "info");
-      }
-    };
-    try { document.addEventListener("keydown", quickApplyEscHandler, true); } catch (_) {}
-    toast("⚡ Auto-postulando en 3s… (Esc cancela)", "info", { durationMs: 3500 });
-    await new Promise((r) => setTimeout(r, 3000));
-    if (quickApplyAborted) return;
-    // Find LaPieza's apply CTA.
-    const applyBtn = findLaPiezaApplyCTA();
-    if (!applyBtn) {
-      toast("No encontré el botón Postularme. Dale clic tú.", "info");
-      return;
-    }
-    // Set a generic "next /apply/ should auto-fire Express" flag BEFORE
-    // we click — the click triggers SPA navigation to /apply/<uuid>, and
-    // because the apply UUID differs from the /vacante/ slug-id, we can't
-    // re-use the per-id flag. The next-apply flag is consumed by
-    // maybeAutoFireExpressOnApply() on the apply page.
-    try {
-      Promise.resolve(
-        chrome.storage.session.set({
-          "eamx:quickapply:next-apply": { setAt: Date.now() }
-        })
-      ).catch(() => {});
-    } catch (_) {}
-    try { applyBtn.click(); } catch (_) {}
-    // Wait briefly for the location-warning modal to appear, then click
-    // "Sí, continuar con postulación" if visible.
-    for (let i = 0; i < 8; i++) {
-      if (quickApplyAborted) return;
-      await new Promise((r) => setTimeout(r, 350));
-      const continueBtn = findLaPiezaLocationContinueCTA();
-      if (continueBtn) {
-        try { continueBtn.click(); } catch (_) {}
-        break;
-      }
-      // If URL already changed to /apply/, no modal appeared — done.
-      if (isApplyPage()) break;
-    }
-    // Cleanup esc listener — the rest of the chain (Express on /apply/,
-    // auto-quiz on test) is handled independently.
-    try {
-      if (quickApplyEscHandler) document.removeEventListener("keydown", quickApplyEscHandler, true);
-    } catch (_) {}
-    quickApplyEscHandler = null;
   }
 
   // Apply-side handler for the quick-apply chain. Runs on /apply/<uuid>
@@ -1295,11 +1239,74 @@
     }
     lastJob = job;
     persistJobToSession(job);
-    // Fire-and-forget — generation typically takes 6-15s; the user will
-    // navigate to /apply/<uuid> in that window. If they're faster, the
-    // apply-side click will simply re-request.
+    // Fire-and-forget — generation typically takes 6-15s; the auto-chain
+    // below will navigate to /apply/<uuid> in that window. If we get there
+    // before generation finishes, the apply-side handler re-requests.
     prewarmExpressDraft(job);
-    toast("⚡ Listo. Dale 'Postularme' y te lleno todo.", "info", { durationMs: 4000 });
+    // Same auto-chain as the matches-panel ⚡ Postular flow: 3s countdown
+    // (Esc cancels) → auto-click "Me quiero postular" → auto-confirm
+    // location modal → /apply/ chain auto-fires Express + Continuar →
+    // STOP at Finalizar (HITL clic final). Single function shared with
+    // maybeAutoPrewarmFromQuickApply so both entry points behave the same.
+    runVacancyAutoChain();
+  }
+
+  // Shared chain for vacancy → apply transition. Used by both the manual
+  // FAB click and the matches-panel ⚡ Postular click. Pre-warm must be
+  // kicked off BEFORE calling this (so generation overlaps the 3s
+  // countdown). Sets the "next-apply" session flag right before clicking
+  // Postularme so the apply-side chain knows to auto-fire Express.
+  async function runVacancyAutoChain() {
+    quickApplyAborted = false;
+    quickApplyEscHandler = (ev) => {
+      if (ev.key === "Escape" || ev.key === "Esc") {
+        quickApplyAborted = true;
+        try { document.removeEventListener("keydown", quickApplyEscHandler, true); } catch (_) {}
+        quickApplyEscHandler = null;
+        toast("Postular cancelado. Continúa manual.", "info");
+      }
+    };
+    try { document.addEventListener("keydown", quickApplyEscHandler, true); } catch (_) {}
+    toast("⚡ Auto-postulando en 3s… (Esc cancela)", "info", { durationMs: 3500 });
+    await new Promise((r) => setTimeout(r, 3000));
+    if (quickApplyAborted) return;
+
+    const applyBtn = findLaPiezaApplyCTA();
+    if (!applyBtn) {
+      toast("No encontré el botón Postularme. Dale clic tú.", "info");
+      try {
+        if (quickApplyEscHandler) document.removeEventListener("keydown", quickApplyEscHandler, true);
+      } catch (_) {}
+      quickApplyEscHandler = null;
+      return;
+    }
+    // Set the "next-apply" flag BEFORE the click — the click triggers
+    // SPA navigation to /apply/<uuid>, and the apply UUID differs from
+    // the /vacante/ slug-id, so we can't re-use the per-id flag.
+    try {
+      Promise.resolve(
+        chrome.storage.session.set({
+          "eamx:quickapply:next-apply": { setAt: Date.now() }
+        })
+      ).catch(() => {});
+    } catch (_) {}
+    try { applyBtn.click(); } catch (_) {}
+
+    // Wait briefly for the location-warning modal, then click "Sí, continuar".
+    for (let i = 0; i < 8; i++) {
+      if (quickApplyAborted) return;
+      await new Promise((r) => setTimeout(r, 350));
+      const continueBtn = findLaPiezaLocationContinueCTA();
+      if (continueBtn) {
+        try { continueBtn.click(); } catch (_) {}
+        break;
+      }
+      if (isApplyPage()) break;
+    }
+    try {
+      if (quickApplyEscHandler) document.removeEventListener("keydown", quickApplyEscHandler, true);
+    } catch (_) {}
+    quickApplyEscHandler = null;
   }
 
   // Express FAB click on /apply/<uuid>. Restore job + draft from session,
