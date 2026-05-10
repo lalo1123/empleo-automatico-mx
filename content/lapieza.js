@@ -1067,6 +1067,21 @@
   async function chainApplyStepsToFinalize() {
     if (chainInProgress) return;
     chainInProgress = true;
+    try {
+      await chainApplyStepsToFinalizeInner();
+    } finally {
+      // Guarantee cleanup even if the inner loop throws — without this,
+      // a single error trapped chainInProgress=true forever, silently
+      // disabling the FAB on /apply/ for the rest of the session.
+      try {
+        if (quickApplyEscHandler) document.removeEventListener("keydown", quickApplyEscHandler, true);
+      } catch (_) {}
+      quickApplyEscHandler = null;
+      chainInProgress = false;
+    }
+  }
+
+  async function chainApplyStepsToFinalizeInner() {
     quickApplyAborted = false;
     quickApplyEscHandler = (ev) => {
       if (ev.key === "Escape" || ev.key === "Esc") {
@@ -1144,13 +1159,8 @@
       // If neither Continuar nor Finalizar is visible, we'll loop again
       // (the DOM may still be settling after a previous click).
     }
-
-    // Cleanup esc listener + release the in-progress flag.
-    try {
-      if (quickApplyEscHandler) document.removeEventListener("keydown", quickApplyEscHandler, true);
-    } catch (_) {}
-    quickApplyEscHandler = null;
-    chainInProgress = false;
+    // chainApplyStepsToFinalize() wrapper handles esc-listener cleanup
+    // and chainInProgress release in its finally block.
   }
 
   // Heuristic: are we on a quiz step? Quiz steps have multiple visible
@@ -1178,33 +1188,43 @@
 
   // Match LaPieza's apply-flow "Continuar" button (NOT the final submit).
   //
-  // Bug history: previous regex was anchored (^continuar$) and rejected
-  // real LaPieza copy when the button text included icons or trailing
-  // whitespace from nested spans (live test: chain stalled on the CV
-  // step even though "Continuar" was clearly visible on screen).
-  //
-  // New approach: word-boundary match so "Continuar →", "→ Continuar",
-  // "Continuar paso 2", etc. all match. We exclude any candidate whose
-  // text ALSO contains finalize-style words (Finalizar / Enviar /
-  // Aplicar) so we never accidentally click the final submit. We also
-  // exclude abandon/cancel/back buttons.
+  // Bug history:
+  //   1. previous regex was anchored (^continuar$) and rejected
+  //      icon-decorated buttons. Now uses substring match.
+  //   2. live test on /apply/ found TWO "Continuar" buttons in the DOM:
+  //      a hidden 0×0 mobile-menu version (parent .action-postulation)
+  //      and the real visible side-panel button. isVisible() should
+  //      catch the 0×0 case but live test showed the chain stalled on
+  //      the CV step anyway — making the rect check explicit + raising
+  //      the minimum to 10px protects against zero-width race conditions
+  //      during initial render.
   function findApplyFlowContinueBtn() {
     // Substring match (case-insensitive) on a continue-style word.
     const continueRx = /(?:^|[^\p{L}])(continuar|siguiente|next)(?:[^\p{L}]|$)/iu;
     // Anything containing these words is NOT a continue button — it's
     // either final submit (finalizar/enviar/aplicar/postular/submit/apply)
     // or an abandon/cancel/back button we shouldn't click.
-    const blockRx = /finalizar|enviar|submit|aplicar|postular(?:me|se)?|apply|abandonar|cancelar|cerrar|atr[áa]s|back|volver|anterior/i;
+    const blockRx = /finalizar|enviar|submit|aplicar|postular(?:me|se)?|apply|abandonar|cancelar|cerrar|atr[áa]s|back|volver|anterior|regresar/i;
     const candidates = Array.from(document.querySelectorAll("button, a[role=button], input[type=submit]"));
     return candidates.find((el) => {
       try {
         if (el.closest(".eamx-fab, .eamx-panel, .eamx-overlay, .eamx-matches-panel, .eamx-toast, [data-eamx]")) return false;
       } catch (_) { /* ignore */ }
       const t = ((el.textContent || el.value || "")).trim();
-      if (!t || t.length > 80) return false; // sane length cap
+      if (!t || t.length > 80) return false;
       if (!continueRx.test(t)) return false;
       if (blockRx.test(t)) return false;
-      try { return isVisible(el) && !el.disabled; } catch (_) { return false; }
+      if (el.disabled) return false;
+      // Explicit rect check — must be at least 10×10 to be a real button.
+      // This skips the hidden 0×0 mobile-menu Continuar that lives in
+      // .action-postulation alongside the real side-panel button.
+      try {
+        const r = el.getBoundingClientRect();
+        if (r.width < 10 || r.height < 10) return false;
+        const cs = window.getComputedStyle(el);
+        if (cs.display === "none" || cs.visibility === "hidden" || cs.opacity === "0") return false;
+      } catch (_) { return false; }
+      return true;
     }) || null;
   }
 
