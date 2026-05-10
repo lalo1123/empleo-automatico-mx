@@ -1319,16 +1319,24 @@
     } catch (_) {}
     try { applyBtn.click(); } catch (_) {}
 
-    // Wait briefly for the location-warning modal, then click "Sí, continuar".
-    for (let i = 0; i < 8; i++) {
+    // Wait for the location-warning modal to render. LaPieza animates it
+    // in over ~500-2000ms after the Postularme click; live test on
+    // /vacante/data-analyst-...-coca-cola-femsa showed the modal arriving
+    // ~3s in, AFTER our previous 2.8s window timed out.
+    //
+    // New budget: poll every 250ms for up to 10s (40 iterations). If the
+    // user ALREADY moved to /apply/ (modal didn't appear at all because
+    // their profile location matched the vacancy), bail early.
+    for (let i = 0; i < 40; i++) {
       if (quickApplyAborted) return;
-      await new Promise((r) => setTimeout(r, 350));
+      await new Promise((r) => setTimeout(r, 250));
+      // No modal needed if URL already advanced to /apply/.
+      if (isApplyPage()) break;
       const continueBtn = findLaPiezaLocationContinueCTA();
       if (continueBtn) {
         try { continueBtn.click(); } catch (_) {}
         break;
       }
-      if (isApplyPage()) break;
     }
     try {
       if (quickApplyEscHandler) document.removeEventListener("keydown", quickApplyEscHandler, true);
