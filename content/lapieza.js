@@ -970,6 +970,11 @@
   // user clicking the FAB / Postularme themselves.
   let quickApplyAborted = false;
   let quickApplyEscHandler = null;
+  // Re-entrancy guard for chainApplyStepsToFinalize. Prevents the FAB
+  // click handler from re-entering the chain while it's already running
+  // (and prevents the chain from triggering itself via its own internal
+  // calls to onFabClickExpressApply for per-step fill).
+  let chainInProgress = false;
   async function maybeAutoPrewarmFromQuickApply() {
     if (!chrome?.storage?.session) return;
     let id = "";
@@ -1058,7 +1063,10 @@
   //   - Esc during any wait → quickApplyAborted = true, exit
   //   - Page leaves /apply/  → exit (user navigated away)
   //   - 8 iterations         → toast + exit (safety cap)
+  //   - chainInProgress flag prevents concurrent chains from racing
   async function chainApplyStepsToFinalize() {
+    if (chainInProgress) return;
+    chainInProgress = true;
     quickApplyAborted = false;
     quickApplyEscHandler = (ev) => {
       if (ev.key === "Escape" || ev.key === "Esc") {
@@ -1117,7 +1125,9 @@
       try { hasCover = !!findExpressCoverLetterField(); } catch (_) {}
       try { hasQuestions = (scanQuestionFields() || []).length > 0; } catch (_) {}
       if (hasCover || hasQuestions) {
-        try { await onFabClickExpressApply({ skipCv: true }); } catch (_) {}
+        // singleStep:true so onFabClickExpressApply doesn't recurse back
+        // into chainApplyStepsToFinalize (we're already inside it).
+        try { await onFabClickExpressApply({ skipCv: true, singleStep: true }); } catch (_) {}
         // runExpressFill ends with overlay.hide() ~1.5s after the final
         // toast. Wait for that to clear before we click Continuar so the
         // user can see what got filled.
@@ -1135,11 +1145,12 @@
       // (the DOM may still be settling after a previous click).
     }
 
-    // Cleanup esc listener.
+    // Cleanup esc listener + release the in-progress flag.
     try {
       if (quickApplyEscHandler) document.removeEventListener("keydown", quickApplyEscHandler, true);
     } catch (_) {}
     quickApplyEscHandler = null;
+    chainInProgress = false;
   }
 
   // Heuristic: are we on a quiz step? Quiz steps have multiple visible
@@ -1166,17 +1177,33 @@
   }
 
   // Match LaPieza's apply-flow "Continuar" button (NOT the final submit).
-  // Strict text match so we don't grab "Continuar leyendo" or similar
-  // unrelated CTAs. Excludes our own UI by class.
+  //
+  // Bug history: previous regex was anchored (^continuar$) and rejected
+  // real LaPieza copy when the button text included icons or trailing
+  // whitespace from nested spans (live test: chain stalled on the CV
+  // step even though "Continuar" was clearly visible on screen).
+  //
+  // New approach: word-boundary match so "Continuar →", "→ Continuar",
+  // "Continuar paso 2", etc. all match. We exclude any candidate whose
+  // text ALSO contains finalize-style words (Finalizar / Enviar /
+  // Aplicar) so we never accidentally click the final submit. We also
+  // exclude abandon/cancel/back buttons.
   function findApplyFlowContinueBtn() {
-    const rx = /^continuar$|^siguiente$|^next$/i;
-    const candidates = Array.from(document.querySelectorAll("button, a[role=button]"));
+    // Substring match (case-insensitive) on a continue-style word.
+    const continueRx = /(?:^|[^\p{L}])(continuar|siguiente|next)(?:[^\p{L}]|$)/iu;
+    // Anything containing these words is NOT a continue button — it's
+    // either final submit (finalizar/enviar/aplicar/postular/submit/apply)
+    // or an abandon/cancel/back button we shouldn't click.
+    const blockRx = /finalizar|enviar|submit|aplicar|postular(?:me|se)?|apply|abandonar|cancelar|cerrar|atr[áa]s|back|volver|anterior/i;
+    const candidates = Array.from(document.querySelectorAll("button, a[role=button], input[type=submit]"));
     return candidates.find((el) => {
       try {
         if (el.closest(".eamx-fab, .eamx-panel, .eamx-overlay, .eamx-matches-panel, .eamx-toast, [data-eamx]")) return false;
       } catch (_) { /* ignore */ }
-      const t = (el.textContent || "").trim();
-      if (!rx.test(t)) return false;
+      const t = ((el.textContent || el.value || "")).trim();
+      if (!t || t.length > 80) return false; // sane length cap
+      if (!continueRx.test(t)) return false;
+      if (blockRx.test(t)) return false;
       try { return isVisible(el) && !el.disabled; } catch (_) { return false; }
     }) || null;
   }
@@ -1320,34 +1347,48 @@
     const { job: extracted, partial } = extractJob();
     let job = extracted;
     const cached = await restoreJobFromSession();
+    let canFill = true;
     if (cached) {
       job = cached;
     } else if (partial && job.title === "(sin título)" && job.company === "(empresa desconocida)") {
-      // Deep-linked user — no cached context, can't run Express safely.
+      // Deep-linked user — no cached context, can't run Express. We can
+      // still chain forward through Continuar buttons, just without the
+      // tailored cover letter. Tell the user but don't bail.
+      canFill = false;
       toast(
-        "Abre primero la vacante desde LaPieza, así tengo el contexto completo.",
+        "Sin contexto de la vacante; te llevo paso a paso pero sin carta personalizada.",
         "info"
       );
-      return;
-    }
-    lastJob = job;
-    persistJobToSession(job);
-
-    // Pre-warmed draft (if any) lives in chrome.storage.session.
-    const prewarmed = await restoreDraftFromSession();
-    if (prewarmed) {
-      lastDraft = prewarmed;
-      activeDraftId = prewarmed.id || null;
     }
 
-    setFabBusy(true);
-    try {
-      await runExpressFill({ job, prewarmedDraft: prewarmed, skipCv: !!opts.skipCv });
-    } catch (err) {
-      console.warn("[EmpleoAutomatico] Express fill threw", err);
-      toast(humanizeError(err), "error");
-    } finally {
-      setFabBusy(false);
+    if (canFill) {
+      lastJob = job;
+      persistJobToSession(job);
+      // Pre-warmed draft (if any) lives in chrome.storage.session.
+      const prewarmed = await restoreDraftFromSession();
+      if (prewarmed) {
+        lastDraft = prewarmed;
+        activeDraftId = prewarmed.id || null;
+      }
+      setFabBusy(true);
+      try {
+        await runExpressFill({ job, prewarmedDraft: prewarmed, skipCv: !!opts.skipCv });
+      } catch (err) {
+        console.warn("[EmpleoAutomatico] Express fill threw", err);
+        toast(humanizeError(err), "error");
+      } finally {
+        setFabBusy(false);
+      }
+    }
+
+    // After filling the current step (or skipping when no context), chain
+    // forward through Continuar buttons until Finalizar. opts.singleStep
+    // = true is set by chainApplyStepsToFinalize itself when it calls us
+    // for per-step filling — that prevents infinite recursion.
+    if (!opts.singleStep && !chainInProgress) {
+      setTimeout(() => {
+        try { chainApplyStepsToFinalize(); } catch (_) {}
+      }, 800);
     }
   }
 
