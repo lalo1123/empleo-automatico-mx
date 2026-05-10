@@ -1106,6 +1106,20 @@
       if (quickApplyAborted) break;
       if (!isApplyPage()) break;
 
+      // Quiz-warning modal: LaPieza pops a "Toma en cuenta lo siguiente"
+      // dialog before the actual quiz step on vacancies that have a
+      // knowledge test, with two buttons:
+      //   - "Seguir postulándome" (red, primary) → continue to quiz
+      //   - "Guardar vacante y postularme más tarde" (gray) → abandon
+      // Auto-click the primary one to advance to the quiz.
+      const quizWarnBtn = findLaPiezaQuizWarningCTA();
+      if (quizWarnBtn) {
+        try { quizWarnBtn.click(); } catch (_) {}
+        // Give LaPieza a beat to dismiss the modal and render the quiz.
+        await new Promise((r) => setTimeout(r, 800));
+        continue;
+      }
+
       // Quiz step → auto-quiz module handles. Wait for its radios to
       // disappear before we look for Continuar. Cap wait at 90s in case
       // the quiz hangs.
@@ -1255,6 +1269,29 @@
       const t = (el.textContent || "").trim();
       if (!rx.test(t)) return false;
       try { return isVisible(el) && !el.disabled; } catch (_) { return false; }
+    }) || null;
+  }
+
+  // Quiz-warning modal: LaPieza shows "Toma en cuenta lo siguiente —
+  // Para enviar tu postulación, deberás responder algunas preguntas de
+  // conocimiento general" with two buttons:
+  //   - "Seguir postulándome"  (red, primary)  → continue to quiz
+  //   - "Guardar vacante y postularme más tarde"  (gray)  → abandon
+  // We click the primary one to advance the chain. Live test on
+  // /apply/ef92e6ce... (L'Oréal Product Technical Lead) showed this
+  // modal appearing AFTER the cover-letter step, just before the quiz.
+  function findLaPiezaQuizWarningCTA() {
+    const rx = /^seguir\s+postul[áa]ndome$/i;
+    const candidates = Array.from(document.querySelectorAll("button, a[role=button]"));
+    return candidates.find((el) => {
+      const t = (el.textContent || "").trim();
+      if (!rx.test(t)) return false;
+      try {
+        if (!isVisible(el) || el.disabled) return false;
+        const r = el.getBoundingClientRect();
+        if (r.width < 10 || r.height < 10) return false;
+      } catch (_) { return false; }
+      return true;
     }) || null;
   }
 
