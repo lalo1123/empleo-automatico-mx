@@ -4866,7 +4866,19 @@
     }
     if (!cachedProfile) {
       FLOW_TIPS_SHOWN.add("auto-quiz-no-cv");
-      toast("Auto-quiz: sube tu CV en Opciones antes de empezar.", "info", { durationMs: 4500 });
+      // Actionable toast: opens the welcome page (which has the drag-drop
+      // CV uploader) so the user doesn't have to hunt for "Options" in
+      // chrome://extensions. Welcome page auto-advances past completed
+      // steps, so this lands them directly on Step 2 if already logged in.
+      toast("Falta tu CV — súbelo en 30 segundos para que el auto-quiz funcione.", "info", {
+        label: "Subir CV",
+        onClick: () => {
+          try {
+            window.open(chrome.runtime.getURL("welcome/welcome.html"), "_blank", "noopener");
+          } catch (_) { /* ignore */ }
+        },
+        durationMs: 10000
+      });
       return;
     }
     // We have a quiz and the pre-flight passed. Fire the loop.

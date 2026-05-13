@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="es-MX">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bienvenido · Empleo Automático MX</title>
+    <link rel="stylesheet" href="welcome.css" />
+  </head>
+  <body>
+    <!--
+      First-install welcome screen. Auto-opened by background/service-worker.js
+      on chrome.runtime.onInstalled. Goal: get the user from "I just installed
+      this" to "first postulación complete" in under 2 minutes.
+
+      The page is structured as a 3-step setup. Each step is gated:
+        1. Crear cuenta / Iniciar sesión   → unlocks step 2
+        2. Subir CV (drag-drop)            → unlocks step 3
+        3. Postular en un portal           → links to LaPieza/OCC
+
+      State is read from chrome.storage on load (via welcome.js) and steps
+      auto-advance. Users who already completed setup land on step 3.
+    -->
+    <main class="wrap">
+      <!-- ============ Brand header ============================ -->
+      <header class="brand">
+        <div class="brand__mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="40" height="40" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <g stroke="#105971" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2L15 6V14C15 14 15 17 12 17C9 17 9 14 9 14V6L12 2Z" />
+              <path d="M9 11L6 14H9V11Z" fill="#105971" />
+              <path d="M15 11L18 14H15V11Z" fill="#105971" />
+            </g>
+            <g>
+              <path d="M9 17C10.5 20 12 22 12 22C12 22 13.5 20 15 17H9Z" fill="#ff6600" />
+              <path d="M10 17.5C11 19.5 12 21 12 21C12 21 13 19.5 14 17.5H10Z" fill="#ef6f6f" />
+            </g>
+          </svg>
+        </div>
+        <div class="brand__text">
+          <div class="brand__name">Empleo Automático MX</div>
+          <div class="brand__sub">por SkyBrandMX</div>
+        </div>
+        <a class="brand__skip" id="skipToOptions" href="#" title="Configuración avanzada">
+          Opciones avanzadas →
+        </a>
+      </header>
+
+      <!-- ============ Hero ============================ -->
+      <section class="hero">
+        <h1 class="hero__title">
+          Bienvenido. Vamos a postular tu primera vacante
+          <span class="hero__accent"> en 2 minutos.</span>
+        </h1>
+        <p class="hero__sub">
+          Necesitas hacer 2 cosas y ya. Después solo navegas en tu portal favorito
+          y nosotros llenamos todo por ti.
+        </p>
+      </section>
+
+      <!-- ============ Step indicator ============================ -->
+      <ol class="steps" aria-label="Pasos de configuración">
+        <li class="step is-active" data-step="auth">
+          <span class="step__num">1</span>
+          <span class="step__label">Crea tu cuenta</span>
+        </li>
+        <li class="step" data-step="cv">
+          <span class="step__num">2</span>
+          <span class="step__label">Sube tu CV</span>
+        </li>
+        <li class="step" data-step="done">
+          <span class="step__num">3</span>
+          <span class="step__label">Postula</span>
+        </li>
+      </ol>
+
+      <!-- ============ STEP 1: Auth ============================ -->
+      <section class="card" id="card-auth" data-card="auth">
+        <h2 class="card__title">1. Crea tu cuenta</h2>
+        <p class="card__sub">
+          Gratis para empezar. 3 postulaciones al mes sin pagar nada.
+        </p>
+
+        <!-- Primary CTA: opens landing signup -->
+        <a class="btn btn--primary btn--big" id="goSignup" href="#" target="_blank">
+          <span aria-hidden="true">✨</span> Crear cuenta gratis
+        </a>
+
+        <p class="card__or">o si ya tienes cuenta</p>
+
+        <!-- Inline login form ----------------------------------- -->
+        <form class="login" id="loginForm" autocomplete="on" novalidate>
+          <label class="login__field">
+            <span>Correo</span>
+            <input type="email" id="loginEmail" autocomplete="email" required placeholder="tu@correo.com" />
+          </label>
+          <label class="login__field">
+            <span>Contraseña</span>
+            <input type="password" id="loginPassword" autocomplete="current-password" required placeholder="••••••••" />
+          </label>
+          <button class="btn btn--secondary" type="submit" id="loginBtn">
+            Iniciar sesión
+          </button>
+          <div class="login__status" id="loginStatus" role="status" aria-live="polite"></div>
+        </form>
+      </section>
+
+      <!-- ============ STEP 2: CV ============================ -->
+      <section class="card is-locked" id="card-cv" data-card="cv">
+        <h2 class="card__title">2. Sube tu CV</h2>
+        <p class="card__sub">
+          PDF, una vez. Lo usamos para personalizar cada carta y contestar
+          preguntas en los formularios.
+        </p>
+
+        <!-- Drop zone ------------------------------------------- -->
+        <div class="drop" id="dropZone" tabindex="0" role="button" aria-label="Suelta tu CV aquí o haz clic para elegirlo">
+          <input type="file" id="cvInput" accept=".pdf,application/pdf" hidden />
+          <svg class="drop__icon" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M14 3v5h5" />
+            <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h9l5 5v11a2 2 0 01-2 2z" />
+            <path d="M12 18v-6M9 15l3-3 3 3" />
+          </svg>
+          <div class="drop__title">Arrastra tu CV aquí</div>
+          <div class="drop__sub">o haz clic para elegirlo · PDF, máx 5 MB</div>
+        </div>
+
+        <div class="cv-progress" id="cvProgress" hidden>
+          <div class="cv-progress__bar"><span id="cvProgressFill"></span></div>
+          <div class="cv-progress__text" id="cvProgressText">Leyendo PDF…</div>
+        </div>
+
+        <div class="cv-result" id="cvResult" hidden>
+          <span class="cv-result__icon" aria-hidden="true">✓</span>
+          <div>
+            <div class="cv-result__title">CV cargado y analizado</div>
+            <div class="cv-result__sub" id="cvResultSub">Tu perfil está listo</div>
+          </div>
+        </div>
+
+        <div class="cv-error" id="cvError" hidden role="alert"></div>
+      </section>
+
+      <!-- ============ STEP 3: Done ============================ -->
+      <section class="card is-locked" id="card-done" data-card="done">
+        <h2 class="card__title">3. ¡Listo! Ahora a postular</h2>
+        <p class="card__sub">
+          Abre cualquiera de estos portales. Cuando veas una vacante que te guste,
+          dale clic al botón <strong>⚡ Postular</strong> y nosotros hacemos todo.
+        </p>
+
+        <div class="portals">
+          <a class="portal" href="https://lapieza.io/vacantes" target="_blank" rel="noopener">
+            <span class="portal__name">LaPieza</span>
+            <span class="portal__hint">Mejores matches + ⚡ Postular</span>
+          </a>
+          <a class="portal" href="https://www.occ.com.mx/empleos" target="_blank" rel="noopener">
+            <span class="portal__name">OCC</span>
+            <span class="portal__hint">El más grande de México</span>
+          </a>
+          <a class="portal" href="https://www.computrabajo.com.mx/ofertas-de-trabajo/" target="_blank" rel="noopener">
+            <span class="portal__name">Computrabajo</span>
+            <span class="portal__hint">Mucha variedad regional</span>
+          </a>
+          <a class="portal" href="https://mx.indeed.com/jobs" target="_blank" rel="noopener">
+            <span class="portal__name">Indeed</span>
+            <span class="portal__hint">Multinacionales</span>
+          </a>
+        </div>
+
+        <p class="done-tip">
+          <strong>Tip:</strong> Tú siempre das el clic final. La extensión NUNCA
+          envía una postulación sin tu aprobación.
+        </p>
+      </section>
+
+      <!-- ============ Footer ============================ -->
+      <footer class="foot">
+        <span>¿Dudas? <a href="https://empleo.skybrandmx.com/" target="_blank" rel="noopener">empleo.skybrandmx.com</a></span>
+      </footer>
+    </main>
+
+    <!-- pdf.js for client-side PDF text extraction (same setup as options.html). -->
+    <script src="../vendor/pdf.min.js" onerror="window.__pdfScriptMissing = true"></script>
+    <script type="module" src="welcome.js"></script>
+  </body>
+</html>

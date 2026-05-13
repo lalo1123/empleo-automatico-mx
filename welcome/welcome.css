@@ -1,0 +1,476 @@
+/* =============================================================================
+ * welcome.css
+ * Standalone first-install onboarding screen. Tokens duplicated from
+ * options.css (we deliberately don't import options.css to keep this page
+ * lightweight and shippable independently).
+ * ============================================================================= */
+
+:root {
+  /* Brand tokens (mirror options.css). */
+  --c-brand-50: #ecfaf7;
+  --c-brand-100: #d2f3ec;
+  --c-brand-200: #a8e6da;
+  --c-brand-400: #70d1c6;
+  --c-brand-500: #4ab3a9;
+  --c-brand-600: #1f9f95;
+  --c-brand-700: #137e7a;
+  --c-brand-800: #105971;
+  --c-brand-900: #0a3a4d;
+
+  --c-ink: #0f1d2c;
+  --c-ink-soft: #334155;
+  --c-ink-muted: #64748b;
+  --c-surface: #ffffff;
+  --c-surface-soft: #f8fafc;
+  --c-border: #e2e8f0;
+  --c-border-strong: #cbd5e1;
+
+  --c-success: #137e7a;
+  --c-success-soft: #ecfaf7;
+  --c-success-border: #a8e6da;
+  --c-danger: #b91c1c;
+  --c-danger-soft: #fef2f2;
+  --c-danger-border: #fecaca;
+
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-xl: 18px;
+
+  --shadow-soft: 0 1px 2px rgba(15, 23, 42, 0.04), 0 4px 12px -2px rgba(15, 23, 42, 0.06);
+  --shadow-brand: 0 8px 24px -8px rgba(16, 89, 113, 0.35);
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  background: linear-gradient(180deg, var(--c-brand-50) 0%, var(--c-surface) 320px);
+  color: var(--c-ink);
+  font: 15px/1.5 var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.wrap {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 32px 24px 64px;
+}
+
+/* =============================================================================
+ * Brand header
+ * ============================================================================= */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 32px;
+}
+.brand__mark {
+  flex: none;
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-soft);
+}
+.brand__text { flex: 1; }
+.brand__name {
+  font-weight: 700;
+  font-size: 17px;
+  letter-spacing: -0.01em;
+}
+.brand__sub {
+  font-size: 12px;
+  color: var(--c-ink-muted);
+}
+.brand__skip {
+  font-size: 13px;
+  color: var(--c-ink-muted);
+  text-decoration: none;
+  padding: 6px 10px;
+  border-radius: var(--r-sm);
+  transition: background 150ms ease, color 150ms ease;
+}
+.brand__skip:hover {
+  background: var(--c-surface-soft);
+  color: var(--c-ink-soft);
+}
+
+/* =============================================================================
+ * Hero
+ * ============================================================================= */
+.hero { margin-bottom: 32px; }
+.hero__title {
+  margin: 0 0 12px;
+  font-size: 32px;
+  line-height: 1.15;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.hero__accent {
+  background: linear-gradient(90deg, var(--c-brand-400), var(--c-brand-800));
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+}
+.hero__sub {
+  margin: 0;
+  font-size: 16px;
+  color: var(--c-ink-soft);
+  max-width: 560px;
+}
+
+/* =============================================================================
+ * Step indicator (horizontal pill row)
+ * ============================================================================= */
+.steps {
+  list-style: none;
+  margin: 0 0 28px;
+  padding: 0;
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+.step {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: var(--r-md);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  font-size: 13px;
+  color: var(--c-ink-muted);
+  transition: all 200ms ease;
+}
+.step__num {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--c-surface-soft);
+  border: 1px solid var(--c-border);
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--c-ink-muted);
+  transition: all 200ms ease;
+}
+.step__label { font-weight: 500; }
+.step.is-active {
+  background: var(--c-brand-50);
+  border-color: var(--c-brand-200);
+  color: var(--c-brand-800);
+}
+.step.is-active .step__num {
+  background: var(--c-brand-700);
+  border-color: var(--c-brand-700);
+  color: #fff;
+}
+.step.is-done {
+  background: var(--c-success-soft);
+  border-color: var(--c-success-border);
+  color: var(--c-success);
+}
+.step.is-done .step__num {
+  background: var(--c-success);
+  border-color: var(--c-success);
+  color: #fff;
+}
+.step.is-done .step__num::before {
+  content: "✓";
+  font-size: 14px;
+  line-height: 1;
+}
+.step.is-done .step__num > * { display: none; }
+
+/* =============================================================================
+ * Card (one per step)
+ * ============================================================================= */
+.card {
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-xl);
+  padding: 28px;
+  margin-bottom: 16px;
+  box-shadow: var(--shadow-soft);
+  transition: opacity 200ms ease, transform 200ms ease;
+}
+.card.is-locked {
+  opacity: 0.45;
+  pointer-events: none;
+  transform: translateY(2px);
+}
+.card.is-done {
+  border-color: var(--c-success-border);
+  background: linear-gradient(180deg, var(--c-success-soft), #fff 80px);
+}
+.card__title {
+  margin: 0 0 6px;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.card__sub {
+  margin: 0 0 20px;
+  color: var(--c-ink-soft);
+  font-size: 14px;
+}
+.card__or {
+  text-align: center;
+  margin: 16px 0;
+  color: var(--c-ink-muted);
+  font-size: 13px;
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+}
+
+/* =============================================================================
+ * Buttons
+ * ============================================================================= */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 16px;
+  font: 600 14px var(--font-sans);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  border: 1px solid transparent;
+  text-decoration: none;
+  transition: all 150ms ease;
+}
+.btn--big {
+  width: 100%;
+  padding: 14px 20px;
+  font-size: 16px;
+}
+.btn--primary {
+  background: linear-gradient(135deg, var(--c-brand-600) 0%, var(--c-brand-800) 100%);
+  color: #fff;
+  box-shadow: var(--shadow-brand);
+}
+.btn--primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 30px -8px rgba(16, 89, 113, 0.45);
+}
+.btn--secondary {
+  background: var(--c-surface);
+  color: var(--c-brand-800);
+  border-color: var(--c-brand-200);
+}
+.btn--secondary:hover {
+  background: var(--c-brand-50);
+  border-color: var(--c-brand-400);
+}
+.btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+/* =============================================================================
+ * Inline login form
+ * ============================================================================= */
+.login {
+  display: grid;
+  gap: 12px;
+}
+.login__field {
+  display: grid;
+  gap: 4px;
+}
+.login__field > span {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--c-ink-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.login__field input {
+  padding: 10px 12px;
+  font: 14px var(--font-sans);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  background: var(--c-surface);
+  color: var(--c-ink);
+}
+.login__field input:focus {
+  outline: none;
+  border-color: var(--c-brand-400);
+  box-shadow: 0 0 0 3px var(--c-brand-100);
+}
+.login__status {
+  min-height: 18px;
+  font-size: 13px;
+}
+.login__status.is-error { color: var(--c-danger); }
+.login__status.is-ok { color: var(--c-success); }
+
+/* =============================================================================
+ * Drop zone (CV upload)
+ * ============================================================================= */
+.drop {
+  border: 2px dashed var(--c-border-strong);
+  border-radius: var(--r-lg);
+  padding: 40px 24px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 200ms ease;
+  background: var(--c-surface-soft);
+}
+.drop:hover, .drop:focus-visible, .drop.is-dragover {
+  border-color: var(--c-brand-400);
+  background: var(--c-brand-50);
+  outline: none;
+}
+.drop__icon {
+  color: var(--c-brand-700);
+  margin-bottom: 12px;
+}
+.drop__title {
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.drop__sub {
+  font-size: 13px;
+  color: var(--c-ink-muted);
+}
+
+.cv-progress {
+  margin-top: 16px;
+}
+.cv-progress__bar {
+  height: 6px;
+  background: var(--c-surface-soft);
+  border-radius: 999px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+.cv-progress__bar span {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: linear-gradient(90deg, var(--c-brand-400), var(--c-brand-700));
+  transition: width 300ms ease;
+}
+.cv-progress__text {
+  font-size: 13px;
+  color: var(--c-ink-soft);
+}
+
+.cv-result {
+  margin-top: 16px;
+  padding: 14px 16px;
+  background: var(--c-success-soft);
+  border: 1px solid var(--c-success-border);
+  border-radius: var(--r-md);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.cv-result__icon {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--c-success);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+}
+.cv-result__title { font-weight: 600; }
+.cv-result__sub {
+  font-size: 13px;
+  color: var(--c-ink-soft);
+}
+
+.cv-error {
+  margin-top: 16px;
+  padding: 12px 16px;
+  background: var(--c-danger-soft);
+  border: 1px solid var(--c-danger-border);
+  border-radius: var(--r-md);
+  color: var(--c-danger);
+  font-size: 13px;
+}
+
+/* =============================================================================
+ * Portal grid (Step 3)
+ * ============================================================================= */
+.portals {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.portal {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  text-decoration: none;
+  background: var(--c-surface);
+  transition: all 150ms ease;
+}
+.portal:hover {
+  border-color: var(--c-brand-400);
+  background: var(--c-brand-50);
+  transform: translateY(-1px);
+}
+.portal__name {
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--c-ink);
+}
+.portal__hint {
+  font-size: 12px;
+  color: var(--c-ink-muted);
+}
+
+.done-tip {
+  margin: 0;
+  padding: 14px 16px;
+  background: var(--c-brand-50);
+  border: 1px solid var(--c-brand-200);
+  border-radius: var(--r-md);
+  font-size: 13px;
+  color: var(--c-brand-900);
+}
+
+/* =============================================================================
+ * Footer
+ * ============================================================================= */
+.foot {
+  margin-top: 32px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--c-ink-muted);
+}
+.foot a {
+  color: var(--c-brand-700);
+  text-decoration: none;
+}
+.foot a:hover { text-decoration: underline; }
+
+/* =============================================================================
+ * Responsive
+ * ============================================================================= */
+@media (max-width: 540px) {
+  .wrap { padding: 20px 16px 48px; }
+  .hero__title { font-size: 26px; }
+  .steps { flex-direction: column; }
+  .step { flex: none; }
+  .card { padding: 20px; }
+  .brand__skip { display: none; }
+}

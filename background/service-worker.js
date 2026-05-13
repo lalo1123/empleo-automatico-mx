@@ -680,18 +680,31 @@ onMessage(async (msg) => {
 // First-install UX
 // ---------------------------------------------------------------------------
 
-chrome.runtime.onInstalled.addListener(async () => {
+chrome.runtime.onInstalled.addListener(async (details) => {
   try {
     const [profile, loggedIn] = await Promise.all([
       storage.getProfile(),
       auth.isLoggedIn()
     ]);
-    if (!loggedIn || !profile) {
-      if (chrome.runtime.openOptionsPage) {
+    // Fresh install or user is not fully set up → open the welcome wizard.
+    // The welcome page auto-advances based on auth + profile state, so
+    // users returning to the page mid-setup pick up where they left off.
+    //
+    // For chrome.runtime.onInstalled "update" events we DON'T open the
+    // welcome page (the user is already a customer and doesn't need the
+    // intro). Only "install" + missing setup triggers the open.
+    const isFreshInstall = details && details.reason === "install";
+    const setupIncomplete = !loggedIn || !profile;
+    if (isFreshInstall || setupIncomplete) {
+      const welcomeUrl = chrome.runtime.getURL("welcome/welcome.html");
+      if (chrome.tabs && chrome.tabs.create) {
+        chrome.tabs.create({ url: welcomeUrl });
+      } else if (chrome.runtime.openOptionsPage) {
         chrome.runtime.openOptionsPage();
       }
     }
   } catch (_) {
-    // If storage fails here, just do nothing. The user can open Options manually.
+    // If storage fails here, just do nothing. The user can open the
+    // welcome page from the extension's action menu.
   }
 });
