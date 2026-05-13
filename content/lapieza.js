@@ -4846,11 +4846,30 @@
    */
   function maybeStartAutoQuizLoop() {
     if (quizLoopActive) return;
+    // FLOW_TIPS_SHOWN persists the per-page "we already told the user" state.
+    // Without it, every MutationObserver tick re-fires runAutoQuizLoop, the
+    // no-CV / no-job pre-flight bails again, and we re-toast — making the
+    // bottom-left toast appear to flicker rapidly. FLOW_TIPS_SHOWN is
+    // cleared on SPA URL change (see runFlowDetectors callers), so a new
+    // /apply/ visit gets a fresh chance to show the tip.
+    if (FLOW_TIPS_SHOWN.has("auto-quiz-no-cv") || FLOW_TIPS_SHOWN.has("auto-quiz-no-job")) return;
     const state = detectQuizQuestion();
     if (!state) return;
-    // We have a quiz. Fire the loop (async, non-blocking). The loop itself
-    // sets quizLoopActive=true on entry so subsequent observer ticks bail
-    // here.
+    // Pre-flight BEFORE setting quizLoopActive so the flag pattern reflects
+    // reality: if we never actually entered the loop, quizLoopActive stays
+    // false (it was already false). The user-visible toast is shown ONCE
+    // per page via FLOW_TIPS_SHOWN above.
+    if (!lastJob) {
+      FLOW_TIPS_SHOWN.add("auto-quiz-no-job");
+      toast("Auto-quiz: abre la vacante primero para que la IA la lea.", "info", { durationMs: 4500 });
+      return;
+    }
+    if (!cachedProfile) {
+      FLOW_TIPS_SHOWN.add("auto-quiz-no-cv");
+      toast("Auto-quiz: sube tu CV en Opciones antes de empezar.", "info", { durationMs: 4500 });
+      return;
+    }
+    // We have a quiz and the pre-flight passed. Fire the loop.
     quizLoopActive = true;
     quizLoopAborted = false;
     quizLastCounter = null;
@@ -5002,18 +5021,18 @@
    *   - Stall (3 polls without the counter advancing)
    *   - No more quiz container detected (we cleared the form)
    */
+  // Caller contract: maybeStartAutoQuizLoop guarantees lastJob +
+  // cachedProfile are set before invoking. The defensive bails below are
+  // kept as a safety net for any future direct caller but no longer fire
+  // the user-facing toast (caller owns that to avoid the flicker bug
+  // where every observer tick re-fired the no-CV toast — fixed in
+  // maybeStartAutoQuizLoop via FLOW_TIPS_SHOWN dedupe).
   async function runAutoQuizLoop() {
     // Pre-flight: lastJob + cachedProfile. The Express flow on /vacancy/<uuid>
     // sets both; if we got here without them the apply-side cache restore
     // didn't fire. Bail with an actionable toast.
-    if (!lastJob) {
-      toast("Auto-quiz: abre la vacante primero para que la IA la lea.", "info", { durationMs: 4500 });
-      return;
-    }
-    if (!cachedProfile) {
-      toast("Auto-quiz: sube tu CV en Opciones antes de empezar.", "info", { durationMs: 4500 });
-      return;
-    }
+    if (!lastJob) return;
+    if (!cachedProfile) return;
     attachQuizKillSwitches();
 
     let answeredOk = 0;
