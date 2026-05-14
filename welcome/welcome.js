@@ -29,6 +29,10 @@ const cardAuth = $("#card-auth");
 const cardCv = $("#card-cv");
 const cardDone = $("#card-done");
 
+const authPending = $("#authPending");
+const authDone = $("#authDone");
+const authDoneEmail = $("#authDoneEmail");
+const logoutBtn = $("#logoutBtn");
 const goSignup = $("#goSignup");
 const loginForm = $("#loginForm");
 const loginEmail = $("#loginEmail");
@@ -117,7 +121,11 @@ async function refreshState() {
     new Promise((res) => chrome.storage.local.get([STORAGE_KEYS.PROFILE], res))
   ]);
 
-  const isLoggedIn = !!(authRes && authRes.ok);
+  // TEST_AUTH returns { ok: true } even when not logged in (the call
+  // succeeded; the auth state is in `loggedIn`). Only treat as logged in
+  // when BOTH ok AND loggedIn are true.
+  const isLoggedIn = !!(authRes && authRes.ok && authRes.loggedIn);
+  const userEmail = (authRes && authRes.user && authRes.user.email) || "";
   const profile = storage && storage[STORAGE_KEYS.PROFILE];
   const hasCv = !!(profile && (profile.rawText || (profile.experiences && profile.experiences.length)));
 
@@ -130,8 +138,13 @@ async function refreshState() {
   if (cvError) cvError.hidden = true;
   if (dropZone) dropZone.hidden = false;
 
-  // Step indicator + card locking.
+  // Swap Step 1 between "show login form" and "show success card with
+  // sign-out link". Without this both states stack and the user sees
+  // the password input below "✓ Sesión iniciada", which they read as
+  // "I still need to log in again".
   if (!isLoggedIn) {
+    if (authPending) authPending.hidden = false;
+    if (authDone) authDone.hidden = true;
     setStep("auth", "active");
     setStep("cv", "locked");
     setStep("done", "locked");
@@ -140,6 +153,9 @@ async function refreshState() {
     setCardLocked(cardDone, true);
     return;
   }
+  if (authPending) authPending.hidden = true;
+  if (authDone) authDone.hidden = false;
+  if (authDoneEmail) authDoneEmail.textContent = userEmail || "Tu sesión está activa";
   setStep("auth", "done");
   setCardDone(cardAuth, true);
   setCardLocked(cardAuth, false);
@@ -181,6 +197,21 @@ goSignup.addEventListener("click", (ev) => {
   // welcome page stays anchored as their setup checklist.
   // Nothing else to do — default <a target="_blank"> behavior.
 });
+
+// "Cerrar sesión" inside the auth success card. Fire-and-forget LOGOUT
+// message — refreshState() picks up the new state via the storage
+// onChanged listener and reverts Step 1 to the login form.
+if (logoutBtn) {
+  logoutBtn.addEventListener("click", async (ev) => {
+    ev.preventDefault();
+    logoutBtn.disabled = true;
+    try {
+      await sendMessage({ type: MESSAGE_TYPES.LOGOUT });
+    } catch (_) { /* ignore */ }
+    logoutBtn.disabled = false;
+    await refreshState();
+  });
+}
 
 loginForm.addEventListener("submit", async (ev) => {
   ev.preventDefault();

@@ -75,33 +75,51 @@
 
       <!-- ============ STEP 1: Auth ============================ -->
       <section class="card" id="card-auth" data-card="auth">
-        <h2 class="card__title">1. Crea tu cuenta</h2>
-        <p class="card__sub">
-          Gratis para empezar. 3 postulaciones al mes sin pagar nada.
-        </p>
+        <!-- Pre-login state: signup CTA + inline login form. Hidden via
+             JS when refreshState() detects a valid session. -->
+        <div id="authPending">
+          <h2 class="card__title">1. Crea tu cuenta</h2>
+          <p class="card__sub">
+            Gratis para empezar. 3 postulaciones al mes sin pagar nada.
+          </p>
 
-        <!-- Primary CTA: opens landing signup -->
-        <a class="btn btn--primary btn--big" id="goSignup" href="#" target="_blank">
-          <span aria-hidden="true">✨</span> Crear cuenta gratis
-        </a>
+          <a class="btn btn--primary btn--big" id="goSignup" href="#" target="_blank">
+            <span aria-hidden="true">✨</span> Crear cuenta gratis
+          </a>
 
-        <p class="card__or">o si ya tienes cuenta</p>
+          <p class="card__or">o si ya tienes cuenta</p>
 
-        <!-- Inline login form ----------------------------------- -->
-        <form class="login" id="loginForm" autocomplete="on" novalidate>
-          <label class="login__field">
-            <span>Correo</span>
-            <input type="email" id="loginEmail" autocomplete="email" required placeholder="tu@correo.com" />
-          </label>
-          <label class="login__field">
-            <span>Contraseña</span>
-            <input type="password" id="loginPassword" autocomplete="current-password" required placeholder="••••••••" />
-          </label>
-          <button class="btn btn--secondary" type="submit" id="loginBtn">
-            Iniciar sesión
-          </button>
-          <div class="login__status" id="loginStatus" role="status" aria-live="polite"></div>
-        </form>
+          <form class="login" id="loginForm" autocomplete="on" novalidate>
+            <label class="login__field">
+              <span>Correo</span>
+              <input type="email" id="loginEmail" autocomplete="email" required placeholder="tu@correo.com" />
+            </label>
+            <label class="login__field">
+              <span>Contraseña</span>
+              <input type="password" id="loginPassword" autocomplete="current-password" required placeholder="••••••••" />
+            </label>
+            <button class="btn btn--secondary" type="submit" id="loginBtn">
+              Iniciar sesión
+            </button>
+            <div class="login__status" id="loginStatus" role="status" aria-live="polite"></div>
+          </form>
+        </div>
+
+        <!-- Logged-in state: success card + sign-out link. Shown when
+             refreshState() detects an active session. -->
+        <div id="authDone" hidden>
+          <h2 class="card__title">1. Tu cuenta</h2>
+          <div class="cv-result">
+            <span class="cv-result__icon" aria-hidden="true">✓</span>
+            <div class="cv-result__body">
+              <div class="cv-result__title">Sesión iniciada</div>
+              <div class="cv-result__sub" id="authDoneEmail">—</div>
+            </div>
+            <button type="button" class="cv-result__replace" id="logoutBtn">
+              Cerrar sesión
+            </button>
+          </div>
+        </div>
       </section>
 
       <!-- ============ STEP 2: CV ============================ -->
