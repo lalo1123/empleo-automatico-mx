@@ -438,16 +438,6 @@ html, body {
   color: var(--c-ink-muted);
 }
 
-.done-tip {
-  margin: 0;
-  padding: 14px 16px;
-  background: var(--c-brand-50);
-  border: 1px solid var(--c-brand-200);
-  border-radius: var(--r-md);
-  font-size: 13px;
-  color: var(--c-brand-900);
-}
-
 /* =============================================================================
  * Footer
  * ============================================================================= */
