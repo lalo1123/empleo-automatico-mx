@@ -150,8 +150,8 @@ export default function TermsPage() {
             </h2>
             <p className="mt-3">
               El Servicio ofrece un plan <strong>Gratis</strong> (3 postulaciones
-              al mes) y planes de pago <strong>Pro</strong> ($199 MXN/mes) y{" "}
-              <strong>Premium</strong> ($399 MXN/mes). Hay también opciones
+              al mes) y planes de pago <strong>Pro</strong> ($299 MXN/mes) y{" "}
+              <strong>Premium</strong> ($499 MXN/mes). Hay también opciones
               anuales con descuento. Los precios están expresados en pesos
               mexicanos (MXN) e incluyen el IVA aplicable.
             </p>

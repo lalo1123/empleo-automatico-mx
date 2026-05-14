@@ -74,10 +74,10 @@ curl http://localhost:8787/healthz
 
 1. Conekta dashboard -> **Planes -> Nuevo plan**.
 2. Crea 4 planes (todos MXN, recurring):
-   - **Pro mensual**: $199 MXN, intervalo `month`.
-   - **Pro anual**: $1,990 MXN, intervalo `year`.
-   - **Premium mensual**: $399 MXN, intervalo `month`.
-   - **Premium anual**: $3,990 MXN, intervalo `year`.
+   - **Pro mensual**: $299 MXN, intervalo `month`.
+   - **Pro anual**: $2,990 MXN, intervalo `year`.
+   - **Premium mensual**: $499 MXN, intervalo `month`.
+   - **Premium anual**: $4,990 MXN, intervalo `year`.
 3. Copia el `plan_id` de cada uno y pegalos en las env vars correspondientes.
 
 ## 6. Probar localmente con Docker

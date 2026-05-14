@@ -10,6 +10,18 @@ export interface PlanDefinition {
   name: string;
   monthlyLimit: number;   // -1 means unlimited
   softCap: number;        // Hard ceiling to protect against abuse, even on unlimited.
+  /**
+   * Daily cap — protects against same-day burst usage that could blow our
+   * Gemini cost budget on the "unlimited" plan. Free/Pro typically use
+   * their monthlyLimit as the effective ceiling; Premium needs a per-day
+   * brake because monthlyLimit is high (500) and 100 postulaciones in a
+   * single day would push margin below 30%.
+   *
+   * -1 means no daily cap (defaults to monthlyLimit / day-of-month or
+   * effectively infinite for the free/pro plans where monthlyLimit
+   * already caps daily implicitly).
+   */
+  dailyLimit: number;
   priceMxn: {
     monthly: number;
     yearly: number;
@@ -22,6 +34,7 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     name: "Gratis",
     monthlyLimit: 3,
     softCap: 3,
+    dailyLimit: -1,
     priceMxn: { monthly: 0, yearly: 0 }
   },
   pro: {
@@ -29,14 +42,19 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     name: "Pro",
     monthlyLimit: 100,
     softCap: 100,
-    priceMxn: { monthly: 199, yearly: 1990 }
+    dailyLimit: -1,   // monthlyLimit/100 effectively caps daily
+    priceMxn: { monthly: 299, yearly: 2990 }
   },
   premium: {
     id: "premium",
     name: "Premium",
     monthlyLimit: 500,    // Spec says "unlimited", protected by soft cap.
     softCap: 500,
-    priceMxn: { monthly: 399, yearly: 3990 }
+    // 30/día × 30 días = 900 absolute max, but the monthly soft cap of
+    // 500 binds first. The daily cap stops same-day bursts (e.g. user
+    // running 200 postulaciones in 2h) that would slam the Gemini budget.
+    dailyLimit: 30,
+    priceMxn: { monthly: 499, yearly: 4990 }
   }
 };
 

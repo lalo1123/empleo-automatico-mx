@@ -25,10 +25,10 @@
 
 ### Economía unitaria
 
-- Costo variable por postulación (Gemini Flash): **~$0.002 USD** (~$0.04 MXN)
-- Costo fijo infra (estimado escalando a 1000 usuarios): ~$10 USD/mes (Cloudflare Workers free tier + D1 + Vercel hobby)
-- Pro @ 100 post/mes = $0.20 USD costo variable → precio $199 MXN (~$10 USD) → **margen ~98%**
-- Premium @ 500 post/mes real usage = $1.00 USD costo → precio $399 MXN (~$20 USD) → **margen ~95%**
+- Costo variable por postulación completa (cover + CV optimizado + Q&A + auto-quiz): **~$0.019 USD** (~$0.38 MXN)
+- Costo fijo infra (Hostinger VPS via Dokploy): ~$15 USD/mes
+- Pro @ 100 post/mes = $1.90 USD costo variable → precio $299 MXN (~$15 USD) → **margen ~77% neto** (después de Conekta 5%)
+- Premium @ 500 post/mes (soft cap, 30/día) = $9.50 USD costo → precio $499 MXN (~$25 USD) → **margen ~64% neto**
 
 ## Stack técnico (decidido por director — no cambiar sin discutir)
 
@@ -307,5 +307,5 @@ CREATE INDEX idx_sessions_user ON sessions(user_id);
 - Cada agente tiene un scope claro (backend, landing, extension refactor). **No pisar trabajo de otro agente.**
 - **Fuente de verdad de contrato API**: este archivo.
 - **Lenguaje UI**: español MX siempre. Código y comentarios en inglés.
-- **Moneda**: MXN siempre en la UI ("$199 MXN"). No usar símbolo $ solo porque puede confundir con USD.
+- **Moneda**: MXN siempre en la UI ("$299 MXN"). No usar símbolo $ solo porque puede confundir con USD.
 - **Not before agreed**: no cambiar precios, nombre del producto, marca, ni stack sin avisar al director.

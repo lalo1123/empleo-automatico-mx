@@ -22,7 +22,7 @@ export const DEFAULT_TITLE =
 // Default meta description. Kept under 160 chars and naturally includes:
 // "buscar empleo", "postularte", the 6 portals, "IA", price anchor.
 export const DEFAULT_DESCRIPTION =
-  "Copiloto con IA para buscar empleo en México. Postúlate en OCC, Computrabajo, Bumeran, LaPieza, Indeed y LinkedIn con cartas IA. Desde $199 MXN.";
+  "Copiloto con IA para buscar empleo en México. Postúlate en OCC, Computrabajo, Bumeran, LaPieza, Indeed y LinkedIn con cartas IA. Desde $299 MXN.";
 
 // Target keyword set, high-intent for the Mexican job market. Google ignores
 // the meta keywords tag but Next's Metadata type accepts it and some crawlers

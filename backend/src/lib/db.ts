@@ -471,3 +471,26 @@ export function incrementUsage(userId: string, yearMonth: string): number {
     .run(userId, yearMonth);
   return getUsageCount(userId, yearMonth);
 }
+
+// DAILY USAGE ---------------------------------------------------------------
+// Per-day counter (parallel to usage_monthly). See lib/plans.ts dailyLimit
+// docs and migration 0004_usage_daily.sql for rationale.
+
+export function getDailyUsageCount(userId: string, date: string): number {
+  const stmt = getDb().prepare<[string, string], { count: number }>(
+    "SELECT count FROM usage_daily WHERE user_id = ? AND date = ? LIMIT 1"
+  );
+  return stmt.get(userId, date)?.count ?? 0;
+}
+
+export function incrementDailyUsage(userId: string, date: string): number {
+  getDb()
+    .prepare(
+      `INSERT INTO usage_daily (user_id, date, count)
+       VALUES (?, ?, 1)
+       ON CONFLICT(user_id, date)
+       DO UPDATE SET count = count + 1`
+    )
+    .run(userId, date);
+  return getDailyUsageCount(userId, date);
+}

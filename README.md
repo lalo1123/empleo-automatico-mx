@@ -36,11 +36,11 @@ MVP comercial vivo. Soporta **6 portales mexicanos**: OCC Mundial, Computrabajo,
 
 ## Planes
 
-| Plan     | Precio (MXN/mes) | Postulaciones/mes |
-|----------|------------------|-------------------|
-| Gratis   | $0               | 3                 |
-| Pro      | $199             | 100               |
-| Premium  | $399             | Ilimitado         |
+| Plan     | Precio (MXN/mes) | Postulaciones        |
+|----------|------------------|----------------------|
+| Gratis   | $0               | 3 / mes              |
+| Pro      | $299             | 100 / mes            |
+| Premium  | $499             | Hasta 30 / día       |
 
 Cambios de plan y facturación en [empleo.skybrandmx.com/account/billing](https://empleo.skybrandmx.com/account/billing).
 

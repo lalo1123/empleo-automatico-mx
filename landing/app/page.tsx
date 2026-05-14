@@ -476,7 +476,7 @@ export default function LandingPage() {
               />
               <FeatureCard
                 title="Accesible"
-                description="Desde $199 MXN al mes. Cancelas cuando quieras, sin letras chiquitas."
+                description="Desde $299 MXN al mes. Cancelas cuando quieras, sin letras chiquitas."
                 icon={
                   <svg
                     viewBox="0 0 24 24"
