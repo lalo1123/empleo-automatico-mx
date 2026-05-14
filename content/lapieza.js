@@ -1155,7 +1155,19 @@
         // skipCv:true means runExpressFill won't open a print-to-PDF tab;
         // the tailored-CV PDF upload happens via tryUploadTailoredCv()
         // below on the dedicated CV step.
-        try { await onFabClickExpressApply({ skipCv: true, singleStep: true }); } catch (_) {}
+        // forceOverwrite:true → since the user explicitly clicked ⚡ Postular,
+        // we replace LaPieza's pre-existing cover letter text (from a
+        // previous submission) with our newly-generated personalized one.
+        // Without this, runExpressFill's isUserEdited gate (>30 chars =
+        // "user edited, leave alone") meant the chain never updated text
+        // for vacancies where LaPieza had pre-populated.
+        try {
+          await onFabClickExpressApply({
+            skipCv: true,
+            singleStep: true,
+            forceOverwrite: true
+          });
+        } catch (_) {}
         await new Promise((r) => setTimeout(r, 2200));
         if (quickApplyAborted) break;
         if (!isApplyPage()) break;
@@ -1165,9 +1177,14 @@
         // backend and inject it into the input BEFORE clicking Continuar.
         // Fails silently to PRINCIPAL CV if anything goes wrong — the
         // user always has a valid CV either way.
-        try { await tryUploadTailoredCv(); } catch (_) {}
+        console.log("[EmpleoAutomatico] CV step detected — attempting tailored upload");
+        try { await tryUploadTailoredCv(); } catch (e) {
+          console.warn("[EmpleoAutomatico] tryUploadTailoredCv threw", e);
+        }
         if (quickApplyAborted) break;
         if (!isApplyPage()) break;
+      } else {
+        console.log("[EmpleoAutomatico] chain step: no cover/Q&A and not CV step, will just click Continuar");
       }
 
       // Click Continuar to advance.
@@ -1293,9 +1310,16 @@
   }
 
   async function tryUploadTailoredCv() {
-    if (!lastJob || !lastJob.title) return false;
+    if (!lastJob || !lastJob.title) {
+      console.log("[EmpleoAutomatico] CV upload skip: no lastJob");
+      return false;
+    }
     const fileInput = findLaPiezaCvFileInput();
-    if (!fileInput) return false;
+    if (!fileInput) {
+      console.log("[EmpleoAutomatico] CV upload skip: no file input found on page");
+      return false;
+    }
+    console.log("[EmpleoAutomatico] CV upload starting — fileInput found:", fileInput);
 
     toast("⚡ Generando CV personalizado para esta vacante…", "info", { durationMs: 12000 });
 
@@ -1494,6 +1518,25 @@
   // countdown). Sets the "next-apply" session flag right before clicking
   // Postularme so the apply-side chain knows to auto-fire Express.
   async function runVacancyAutoChain() {
+    // Early CV check — fail FAST and visibly before the 3s countdown
+    // gives users false confidence that the chain is running. Without
+    // cachedProfile our auto-quiz and CV-personalized features bail
+    // silently mid-flow; detecting at /vacante/ entry lets the user
+    // upload their CV BEFORE losing 30+ seconds of chain time.
+    if (!cachedProfile) {
+      toast(
+        "Para usar la cadena necesitas tu CV cargado en la extensión. Te lleva 30s.",
+        "info",
+        {
+          label: "Subir CV ahora",
+          onClick: () => {
+            try { chrome.runtime.sendMessage({ type: MSG.OPEN_WELCOME }); } catch (_) {}
+          },
+          durationMs: 10000
+        }
+      );
+      return;
+    }
     quickApplyAborted = false;
     quickApplyEscHandler = (ev) => {
       if (ev.key === "Escape" || ev.key === "Esc") {
@@ -1590,7 +1633,12 @@
       }
       setFabBusy(true);
       try {
-        await runExpressFill({ job, prewarmedDraft: prewarmed, skipCv: !!opts.skipCv });
+        await runExpressFill({
+          job,
+          prewarmedDraft: prewarmed,
+          skipCv: !!opts.skipCv,
+          forceOverwrite: !!opts.forceOverwrite
+        });
       } catch (err) {
         console.warn("[EmpleoAutomatico] Express fill threw", err);
         toast(humanizeError(err), "error");
@@ -2083,7 +2131,7 @@
    * @param {Object|null} opts.prewarmedDraft — draft cached from /vacancy/<uuid>,
    *        or null if the user came in cold.
    */
-  async function runExpressFill({ job, prewarmedDraft, skipCv = false }) {
+  async function runExpressFill({ job, prewarmedDraft, skipCv = false, forceOverwrite = false }) {
     if (!job || !job.title) {
       toast("No tengo la vacante. Abre /vacancy/<id> primero.", "info");
       return;
@@ -2142,7 +2190,7 @@
           status.cover = "error";
           return null;
         }
-        if (!isUserEdited(coverField)) {
+        if (forceOverwrite || !isUserEdited(coverField)) {
           fillFieldWithPulse(coverField, cover);
           status.cover = "ok";
           overlay.markDone("cover");
@@ -2190,7 +2238,7 @@
           if (!value) continue;
           const target = resolveFieldRef(q.fieldRef);
           if (!target) continue;
-          if (isUserEdited(target)) continue;
+          if (!forceOverwrite && isUserEdited(target)) continue;
           fillFieldWithPulse(target, value);
           filled++;
           overlay.markPending("questions", `${filled}/${scanned.length}`);
