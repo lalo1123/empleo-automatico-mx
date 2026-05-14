@@ -43,6 +43,7 @@ const cvProgressFill = $("#cvProgressFill");
 const cvProgressText = $("#cvProgressText");
 const cvResult = $("#cvResult");
 const cvResultSub = $("#cvResultSub");
+const cvReplaceBtn = $("#cvReplaceBtn");
 const cvError = $("#cvError");
 
 const skipToOptions = $("#skipToOptions");
@@ -120,6 +121,15 @@ async function refreshState() {
   const profile = storage && storage[STORAGE_KEYS.PROFILE];
   const hasCv = !!(profile && (profile.rawText || (profile.experiences && profile.experiences.length)));
 
+  // Reset the CV card's "result" state on every refresh. Without this,
+  // a previous refreshState() call that set cvResult.hidden=false would
+  // leak into subsequent calls (e.g. user logs out → cvResult would
+  // still claim "CV cargado" until the page reload).
+  if (cvResult) cvResult.hidden = true;
+  if (cvProgress) cvProgress.hidden = true;
+  if (cvError) cvError.hidden = true;
+  if (dropZone) dropZone.hidden = false;
+
   // Step indicator + card locking.
   if (!isLoggedIn) {
     setStep("auth", "active");
@@ -141,15 +151,22 @@ async function refreshState() {
     setCardLocked(cardDone, true);
     return;
   }
+  // CV uploaded — mark step done, hide the drop zone, surface the
+  // success card with the user's parsed name. The drop zone hidden is
+  // critical: previous build showed BOTH the drop zone AND the success
+  // card simultaneously, confusing users who thought they had to upload
+  // again.
   setStep("cv", "done");
   setCardDone(cardCv, true);
   setStep("done", "active");
   setCardLocked(cardDone, false);
-  // Surface what we parsed so the user trusts the CV uploaded.
+  if (dropZone) dropZone.hidden = true;
   cvResult.hidden = false;
-  cvProgress.hidden = true;
-  if (profile && profile.fullName) {
-    cvResultSub.textContent = `Listo, ${profile.fullName}. Cargado en tu perfil.`;
+  const personName = (profile && (profile.fullName || (profile.personal && profile.personal.fullName))) || "";
+  if (personName) {
+    cvResultSub.textContent = `Listo, ${personName.split(" ")[0]}. Tu perfil está cargado.`;
+  } else {
+    cvResultSub.textContent = "Tu perfil está cargado y listo para postular.";
   }
 }
 
@@ -198,6 +215,21 @@ loginForm.addEventListener("submit", async (ev) => {
 // =============================================================================
 
 dropZone.addEventListener("click", () => cvInput.click());
+
+// "Reemplazar" inside the success card → reveal the drop zone again so
+// the user can drag a new CV without leaving this page. We don't clear
+// the success card itself — the new upload will overwrite the parsed
+// profile and refreshState() will re-render.
+if (cvReplaceBtn) {
+  cvReplaceBtn.addEventListener("click", (ev) => {
+    ev.preventDefault();
+    if (dropZone) {
+      dropZone.hidden = false;
+      dropZone.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+    cvInput.click();
+  });
+}
 dropZone.addEventListener("keydown", (ev) => {
   if (ev.key === "Enter" || ev.key === " ") {
     ev.preventDefault();
