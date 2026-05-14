@@ -2616,7 +2616,7 @@
       </div>
       <div class="eamx-matches-panel__bulk" data-eamx-matches-bulk hidden>
         <button type="button" class="eamx-matches-panel__bulk-btn" data-action="mark-top-5">⭐ Marcar top 5 de un solo clic</button>
-        <p class="eamx-matches-panel__bulk-hint">Marcar = guardar en tu cola. La extensión NO postula sola — tú abres cada vacante y le das clic al botón Postular cuando quieras.</p>
+        <p class="eamx-matches-panel__bulk-hint"><strong>⚡ Postular</strong> = la extensión hace todo automático hasta el botón "Finalizar" (carta, CV, preguntas, quiz). <strong>⭐ Marcar</strong> = solo guarda en tu cola para postular después.</p>
       </div>
     `;
 
