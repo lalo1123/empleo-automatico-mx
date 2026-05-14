@@ -113,21 +113,38 @@ function setCardDone(cardEl, done) {
 // =============================================================================
 
 async function refreshState() {
-  // Auth: a successful TEST_AUTH means the user has a valid token. We also
-  // check chrome.storage.local for the profile — if it exists and has the
-  // minimum shape (rawText / experiences), step 2 is done.
+  // Auth: check both TEST_AUTH (live token validation) AND
+  // chrome.storage.local["settings"]["authToken"] as a backup signal —
+  // immediately after a successful LOGIN message the storage write
+  // races the background's TEST_AUTH response. If we only believed
+  // TEST_AUTH.loggedIn we'd briefly show the login form again before
+  // the next refresh tick (storage onChange) caught up. Reading the
+  // token from storage closes that race.
   const [authRes, storage] = await Promise.all([
     sendMessage({ type: MESSAGE_TYPES.TEST_AUTH }),
-    new Promise((res) => chrome.storage.local.get([STORAGE_KEYS.PROFILE], res))
+    new Promise((res) => chrome.storage.local.get([STORAGE_KEYS.PROFILE, STORAGE_KEYS.SETTINGS], res))
   ]);
 
+  const settings = (storage && storage[STORAGE_KEYS.SETTINGS]) || {};
+  const tokenInStorage = !!(settings && settings.authToken);
+
   // TEST_AUTH returns { ok: true } even when not logged in (the call
-  // succeeded; the auth state is in `loggedIn`). Only treat as logged in
-  // when BOTH ok AND loggedIn are true.
-  const isLoggedIn = !!(authRes && authRes.ok && authRes.loggedIn);
-  const userEmail = (authRes && authRes.user && authRes.user.email) || "";
+  // succeeded; the auth state is in `loggedIn`). Treat as logged in
+  // when EITHER the live test confirms it OR we have a token in
+  // storage (covers the immediate-post-login race).
+  const liveAuth = !!(authRes && authRes.ok && authRes.loggedIn);
+  const isLoggedIn = liveAuth || tokenInStorage;
+  const userEmail =
+    (authRes && authRes.user && authRes.user.email) ||
+    (settings && settings.user && settings.user.email) ||
+    "";
   const profile = storage && storage[STORAGE_KEYS.PROFILE];
   const hasCv = !!(profile && (profile.rawText || (profile.experiences && profile.experiences.length)));
+
+  console.log("[welcome] refreshState:", {
+    isLoggedIn, liveAuth, tokenInStorage, hasCv, userEmail,
+    authResOk: authRes?.ok, authResLoggedIn: authRes?.loggedIn
+  });
 
   // Reset the CV card's "result" state on every refresh. Without this,
   // a previous refreshState() call that set cvResult.hidden=false would
