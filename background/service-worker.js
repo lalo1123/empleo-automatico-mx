@@ -308,6 +308,82 @@ async function handleGenerateCv(msg) {
   };
 }
 
+// GENERATE_CV_PDF — same pre-flight as GENERATE_CV but returns the PDF
+// binary (base64-encoded for the message-channel round-trip — chrome's
+// runtime.sendMessage can't transfer Uint8Array directly). The content
+// script decodes back to bytes and creates a File for upload to the
+// portal's <input type="file">.
+async function handleGenerateCvPdf(msg) {
+  const job = msg && msg.job;
+  if (!job) {
+    return { ok: false, error: ERROR_CODES.INVALID_INPUT, message: "Falta información de la vacante" };
+  }
+  if (!(await auth.isLoggedIn())) {
+    return {
+      ok: false,
+      error: ERROR_CODES.UNAUTHORIZED,
+      message: "Inicia sesión en Opciones para generar tu CV personalizado."
+    };
+  }
+  const profile = await storage.getProfile();
+  if (!profile) {
+    return {
+      ok: false,
+      error: ERROR_CODES.INVALID_INPUT,
+      message: "Sube tu CV en Opciones antes de generar la versión personalizada."
+    };
+  }
+
+  const normalizedJob = {
+    source: job.source || SOURCES.OCC,
+    url: job.url || "",
+    id: job.id || "",
+    title: job.title || "",
+    company: job.company || "",
+    location: job.location || "",
+    salary: job.salary == null ? null : job.salary,
+    modality: job.modality == null ? null : job.modality,
+    description: job.description || "",
+    requirements: Array.isArray(job.requirements) ? job.requirements : [],
+    extractedAt: job.extractedAt || nowISO()
+  };
+
+  let pdfBytesB64, usageCurrent, usageLimit;
+  try {
+    const res = await backend.generateTailoredCvPdf({ profile, job: normalizedJob });
+    pdfBytesB64 = res.pdfBase64;
+    usageCurrent = res.usageCurrent;
+    usageLimit = res.usageLimit;
+  } catch (e) {
+    if (e instanceof backend.PlanLimitError) {
+      return {
+        ok: false,
+        error: ERROR_CODES.PLAN_LIMIT_EXCEEDED,
+        message: "Llegaste al límite de tu plan. Upgrade en empleo.skybrandmx.com/account/billing"
+      };
+    }
+    return failFromError(e);
+  }
+
+  if (usageCurrent != null && usageLimit != null) {
+    const current = await auth.getUser();
+    if (current) {
+      await auth.setUser({
+        ...current,
+        usage: { current: usageCurrent, limit: usageLimit }
+      });
+    }
+  }
+
+  return {
+    ok: true,
+    pdfBase64: pdfBytesB64,
+    usage: usageCurrent != null && usageLimit != null
+      ? { current: usageCurrent, limit: usageLimit }
+      : null
+  };
+}
+
 // OPEN_GENERATED_CV opens the supplied HTML in a fresh tab. Content scripts
 // can't call chrome.tabs.create from MV3, so they relay the HTML through this
 // handler. We try a blob: URL first (preferred — survives large payloads and
@@ -705,6 +781,8 @@ onMessage(async (msg) => {
       return handleAdminSetPlan(msg);
     case MESSAGE_TYPES.GENERATE_CV:
       return handleGenerateCv(msg);
+    case MESSAGE_TYPES.GENERATE_CV_PDF:
+      return handleGenerateCvPdf(msg);
     case MESSAGE_TYPES.OPEN_GENERATED_CV:
       return handleOpenGeneratedCv(msg);
     case MESSAGE_TYPES.ANSWER_QUESTIONS:

@@ -27,6 +27,7 @@
     OPEN_BILLING: "OPEN_BILLING",
     OPEN_WELCOME: "OPEN_WELCOME",
     GENERATE_CV: "GENERATE_CV",
+    GENERATE_CV_PDF: "GENERATE_CV_PDF",
     OPEN_GENERATED_CV: "OPEN_GENERATED_CV",
     ANSWER_QUESTIONS: "ANSWER_QUESTIONS",
     ANSWER_QUIZ: "ANSWER_QUIZ"
@@ -1145,23 +1146,26 @@
       // generates cover letter / Q&A answers, fills them). Skip when there's
       // nothing to fill (CV step, review step) so we don't show a noisy
       // overlay on every step.
-      //
-      // skipCv:true → the chain NEVER triggers our CV generation pipeline
-      // (which opens a print-to-PDF tab, jarring during an automated flow
-      // and the user already has LaPieza's "PRINCIPAL" CV pre-selected).
-      // The FAB still triggers tailored CV generation manually if the
-      // user wants it.
       let hasCover = false, hasQuestions = false;
       try { hasCover = !!findExpressCoverLetterField(); } catch (_) {}
       try { hasQuestions = (scanQuestionFields() || []).length > 0; } catch (_) {}
       if (hasCover || hasQuestions) {
         // singleStep:true so onFabClickExpressApply doesn't recurse back
         // into chainApplyStepsToFinalize (we're already inside it).
+        // skipCv:true means runExpressFill won't open a print-to-PDF tab;
+        // the tailored-CV PDF upload happens via tryUploadTailoredCv()
+        // below on the dedicated CV step.
         try { await onFabClickExpressApply({ skipCv: true, singleStep: true }); } catch (_) {}
-        // runExpressFill ends with overlay.hide() ~1.5s after the final
-        // toast. Wait for that to clear before we click Continuar so the
-        // user can see what got filled.
         await new Promise((r) => setTimeout(r, 2200));
+        if (quickApplyAborted) break;
+        if (!isApplyPage()) break;
+      } else if (isOnLaPiezaCvStep()) {
+        // CV-selection step. If we have lastJob context AND LaPieza is
+        // showing a CV file input, generate the tailored-CV PDF on the
+        // backend and inject it into the input BEFORE clicking Continuar.
+        // Fails silently to PRINCIPAL CV if anything goes wrong — the
+        // user always has a valid CV either way.
+        try { await tryUploadTailoredCv(); } catch (_) {}
         if (quickApplyAborted) break;
         if (!isApplyPage()) break;
       }
@@ -1199,6 +1203,154 @@
       if (count >= 2) return true;
     }
     return false;
+  }
+
+  // ---------------------------------------------------------------------
+  // Tailored-CV PDF upload (chain Fase 2)
+  // ---------------------------------------------------------------------
+  // On the CV step the chain calls tryUploadTailoredCv() which:
+  //   1. Requests a per-vacancy ATS-tailored CV from the backend
+  //      (GENERATE_CV_PDF — server renders via puppeteer + chromium).
+  //   2. Decodes the base64 PDF response into a Uint8Array → File.
+  //   3. Injects the File into LaPieza's hidden file input via the
+  //      DataTransfer trick (the only programmatic file-set technique
+  //      that React handlers actually pick up).
+  //   4. Dispatches a synthetic `change` event so LaPieza's onChange
+  //      reads the new file and updates the radio selection.
+  //
+  // Failure is silent + non-fatal. If anything throws — backend down,
+  // user not logged in, plan limit hit, LaPieza DOM shape changed —
+  // the chain continues with LaPieza's PRINCIPAL CV (which is always
+  // valid). This is the "less personalized but never broken" fallback.
+
+  // Heuristic: are we currently on LaPieza's CV-selection step?
+  // Signals: heading mentions "Añade un CV" / "CV para postular" AND
+  // there's at least one visible file input on the page.
+  function isOnLaPiezaCvStep() {
+    try {
+      const headings = Array.from(document.querySelectorAll("h1, h2, h3"));
+      const cvHeading = headings.some((h) => {
+        const t = (h.textContent || "").trim();
+        return /a[ñn]ade\s+un\s+cv|cv\s+para\s+postular|selecciona.*cv/i.test(t);
+      });
+      if (!cvHeading) return false;
+      return !!findLaPiezaCvFileInput();
+    } catch (_) { return false; }
+  }
+
+  // LaPieza's "Añadir nuevo CV" hidden file input lives inside the
+  // upload card on /apply/. We find it by walking up from each
+  // input[type=file] looking for CV-related text in the ancestor chain.
+  function findLaPiezaCvFileInput() {
+    let inputs = [];
+    try { inputs = Array.from(document.querySelectorAll('input[type="file"]')); } catch (_) { return null; }
+    for (const inp of inputs) {
+      if (inp.disabled) continue;
+      // Match if EITHER the input's own attributes mention CV/PDF, OR a
+      // labelled ancestor (max 4 levels up) does.
+      const selfAttrs = (
+        (inp.getAttribute("name") || "") + " " +
+        (inp.getAttribute("aria-label") || "") + " " +
+        (inp.getAttribute("accept") || "")
+      ).toLowerCase();
+      if (/cv|curriculum|currículum|resume|pdf/i.test(selfAttrs)) return inp;
+      let walker = inp.parentElement;
+      for (let depth = 0; depth < 4 && walker; depth++) {
+        const txt = (walker.textContent || "").slice(0, 300).toLowerCase();
+        if (/a[ñn]adir\s+nuevo\s+cv|añade\s+un\s+cv|cv\s+para\s+postular/i.test(txt)) {
+          return inp;
+        }
+        walker = walker.parentElement;
+      }
+    }
+    return null;
+  }
+
+  // Decode a base64 string into a Uint8Array. Backend sent the PDF
+  // base64-encoded because chrome.runtime.sendMessage can't transfer
+  // binary buffers directly — atob is the symmetric counterpart of the
+  // backend's btoa encoding (see lib/backend.js generateTailoredCvPdf).
+  function base64ToBytes(b64) {
+    const binary = atob(b64);
+    const out = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+    return out;
+  }
+
+  // Build a sane filename from the user's name + vacancy slug. Sanitized
+  // so LaPieza accepts it (some portals reject filenames with /,?,*,etc).
+  function buildCvFilename(job, profile) {
+    const personName = (profile?.personal?.fullName || profile?.fullName || "CV")
+      .replace(/[^a-z0-9\s-]/gi, "")
+      .trim()
+      .replace(/\s+/g, "-");
+    const jobBit = (job?.title || job?.id || "")
+      .replace(/[^a-z0-9\s-]/gi, "")
+      .trim()
+      .replace(/\s+/g, "-")
+      .slice(0, 40);
+    return jobBit ? `${personName}-${jobBit}.pdf` : `${personName}-CV.pdf`;
+  }
+
+  async function tryUploadTailoredCv() {
+    if (!lastJob || !lastJob.title) return false;
+    const fileInput = findLaPiezaCvFileInput();
+    if (!fileInput) return false;
+
+    toast("⚡ Generando CV personalizado para esta vacante…", "info", { durationMs: 12000 });
+
+    let pdfBase64;
+    try {
+      const res = await sendMsg({ type: MSG.GENERATE_CV_PDF, job: lastJob });
+      if (!res || !res.ok) {
+        if (res && res.error === ERR.PLAN_LIMIT_EXCEEDED) {
+          toast("Llegaste al límite de tu plan. Sigo con tu CV PRINCIPAL.", "info");
+        } else if (res && res.error === ERR.UNAUTHORIZED) {
+          toast("Sesión expirada. Sigo con tu CV PRINCIPAL.", "info");
+        } else {
+          toast("No pude generar el CV personalizado. Sigo con tu PRINCIPAL.", "info");
+        }
+        return false;
+      }
+      pdfBase64 = res.pdfBase64;
+    } catch (err) {
+      console.warn("[EmpleoAutomatico] generate-cv-pdf threw", err);
+      toast("CV personalizado no disponible. Sigo con tu PRINCIPAL.", "info");
+      return false;
+    }
+
+    if (!pdfBase64) return false;
+
+    let file;
+    try {
+      const bytes = base64ToBytes(pdfBase64);
+      const filename = buildCvFilename(lastJob, cachedProfile);
+      file = new File([bytes], filename, { type: "application/pdf" });
+    } catch (err) {
+      console.warn("[EmpleoAutomatico] CV decode failed", err);
+      return false;
+    }
+
+    // DataTransfer is the only technique React/modern frameworks pick up.
+    // Setting input.files directly with a FileList from Object.defineProperty
+    // works in Chrome but not always Firefox; DataTransfer is universal.
+    try {
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      fileInput.files = dt.files;
+      fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+      // Some React onChange handlers listen for `input` instead.
+      fileInput.dispatchEvent(new Event("input", { bubbles: true }));
+    } catch (err) {
+      console.warn("[EmpleoAutomatico] file injection failed", err);
+      return false;
+    }
+
+    // Give LaPieza ~2s to process the upload (POST to their server,
+    // update the radio selection, mark the new CV as active).
+    toast("✓ CV personalizado subido. Validando…", "success", { durationMs: 3000 });
+    await new Promise((r) => setTimeout(r, 2000));
+    return true;
   }
 
   // Match LaPieza's apply-flow "Continuar" button (NOT the final submit).

@@ -23,13 +23,30 @@ RUN npm run build
 FROM node:20-alpine AS runner
 
 # sqlite CLI is useful for debugging inside the container.
-RUN apk add --no-cache sqlite libc6-compat
+# chromium + fonts: required by puppeteer-core for the tailored-CV PDF
+# rendering pipeline (see lib/pdf.ts). We install Alpine's chromium and
+# point puppeteer at it via PUPPETEER_EXECUTABLE_PATH — much smaller than
+# letting puppeteer download its own bundled chromium during npm install.
+RUN apk add --no-cache \
+      sqlite \
+      libc6-compat \
+      chromium \
+      nss \
+      freetype \
+      harfbuzz \
+      ca-certificates \
+      ttf-freefont \
+      font-noto-emoji
+
+# Skip chromium download — we use the Alpine binary above.
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 
 ENV NODE_ENV=production
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
-# Omit dev deps, keep prod deps (better-sqlite3, hono, etc).
+# Omit dev deps, keep prod deps (better-sqlite3, hono, puppeteer-core, etc).
 RUN npm ci --omit=dev && npm cache clean --force
 
 # Copy compiled code and migrations.

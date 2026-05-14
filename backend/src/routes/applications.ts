@@ -276,6 +276,96 @@ applicationsRoutes.post(
   }
 );
 
+// /generate-cv-pdf produces the same ATS-tailored CV as /generate-cv but
+// rendered as an A4 PDF buffer (via puppeteer-core + Alpine chromium).
+//
+// Why a separate endpoint vs a `?format=pdf` flag on /generate-cv:
+//   - Lets the extension request the cheaper HTML output during onboarding
+//     UX flows (preview, download as HTML) without paying the puppeteer
+//     render cost.
+//   - Returns a binary octet-stream (not JSON), so the shape is different.
+//   - Quota: this endpoint is **0 units** when /generate-cv has already
+//     been called for the same job in the same session (i.e. we just
+//     re-render existing HTML to PDF). For now we just always charge 1
+//     unit and let the extension cache the HTML client-side to avoid
+//     paying twice. The cleaner cache-by-job-id flow is a follow-up.
+//
+// The PDF is meant for programmatic upload to portal file inputs (LaPieza
+// "Añadir nuevo CV" being the first wired up). The extension creates a
+// File object from this blob and dispatches a synthetic change event on
+// the portal's <input type="file">. See content/lapieza.js chain.
+applicationsRoutes.post(
+  "/generate-cv-pdf",
+  authRequired(),
+  emailVerifiedRequired(),
+  async (c) => {
+    try {
+      const body = await c.req.json().catch(() => null);
+      const parsed = generateSchema.safeParse(body);
+      if (!parsed.success) {
+        throw new HttpError(
+          400,
+          "VALIDATION_ERROR",
+          parsed.error.issues[0]?.message ?? "Perfil o vacante invalidos"
+        );
+      }
+      const { profile, job } = parsed.data;
+      if (!profile.experience || profile.experience.length === 0) {
+        throw new HttpError(422, "VALIDATION_ERROR", "Tu perfil no tiene experiencia laboral.");
+      }
+      if (!profile.personal.fullName || !profile.personal.fullName.trim()) {
+        throw new HttpError(422, "VALIDATION_ERROR", "Tu perfil no tiene nombre completo.");
+      }
+      if (!job.title || !job.title.trim() || !job.description || !job.description.trim()) {
+        throw new HttpError(422, "VALIDATION_ERROR", "La vacante no tiene titulo o descripcion suficientes.");
+      }
+
+      const env = loadEnv();
+      const user = c.get("user");
+      assertUnderLimit(user.id, user.plan);
+
+      // 1) Generate the tailored HTML CV (same path as /generate-cv).
+      const result = await generateTailoredCv({
+        apiKey: env.GEMINI_API_KEY,
+        model: env.GEMINI_MODEL,
+        profile,
+        job
+      });
+
+      // 2) Render that HTML to a PDF buffer via puppeteer-core.
+      const { htmlToPdf } = await import("../lib/pdf.js");
+      const pdfBuf = await htmlToPdf(result.html);
+
+      // 3) Charge the quota only after BOTH the AI call and the render
+      // succeed. Failure to render shouldn't burn the user's quota.
+      const newCount = incrementUsage(user.id);
+      const plan = getPlan(user.plan);
+      console.log(
+        `[generate-cv-pdf] ok user=${user.id} plan=${user.plan} job=${job.source}:${job.id} bytes=${pdfBuf.length} usage=${newCount}/${plan.monthlyLimit}`
+      );
+
+      // Return as binary octet-stream. The extension caller uses
+      // arrayBuffer() to get the bytes and constructs a File object for
+      // programmatic upload to LaPieza's file input.
+      const filenameSafe = (profile.personal.fullName || "CV").replace(/[^a-z0-9\s-]/gi, "").trim().replace(/\s+/g, "-") || "CV";
+      return new Response(new Uint8Array(pdfBuf), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": `attachment; filename="${filenameSafe}-CV.pdf"`,
+          "Content-Length": String(pdfBuf.length),
+          // Surface usage in custom headers so the extension can update
+          // its quota indicator without a separate /account round-trip.
+          "X-EAMX-Usage-Current": String(newCount),
+          "X-EAMX-Usage-Limit": String(plan.monthlyLimit)
+        }
+      });
+    } catch (err) {
+      return sendError(c, err);
+    }
+  }
+);
+
 // /answer-questions generates one adaptive answer per question detected in
 // the application form by the extension.
 //

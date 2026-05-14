@@ -5,6 +5,7 @@ import { serve } from "@hono/node-server";
 import { app } from "./app.js";
 import { loadEnv } from "./lib/env.js";
 import { closeDb } from "./lib/db.js";
+import { closeBrowser } from "./lib/pdf.js";
 import { runMigrations } from "./scripts/migrate.js";
 
 async function main(): Promise<void> {
@@ -39,8 +40,15 @@ async function main(): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
     console.log(`[shutdown] received ${signal}, closing server...`);
-    server.close((err?: Error) => {
+    server.close(async (err?: Error) => {
       if (err) console.error("[shutdown] server.close error:", err);
+      // Close puppeteer's headless chromium first (lib/pdf.ts holds a
+      // shared instance) so docker stop doesn't strand zombie processes.
+      try {
+        await closeBrowser();
+      } catch (pdfErr) {
+        console.error("[shutdown] closeBrowser error:", pdfErr);
+      }
       try {
         closeDb();
       } catch (dbErr) {
