@@ -25,6 +25,7 @@
     APPROVE_DRAFT: "APPROVE_DRAFT",
     REJECT_DRAFT: "REJECT_DRAFT",
     OPEN_BILLING: "OPEN_BILLING",
+    OPEN_WELCOME: "OPEN_WELCOME",
     GENERATE_CV: "GENERATE_CV",
     OPEN_GENERATED_CV: "OPEN_GENERATED_CV",
     ANSWER_QUESTIONS: "ANSWER_QUESTIONS",
@@ -4866,15 +4867,16 @@
     }
     if (!cachedProfile) {
       FLOW_TIPS_SHOWN.add("auto-quiz-no-cv");
-      // Actionable toast: opens the welcome page (which has the drag-drop
-      // CV uploader) so the user doesn't have to hunt for "Options" in
-      // chrome://extensions. Welcome page auto-advances past completed
-      // steps, so this lands them directly on Step 2 if already logged in.
+      // Actionable toast: opens the welcome page (drag-drop CV uploader)
+      // via the background service worker. Live test caught Chrome blocking
+      // window.open("chrome-extension://.../welcome.html") with
+      // ERR_BLOCKED_BY_CLIENT — content scripts can't open extension URLs
+      // directly. Messaging the background is the supported path.
       toast("Falta tu CV — súbelo en 30 segundos para que el auto-quiz funcione.", "info", {
         label: "Subir CV",
         onClick: () => {
           try {
-            window.open(chrome.runtime.getURL("welcome/welcome.html"), "_blank", "noopener");
+            chrome.runtime.sendMessage({ type: MSG.OPEN_WELCOME });
           } catch (_) { /* ignore */ }
         },
         durationMs: 10000

@@ -94,6 +94,10 @@
     {
       "resources": ["lib/schemas.js", "lib/match-score.js", "lib/queue.js", "vendor/pdf.min.js", "vendor/pdf.worker.min.js"],
       "matches": ["<all_urls>"]
+    },
+    {
+      "resources": ["welcome/welcome.html", "welcome/welcome.css", "welcome/welcome.js"],
+      "matches": ["https://*.lapieza.io/*", "https://lapieza.io/*", "https://*.occ.com.mx/*", "https://occ.com.mx/*", "https://*.computrabajo.com.mx/*", "https://computrabajo.com.mx/*", "https://*.bumeran.com.mx/*", "https://bumeran.com.mx/*", "https://mx.indeed.com/*", "https://www.linkedin.com/*"]
     }
   ]
 }

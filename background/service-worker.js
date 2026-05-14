@@ -625,6 +625,21 @@ async function handleOpenBilling() {
   }
 }
 
+// Open the first-install welcome page in a new tab. Content scripts can't
+// chrome.tabs.create directly — they message us and we open it. This is
+// also more reliable than window.open(chrome.runtime.getURL(...)) from a
+// content script, which Chrome blocks unless welcome/* is in
+// web_accessible_resources AND the host site allows it.
+async function handleOpenWelcome() {
+  try {
+    const url = chrome.runtime.getURL("welcome/welcome.html");
+    await chrome.tabs.create({ url });
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: ERROR_CODES.SERVER_ERROR, message: (e && e.message) || "No se pudo abrir el navegador" };
+  }
+}
+
 // Admin-only: switch the caller's own plan without paying. The backend
 // enforces the allowlist via ADMIN_USER_EMAILS — we surface its FORBIDDEN
 // response unchanged. On success we refresh the cached user so the rest of
@@ -684,6 +699,8 @@ onMessage(async (msg) => {
       return handleGetAuthStatus();
     case MESSAGE_TYPES.OPEN_BILLING:
       return handleOpenBilling();
+    case MESSAGE_TYPES.OPEN_WELCOME:
+      return handleOpenWelcome();
     case MESSAGE_TYPES.ADMIN_SET_PLAN:
       return handleAdminSetPlan(msg);
     case MESSAGE_TYPES.GENERATE_CV:
