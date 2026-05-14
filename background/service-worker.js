@@ -14,6 +14,33 @@ import * as backend from "../lib/backend.js";
 import { BILLING_URL } from "../lib/config.js";
 import { onMessage } from "../lib/messaging.js";
 
+// ---------------------------------------------------------------------------
+// Storage access policy
+// ---------------------------------------------------------------------------
+//
+// Chrome MV3 defaults `chrome.storage.session` to TRUSTED_CONTEXTS only —
+// content scripts that try to `.set()` or `.get()` it get a silent no-op.
+// Our LaPieza content script needs session storage to pass the quick-apply
+// flag between tabs (matches panel click on /vacantes → flag set → flag
+// read on /vacante/<slug> in a new tab). Without this call the flag is
+// never written and the auto-chain never fires.
+//
+// Live test that uncovered this: clicking ⚡ Postular on the matches panel
+// opened the vacancy tab but the chain stayed silent. JS probe on both
+// tabs showed `eamx:` keys empty. Calling setAccessLevel here makes
+// session storage readable AND writable from content scripts.
+try {
+  if (chrome?.storage?.session?.setAccessLevel) {
+    chrome.storage.session
+      .setAccessLevel({ accessLevel: "TRUSTED_AND_UNTRUSTED_CONTEXTS" })
+      .catch((err) => {
+        console.warn("[EmpleoAutomatico] setAccessLevel(session) failed:", err);
+      });
+  }
+} catch (err) {
+  console.warn("[EmpleoAutomatico] setAccessLevel(session) threw:", err);
+}
+
 /**
  * Build the semantic field map sent back on APPROVE_DRAFT.
  * The content script translates these semantic keys to actual DOM selectors
