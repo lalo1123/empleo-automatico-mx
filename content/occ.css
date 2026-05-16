@@ -2339,6 +2339,27 @@
   opacity: 1;
 }
 
+/* Tiny "✓ Ya apliqué" link under the Marcar/Postular row. Manual marker
+   for vacancies the user applied to outside our chain — easy to miss
+   when intentionally browsing, easy to find when wanting to clean up
+   the panel. */
+.eamx-match-item__mark-applied {
+  margin-top: 6px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  color: rgba(94, 234, 212, 0.65);
+  font: 600 11px inherit;
+  cursor: pointer;
+  transition: color 120ms ease;
+  text-align: left;
+  letter-spacing: 0.01em;
+}
+.eamx-match-item__mark-applied:hover {
+  color: #5eead4;
+  text-decoration: underline;
+}
+
 .eamx-match-item__reasons {
   list-style: none;
   margin: 4px 0 0 0;

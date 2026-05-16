@@ -2988,6 +2988,18 @@
       try { location.href = "https://lapieza.io/vacantes"; } catch (_) {}
       return;
     }
+    if (what === "mark-applied") {
+      // "✓ Ya apliqué" — manual marker for vacancies the user applied
+      // to outside our chain (manually, before our tracker existed, or
+      // from another device). We upsert into the queue with status
+      // "aplicada"; renderMatchesPanelContent re-fetches appliedIds on
+      // next render so the card flips to the dimmed/badged state.
+      ev.preventDefault();
+      ev.stopPropagation();
+      const id = action.getAttribute("data-id");
+      onMatchesManualMarkApplied(action, id);
+      return;
+    }
     if (what === "quick-apply") {
       // "⚡ Postular" — open the vacancy in a new tab AND set a session
       // flag so our content script chains the FULL apply flow on arrival:
@@ -3616,6 +3628,12 @@
     const applyAction = isApplied
       ? `<a href="${safeUrl}" target="_blank" rel="noopener" class="eamx-match-item__apply eamx-match-item__apply--applied">Abrir vacante</a>`
       : `<a data-action="quick-apply" href="${safeUrl}" target="_blank" rel="noopener" class="eamx-match-item__apply" data-job-id="${safeId}">⚡ Postular →</a>`;
+    // Manual "ya apliqué" link — for vacancies the user applied to OUTSIDE
+    // our chain (manually, before the tracker existed, or from another
+    // device). Hidden once the item is already marked as applied.
+    const manualMarkApplied = isApplied
+      ? ""
+      : `<button type="button" data-action="mark-applied" data-id="${safeId}" class="eamx-match-item__mark-applied" title="Ya apliqué a esta vacante por mi cuenta">✓ Ya apliqué</button>`;
     const itemClass = isApplied ? "eamx-match-item eamx-match-item--applied" : "eamx-match-item";
     return `
       <li class="${itemClass}">
@@ -3635,9 +3653,65 @@
             </button>
             ${applyAction}
           </div>
+          ${manualMarkApplied}
         </div>
       </li>
     `;
+  }
+
+  // Manual "✓ Ya apliqué" click — for vacancies the user applied to
+  // outside our chain. Upserts into the queue with status="aplicada"
+  // and re-renders the matches panel so the card flips to the dimmed
+  // "ya postulada" state immediately. Idempotent — clicking again on
+  // a card already marked is a no-op (upsertApplied handles it).
+  async function onMatchesManualMarkApplied(btn, id) {
+    if (!btn || !id) return;
+    const match = matchesCurrentTopN.find((m) => m.jobLite.id === id);
+    if (!match) {
+      // Card data isn't in our top-N cache (e.g. panel was scrolled past
+      // the entry). Fall back to a minimal upsert with just id/source/url
+      // — the queue accepts that, just won't have title/company.
+      try {
+        const url = (btn.parentElement?.querySelector("a[data-action='quick-apply']") || {}).href || "";
+        await ensureDiscoveryDeps();
+        if (queueModule && typeof queueModule.upsertApplied === "function") {
+          await queueModule.upsertApplied({
+            id,
+            source: SOURCE,
+            url,
+            title: "",
+            company: "",
+            savedAt: Date.now(),
+            matchScore: 0,
+            reasons: ["Marcada manualmente como postulada"]
+          });
+        }
+      } catch (_) { /* swallow */ }
+    } else {
+      const { jobLite, score, reasons } = match;
+      try {
+        await ensureDiscoveryDeps();
+        if (queueModule && typeof queueModule.upsertApplied === "function") {
+          await queueModule.upsertApplied({
+            id: jobLite.id,
+            source: SOURCE,
+            url: jobLite.url || "",
+            title: jobLite.title || "",
+            company: jobLite.company || "",
+            location: jobLite.location || "",
+            savedAt: Date.now(),
+            matchScore: Number.isFinite(score) ? score : 0,
+            reasons: Array.isArray(reasons) ? reasons.slice(0, 3) : ["Marcada manualmente"]
+          });
+        }
+      } catch (_) { /* swallow */ }
+    }
+    // Re-render the panel content so the freshly-applied card flips
+    // visually (badge + dimmed + Abrir vacante button). chrome.storage
+    // .onChanged would also trigger a refresh on most platforms but the
+    // explicit render here avoids a perceptible delay.
+    try { renderMatchesPanelContent(); } catch (_) {}
+    toast("✓ Marcada como postulada. No la verás como activa.", "success", { durationMs: 3000 });
   }
 
   // Click on a per-item Marcar/Marcada button. Toggle behavior, re-uses the
