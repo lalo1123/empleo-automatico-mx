@@ -2297,6 +2297,48 @@
   box-shadow: 0 4px 12px rgba(19, 126, 122, 0.5);
 }
 
+/* Applied state — replaces the bright teal gradient with a muted
+   neutral button so it visually de-emphasizes (user already postuló,
+   no need to re-invite them) but keeps the "open vacancy" affordance. */
+.eamx-match-item__apply--applied {
+  background: rgba(148, 163, 184, 0.18);
+  color: #cbd5e1;
+  border-color: rgba(203, 213, 225, 0.2);
+  box-shadow: none;
+  font-weight: 600;
+}
+.eamx-match-item__apply--applied:hover {
+  filter: none;
+  background: rgba(148, 163, 184, 0.28);
+  transform: none;
+  box-shadow: none;
+}
+
+/* "✓ Ya postulada" pill at the top of the match item — green-ish so the
+   user spots it instantly across the matches list. */
+.eamx-match-item__applied {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 6px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgba(20, 184, 166, 0.18);
+  border: 1px solid rgba(94, 234, 212, 0.35);
+  color: #5eead4;
+  font: 700 10.5px/1 inherit;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+/* Whole-item dim when applied so the live actionable matches pop. */
+.eamx-match-item--applied {
+  opacity: 0.78;
+}
+.eamx-match-item--applied:hover {
+  opacity: 1;
+}
+
 .eamx-match-item__reasons {
   list-style: none;
   margin: 4px 0 0 0;

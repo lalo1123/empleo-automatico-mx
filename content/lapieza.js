@@ -1136,8 +1136,14 @@
       }
 
       // Final step → STOP. Highlight + tell user to dale Finalizar.
-      if (findApplyFlowFinalizeBtn()) {
+      // Also attach a one-shot click listener so we KNOW when the user
+      // submits, and can mark the vacancy as "aplicada" in the queue.
+      // The matches panel then renders a "✓ Postulada" badge on that
+      // card on every future scan — user never tries to postular twice.
+      const finalizeBtn = findApplyFlowFinalizeBtn();
+      if (finalizeBtn) {
         try { highlightExpressSubmitButton(); } catch (_) {}
+        attachFinalizeApplyTracker(finalizeBtn);
         toast("✓ Listo. Revisa todo y dale Finalizar.", "success", { durationMs: 6000 });
         break;
       }
@@ -1220,6 +1226,51 @@
       if (count >= 2) return true;
     }
     return false;
+  }
+
+  // ---------------------------------------------------------------------
+  // Applied-vacancy tracker
+  // ---------------------------------------------------------------------
+  // When the chain reaches the final Finalizar step we attach a one-shot
+  // click listener that calls queueModule.upsertApplied() AFTER the user
+  // clicks. The vacancy lands in the queue with status="aplicada", and
+  // future matches-panel renders show a "✓ Postulada" badge on its card
+  // — so the user never accidentally postula to the same vacancy twice.
+  //
+  // Stamps the button with data-eamx-finalize-tracked="true" to avoid
+  // double-attaching across observer ticks if the chain re-detects the
+  // same button.
+
+  function attachFinalizeApplyTracker(btn) {
+    if (!btn || btn.dataset.eamxFinalizeTracked === "true") return;
+    btn.dataset.eamxFinalizeTracked = "true";
+    const handler = async () => {
+      try {
+        if (!queueModule || typeof queueModule.upsertApplied !== "function") return;
+        const job = lastJob || {};
+        const url = location.href;
+        const id = idFromUrl(url);
+        if (!id) return;
+        await queueModule.upsertApplied({
+          id,
+          source: SOURCE,
+          url,
+          title: job.title || "",
+          company: job.company || "",
+          location: job.location || "",
+          savedAt: Date.now(),
+          matchScore: 0,
+          reasons: ["Postulada desde la extensión"]
+        });
+        console.log("[EmpleoAutomatico] vacancy marked applied:", id);
+      } catch (err) {
+        console.warn("[EmpleoAutomatico] applied-tracker failed", err);
+      }
+    };
+    // Capture phase so we run BEFORE LaPieza's handler navigates away
+    // (the page may unmount our content script after submission). Listener
+    // is one-shot via { once: true } so re-clicks don't re-fire.
+    btn.addEventListener("click", handler, { capture: true, once: true });
   }
 
   // ---------------------------------------------------------------------
@@ -3476,7 +3527,13 @@
         </div>
       `
       : "";
-    const list = topN.map((m, i) => renderMatchItem(m, i + 1)).join("");
+    // Fetch applied IDs ONCE before rendering so each card knows whether
+    // to show the "✓ Ya postulada" badge in its first paint (no flicker).
+    let appliedIds = new Set();
+    if (queueModule && typeof queueModule.appliedIdsForSource === "function") {
+      try { appliedIds = await queueModule.appliedIdsForSource(SOURCE); } catch (_) {}
+    }
+    const list = topN.map((m, i) => renderMatchItem(m, i + 1, appliedIds)).join("");
     const footer = cards.length < 5
       ? `<p class="eamx-matches-panel__hint">Scroll para más vacantes.</p>`
       : "";
@@ -3527,7 +3584,7 @@
   }
 
   // Build a single <li> for the matches list.
-  function renderMatchItem(match, rank) {
+  function renderMatchItem(match, rank, appliedIds) {
     const { jobLite, score, reasons, level } = match;
     const badgeLevel = level || "unknown";
     const safeTitle = escapeHtml(jobLite.title || "(sin título)");
@@ -3535,6 +3592,7 @@
     const safeLoc = jobLite.location ? escapeHtml(jobLite.location) : "";
     const safeUrl = encodeURI(jobLite.url || "#");
     const safeId = escapeHtml(jobLite.id || "");
+    const isApplied = appliedIds && appliedIds.has(String(jobLite.id || ""));
     const reasonItems = (Array.isArray(reasons) ? reasons : [])
       .slice(0, 3)
       .map((r) => `<li>✓ ${escapeHtml(r)}</li>`)
@@ -3547,10 +3605,23 @@
     const locRow = safeLoc
       ? `<div class="eamx-match-item__location"><span aria-hidden="true">📍</span><span>${safeLoc}</span></div>`
       : "";
+    // Applied badge — shown when the vacancy is in the queue with
+    // status="aplicada". Replaces the ⚡ Postular CTA with a clear
+    // "ya postulada" indicator so the user doesn't try to postular
+    // twice. (The card itself still opens the vacancy on click for
+    // reference / re-check.)
+    const appliedBadge = isApplied
+      ? `<div class="eamx-match-item__applied">✓ Ya postulada</div>`
+      : "";
+    const applyAction = isApplied
+      ? `<a href="${safeUrl}" target="_blank" rel="noopener" class="eamx-match-item__apply eamx-match-item__apply--applied">Abrir vacante</a>`
+      : `<a data-action="quick-apply" href="${safeUrl}" target="_blank" rel="noopener" class="eamx-match-item__apply" data-job-id="${safeId}">⚡ Postular →</a>`;
+    const itemClass = isApplied ? "eamx-match-item eamx-match-item--applied" : "eamx-match-item";
     return `
-      <li class="eamx-match-item">
+      <li class="${itemClass}">
         <div class="eamx-match-item__rank" aria-hidden="true">${rank}</div>
         <div class="eamx-match-item__body">
+          ${appliedBadge}
           <div class="eamx-match-item__head">
             <span class="eamx-match-item__score eamx-match-item__score--${badgeLevel}">${score}%</span>
             <span class="eamx-match-item__title">${safeTitle}</span>
@@ -3562,7 +3633,7 @@
             <button type="button" data-action="mark" data-id="${safeId}" class="eamx-match-item__mark" aria-pressed="false">
               <span aria-hidden="true">⭐</span><span>Marcar</span>
             </button>
-            <a data-action="quick-apply" href="${safeUrl}" target="_blank" rel="noopener" class="eamx-match-item__apply" data-job-id="${safeId}">⚡ Postular →</a>
+            ${applyAction}
           </div>
         </div>
       </li>
