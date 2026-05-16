@@ -2859,12 +2859,12 @@
         <button type="button" class="eamx-matches-panel__close" aria-label="Cerrar">✕</button>
       </header>
       <p class="eamx-matches-panel__lead">Top 25 vacantes ordenadas por afinidad con tu CV. Tú decides a cuáles postular.</p>
+      <div class="eamx-matches-panel__widening" data-eamx-matches-widening hidden>
+        <span class="eamx-matches-panel__widening-dot" aria-hidden="true"></span>
+        <span class="eamx-matches-panel__widening-text" data-eamx-widening-text>🔍 Buscando más vacantes…</span>
+      </div>
       <div class="eamx-matches-panel__content" data-eamx-matches-content>
         <div class="eamx-matches-panel__loading">Analizando vacantes…</div>
-      </div>
-      <div class="eamx-matches-panel__loadmore" data-eamx-matches-loadmore hidden>
-        <button type="button" class="eamx-matches-panel__loadmore-btn" data-action="wider-search">🔍 Buscar más amplio</button>
-        <p class="eamx-matches-panel__loadmore-hint">Carga hasta 100 vacantes de LaPieza y te muestra las mejores según tus preferencias y CV.</p>
       </div>
       <div class="eamx-matches-panel__bulk" data-eamx-matches-bulk hidden>
         <button type="button" class="eamx-matches-panel__bulk-btn" data-action="mark-top-5">⭐ Marcar top 5 de un solo clic</button>
@@ -3200,10 +3200,34 @@
     return out;
   }
 
+  // Auto-trigger flag: set to true while a widening loop is in flight so
+  // re-entrancy (e.g. user closes + reopens panel mid-flight) doesn't
+  // start a second loop. Cleared in the finally block.
+  let widerSearchInProgress = false;
+
+  /**
+   * Run the wider-search loop. Called either:
+   *   - From the user explicitly clicking a button (legacy path, btn passed)
+   *   - Auto-fired by renderMatchesPanelContent on first panel open (no btn)
+   *
+   * Progress is surfaced via the [data-eamx-matches-widening] strip in
+   * the panel header. When no button is passed we skip the button-text
+   * updates and rely entirely on the strip.
+   */
   async function onMatchesWiderSearch(btn) {
-    if (!btn || btn.disabled) return;
-    const original = btn.textContent;
-    btn.disabled = true;
+    if (widerSearchInProgress) return;
+    if (btn && btn.disabled) return;
+    widerSearchInProgress = true;
+    const original = btn ? btn.textContent : "";
+    if (btn) btn.disabled = true;
+    // Show the auto-widening progress strip in the panel header.
+    const wideStrip = matchesPanelEl?.querySelector("[data-eamx-matches-widening]");
+    const wideText = matchesPanelEl?.querySelector("[data-eamx-widening-text]");
+    if (wideStrip) wideStrip.hidden = false;
+    const setProgress = (txt) => {
+      if (wideText) wideText.textContent = txt;
+      if (btn) btn.textContent = txt;
+    };
     // 14 covers the typical full LaPieza listing (we saw 14 pages live).
     // Each page is ~12 cards = ~168 vacantes total. The cumulative pool
     // map dedupes by id so re-visiting a page (e.g. when the loop bails
@@ -3223,7 +3247,7 @@
     let lastFirstAnchorHref = "";
     try {
       for (let page = 1; page <= MAX_PAGES; page++) {
-        btn.textContent = `Página ${page}/${MAX_PAGES} · ${pool.size} vacantes`;
+        setProgress(`🔍 Página ${page}/${MAX_PAGES} · ${pool.size} vacantes`);
         const nextBtn = findLaPiezaNextPageButton();
         if (!nextBtn) break; // single-page result, stop early
         // Capture the first anchor's href BEFORE click so we can confirm
@@ -3281,17 +3305,20 @@
       widerSearchPool = pool;
       await renderMatchesPanelContent();
       const best = matchesCurrentTopN[0]?.score ?? 0;
-      toast(
-        `Análisis ampliado: ${pool.size} vacantes consideradas, mejor match ${best}%`,
-        "success",
-        { durationMs: 4500 }
-      );
+      setProgress(`✓ ${pool.size} vacantes analizadas · mejor ${best}%`);
+      // Hide the progress strip after a short reveal so the user sees the
+      // final count, but the panel returns to a clean state.
+      setTimeout(() => { if (wideStrip) wideStrip.hidden = true; }, 4000);
     } catch (err) {
       console.warn("[EmpleoAutomatico] wider search failed", err);
-      toast("No se pudo ampliar la búsqueda. Intenta de nuevo.", "error");
+      setProgress("No se pudo ampliar la búsqueda");
+      setTimeout(() => { if (wideStrip) wideStrip.hidden = true; }, 4000);
     } finally {
-      btn.disabled = false;
-      btn.textContent = original || "🔍 Buscar más amplio";
+      widerSearchInProgress = false;
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = original || "🔍 Buscar más amplio";
+      }
     }
   }
 
@@ -3567,30 +3594,29 @@
 
     if (bulk) bulk.hidden = false;
 
-    // Show the "Buscar más amplio" button whenever we have enough cards
-    // visible to justify a wider sweep. We hide it when there are < 5
-    // cards because the user should fix their filters first; the auto-
-    // scroll loop won't summon vacancies that don't exist.
-    //
-    // Capped at 100 cards by the loop itself (see onMatchesWiderSearch),
-    // so we also hide the button once we hit that ceiling — there's no
-    // more headroom to grow.
-    const loadMore = matchesPanelEl?.querySelector("[data-eamx-matches-loadmore]");
-    if (loadMore) {
-      // Visibility uses the larger of (live cards, pool size). When the
-      // user reopens the panel after a previous wider-search, pool.size
-      // is the meaningful number — we already have N vacancies cached,
-      // so "Buscar más amplio" should hide once we hit the 100 ceiling.
-      const effective = Math.max(
-        cards.length,
-        (widerSearchPool && widerSearchPool.size) || 0
-      );
-      loadMore.hidden = effective < 5 || effective >= 100;
-    }
-
     // Wire the scroll re-populate handler when there are too few cards.
     if (cards.length < 5) attachMatchesScrollHandler();
     else detachMatchesScrollHandler();
+
+    // Auto-fire the wider-search loop on first panel open. The user
+    // explicitly asked for this in live test: "quita el botón y que
+    // siempre busque más amplio automático". We gate on:
+    //   - !widerSearchPool: only fire once per session — pool survives
+    //     close/reopen
+    //   - !widerSearchInProgress: re-entrancy guard
+    //   - >= 5 cards: <5 means the user's filters are too tight and
+    //     LaPieza pagination won't find more
+    //   - < 100 effective: hit the ceiling, no headroom left
+    const effectiveCards = Math.max(
+      cards.length,
+      (widerSearchPool && widerSearchPool.size) || 0
+    );
+    if (!widerSearchPool && !widerSearchInProgress && effectiveCards >= 5 && effectiveCards < 100) {
+      // Fire-and-forget — onMatchesWiderSearch handles its own progress
+      // strip + final re-render. We don't await so the initial Top-25
+      // paints first and the user sees results immediately.
+      setTimeout(() => onMatchesWiderSearch(null), 250);
+    }
 
     console.log(`[EmpleoAutomatico] best matches panel opened: ${topN.length} matches`);
   }

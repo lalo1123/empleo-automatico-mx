@@ -2105,6 +2105,40 @@
   color: #cbd5e1;
 }
 
+/* Auto-widening progress strip — appears right after the lead line while
+   the background pagination loop is running. Inline pulse dot signals
+   "still scanning". Hides itself after the loop completes (~4s reveal of
+   the final count, then auto-collapse). */
+.eamx-matches-panel__widening {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 22px 10px 22px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(112, 209, 198, 0.08);
+  border: 1px solid rgba(112, 209, 198, 0.18);
+  font-size: 12.5px;
+  color: #a8e6da;
+}
+.eamx-matches-panel__widening-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #5eead4;
+  box-shadow: 0 0 0 0 rgba(94, 234, 212, 0.7);
+  animation: eamxMatchesWideningPulse 1.4s ease-in-out infinite;
+}
+.eamx-matches-panel__widening-text {
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+@keyframes eamxMatchesWideningPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(94, 234, 212, 0.7); }
+  50%      { box-shadow: 0 0 0 6px rgba(94, 234, 212, 0); }
+}
+
 /* Body / list ---------------------------------------------------------- */
 
 .eamx-matches-panel__content {
