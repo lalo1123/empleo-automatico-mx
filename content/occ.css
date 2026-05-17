@@ -2860,13 +2860,25 @@
   gap: 6px;
   width: 100%;
   padding: 11px 16px;
+  margin-top: 8px;
   border-radius: 10px;
+  border: 1px solid rgba(112, 209, 198, 0.4);
+  background: transparent;
+  color: var(--eamx-c-brand-300, #a8e6da);
+  font: 600 13px/1 inherit;
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
+}
+
+/* Primary variant — the actionable "auto-postular" pop. The plain
+   secondary "mark" stays subdued so the auto-postular CTA wins the
+   eye. */
+.eamx-matches-panel__bulk-btn--primary {
+  margin-top: 0;
   border: 1px solid var(--eamx-c-brand-300);
   background: linear-gradient(135deg, #137e7a 0%, #105971 100%);
   color: #ffffff;
   font: 700 13.5px/1 inherit;
-  cursor: pointer;
-  transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
   box-shadow: 0 2px 8px rgba(15, 29, 44, 0.4);
 }
 

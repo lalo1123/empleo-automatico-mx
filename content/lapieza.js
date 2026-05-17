@@ -1148,29 +1148,40 @@
         continue;
       }
 
-      // Final step → STOP. Highlight + tell user to dale Finalizar.
-      // Also attach a one-shot click listener so we KNOW when the user
-      // submits, and can mark the vacancy as "aplicada" in the queue.
-      // The matches panel then renders a "✓ Postulada" badge on that
-      // card on every future scan — user never tries to postular twice.
+      // Detect the step state FIRST. We need to know whether there are
+      // fillable fields before treating Finalize as a stop signal —
+      // LaPieza shows Finalize on the cover step of short forms (only
+      // 2 steps total: CV + Cover-with-Finalize), so an early bail
+      // would skip the cover-letter fill entirely. Live test on
+      // /apply/c77e3107... (Ejecutivo de Ventas B2B en E-Bitware)
+      // proved this: cover textarea was pre-filled with the user's
+      // profile summary, Finalize was visible, chain bailed → user
+      // got the generic "Soy un líder comercial..." copy instead of a
+      // personalized cover letter.
+      const onCvStep = isOnLaPiezaCvStep();
+      let hasCover = false, hasQuestions = false;
+      if (!onCvStep) {
+        try { hasCover = !!findExpressCoverLetterField(); } catch (_) {}
+        try { hasQuestions = (scanQuestionFields() || []).length > 0; } catch (_) {}
+      }
+      const hasFillable = hasCover || hasQuestions;
       const finalizeBtn = findApplyFlowFinalizeBtn();
-      if (finalizeBtn) {
+      console.log("[EmpleoAutomatico] chain step check:", {
+        onCvStep,
+        hasCover,
+        hasQuestions,
+        hasFinalize: !!finalizeBtn,
+        url: location.href.split("?")[0]
+      });
+
+      // Final step (no fillable fields, no CV step pending) → STOP.
+      // Attach one-shot click listener for "applied" tracking on submit.
+      if (finalizeBtn && !hasFillable && !onCvStep) {
         try { highlightExpressSubmitButton(); } catch (_) {}
         attachFinalizeApplyTracker(finalizeBtn);
         toast("✓ Listo. Revisa todo y dale Finalizar.", "success", { durationMs: 6000 });
         break;
       }
-
-      // CV step gets priority — checked BEFORE hasCover/hasQuestions
-      // because LaPieza's apply form can have unrelated text inputs
-      // (e.g. notes) on the CV step that would fool scanQuestionFields
-      // into reporting hasQuestions=true and routing us through the
-      // wrong branch (skipping the modal entirely).
-      const onCvStep = isOnLaPiezaCvStep();
-      console.log("[EmpleoAutomatico] chain step check:", {
-        onCvStep,
-        url: location.href.split("?")[0]
-      });
 
       if (onCvStep) {
         // CV-selection step. Ask the user whether to personalize the CV
@@ -1194,33 +1205,35 @@
           // user knows nothing's broken; just chose the fast path.
           toast("Listo, sigo con tu CV PRINCIPAL.", "info", { durationMs: 2500 });
         }
+      } else if (hasFillable) {
+        // Run Express fill on this step. singleStep:true so
+        // onFabClickExpressApply doesn't recurse back into
+        // chainApplyStepsToFinalize. forceOverwrite:true → since the
+        // user explicitly clicked ⚡ Postular, we replace LaPieza's
+        // pre-existing cover letter text from a previous submission.
+        try {
+          await onFabClickExpressApply({
+            skipCv: true,
+            singleStep: true,
+            forceOverwrite: true
+          });
+        } catch (_) {}
+        await new Promise((r) => setTimeout(r, 2200));
+        if (quickApplyAborted) break;
+        if (!isApplyPage()) break;
       } else {
-        // Has fillable fields on THIS step? Run Express fill (opens overlay,
-        // generates cover letter / Q&A answers, fills them). Skip when there's
-        // nothing to fill (review step) so we don't show a noisy
-        // overlay on every step.
-        let hasCover = false, hasQuestions = false;
-        try { hasCover = !!findExpressCoverLetterField(); } catch (_) {}
-        try { hasQuestions = (scanQuestionFields() || []).length > 0; } catch (_) {}
-        if (hasCover || hasQuestions) {
-          // singleStep:true so onFabClickExpressApply doesn't recurse back
-          // into chainApplyStepsToFinalize (we're already inside it).
-          // forceOverwrite:true → since the user explicitly clicked ⚡ Postular,
-          // we replace LaPieza's pre-existing cover letter text from a
-          // previous submission.
-          try {
-            await onFabClickExpressApply({
-              skipCv: true,
-              singleStep: true,
-              forceOverwrite: true
-            });
-          } catch (_) {}
-          await new Promise((r) => setTimeout(r, 2200));
-          if (quickApplyAborted) break;
-          if (!isApplyPage()) break;
-        } else {
-          console.log("[EmpleoAutomatico] chain step: no cover/Q&A and not CV step, will just click Continuar");
-        }
+        console.log("[EmpleoAutomatico] chain step: no cover/Q&A and not CV step, will just click Continuar");
+      }
+
+      // After filling (or skipping), if Finalize is now the only path
+      // forward (no Continuar button visible), we're done. STOP here
+      // instead of looping forever waiting for a Continuar that won't
+      // come.
+      if (finalizeBtn && !findApplyFlowContinueBtn()) {
+        try { highlightExpressSubmitButton(); } catch (_) {}
+        attachFinalizeApplyTracker(finalizeBtn);
+        toast("✓ Listo. Revisa todo y dale Finalizar.", "success", { durationMs: 6000 });
+        break;
       }
 
       // Click Continuar to advance.
@@ -1326,41 +1339,29 @@
   // there's at least one visible file input on the page.
   function isOnLaPiezaCvStep() {
     try {
-      // Signal A: a "CV"-titled section anywhere on the page. LaPieza
-      // uses non-semantic divs sometimes, so we cast a wider net than
-      // h1/h2/h3 — but ONLY scan elements that look like headings
-      // (short text, prominent role) to avoid false positives on the
-      // entire main element's text content.
-      const candidates = Array.from(document.querySelectorAll(
-        "h1, h2, h3, h4, [class*='title' i], [class*='heading' i], [class*='step' i] p"
-      ));
-      const rx = /a[ñn]ade\s+un\s+cv|cv\s+para\s+postular|selecciona.*cv|sube\s+tu\s+cv/i;
-      const cvHeading = candidates.some((el) => {
-        const t = (el.textContent || "").trim();
-        // Heading-ish: short text. Anything > 120 chars is probably a
-        // paragraph that happens to contain "CV" — skip.
-        if (!t || t.length > 120) return false;
-        return rx.test(t);
-      });
+      // Hard exclusions FIRST: if there's a visible cover textarea OR
+      // visible quiz-step radios, we are demonstrably NOT on the CV
+      // step. This is the strongest signal — LaPieza never shows the
+      // cover textarea on the CV step, and vice versa.
+      if (findExpressCoverLetterField()) return false;
+      if (looksLikeQuizStep()) return false;
 
-      // Signal B: visible CV file input.
-      const hasFileInput = !!findLaPiezaCvFileInput();
-
-      // Signal C: a "PRINCIPAL" CV card or radio with a CV name (the
-      // selected default CV LaPieza shows on the step). Catches cases
-      // where LaPieza hid the file input behind an "Añadir nuevo CV"
-      // button that's only mounted after the user clicks something.
-      let hasPrincipalCard = false;
-      try {
-        const principalEls = Array.from(document.querySelectorAll(
-          "[class*='principal' i], [class*='cv-card' i], [class*='cvCard' i]"
-        )).filter((el) => /principal|cv\s*-/i.test((el.textContent || "").slice(0, 200)));
-        hasPrincipalCard = principalEls.length > 0;
-      } catch (_) {}
-
-      // True if EITHER (heading AND any CV signal) OR (both Signal B + Signal C).
-      return (cvHeading && (hasFileInput || hasPrincipalCard))
-          || (hasFileInput && hasPrincipalCard);
+      // Now check for any CV-related signal in the page body. We scan
+      // a 3KB window of the page text — enough to catch the step title
+      // and the "PRINCIPAL" / "Añadir nuevo CV" labels, while avoiding
+      // pulling the full <main>'s text content into the regex engine.
+      const bodyText = (document.body?.textContent || "").slice(0, 3000).toLowerCase();
+      // Strong matches: explicit CV-step headings.
+      if (/a[ñn]ade\s+un\s+cv|cv\s+para\s+postular|sube\s+tu\s+cv|selecciona.*cv/i.test(bodyText)) {
+        return true;
+      }
+      // Fallback: PRINCIPAL label + CV mention (LaPieza shows the user's
+      // PRINCIPAL CV card on the CV-selection step regardless of the
+      // exact step-title copy).
+      if (/principal/i.test(bodyText) && /cv\s*-|cv\s+principal|a[ñn]adir\s+nuevo\s+cv/i.test(bodyText)) {
+        return true;
+      }
+      return false;
     } catch (_) { return false; }
   }
 
@@ -3002,8 +3003,9 @@
         <div class="eamx-matches-panel__loading">Analizando vacantes…</div>
       </div>
       <div class="eamx-matches-panel__bulk" data-eamx-matches-bulk hidden>
-        <button type="button" class="eamx-matches-panel__bulk-btn" data-action="mark-top-5">⭐ Marcar top 5 de un solo clic</button>
-        <p class="eamx-matches-panel__bulk-hint"><strong>⚡ Postular</strong> = la extensión hace todo automático hasta el botón "Finalizar" (carta, CV, preguntas, quiz). <strong>⭐ Marcar</strong> = solo guarda en tu cola para postular después.</p>
+        <button type="button" class="eamx-matches-panel__bulk-btn eamx-matches-panel__bulk-btn--primary" data-action="bulk-apply-top">⚡ Auto-postular top 5 (abre 5 pestañas)</button>
+        <button type="button" class="eamx-matches-panel__bulk-btn" data-action="mark-top-5">⭐ Solo marcar top 5 en mi cola</button>
+        <p class="eamx-matches-panel__bulk-hint"><strong>⚡ Auto-postular</strong> abre cada vacante en su propia pestaña y dispara la cadena (carta + CV + Q&A + quiz, para en Finalizar). <strong>⭐ Marcar</strong> solo guarda para postular después.</p>
       </div>
     `;
 
@@ -3102,6 +3104,11 @@
     if (what === "mark-top-5") {
       ev.preventDefault();
       onMatchesMarkTop5(action);
+      return;
+    }
+    if (what === "bulk-apply-top") {
+      ev.preventDefault();
+      onMatchesBulkApplyTop(action);
       return;
     }
     if (what === "open-options") {
@@ -3926,6 +3933,69 @@
     } finally {
       btn.disabled = false;
     }
+  }
+
+  // Bulk action: open top N matches in their own tabs and trigger the
+  // chain on each. We DO open N tabs programmatically here — explicitly
+  // gated by the user's click on a labelled "abre N pestañas" button so
+  // the surprise factor is zero. Stagger opens by 6s so chains don't
+  // pile up on the backend and so each new vacancy page has time to
+  // load + load profile before its chain fires.
+  //
+  // Each tab uses the existing quickapply session flag (set per
+  // jobId, consumed by maybeAutoPrewarmFromQuickApply) — same path as
+  // a single ⚡ Postular click.
+  async function onMatchesBulkApplyTop(bulkBtn) {
+    if (!bulkBtn) return;
+    const N = 5;
+    const STAGGER_MS = 6000;
+    const topN = (matchesCurrentTopN || []).slice(0, N).filter((m) => m && m.jobLite && m.jobLite.url);
+    if (!topN.length) {
+      toast("No hay vacantes para postular.", "info");
+      return;
+    }
+    // Honest confirmation — opening 5 tabs IS a lot. Make the user agree.
+    const confirmMsg = `Voy a abrir ${topN.length} pestañas (una por vacante) y disparar la cadena en cada una. ¿Continuar?`;
+    if (!window.confirm(confirmMsg)) return;
+
+    bulkBtn.disabled = true;
+    const original = bulkBtn.innerHTML;
+    bulkBtn.innerHTML = `⏳ Abriendo 0/${topN.length}…`;
+
+    let opened = 0;
+    for (const m of topN) {
+      const jobId = m.jobLite.id;
+      const url = m.jobLite.url;
+      // Set the quickapply flag for this vacancy id so when the new
+      // tab's content script reads it, the chain fires automatically.
+      if (jobId && chrome?.storage?.session) {
+        try {
+          await new Promise((resolve) => {
+            try {
+              chrome.storage.session.set(
+                { [`eamx:quickapply:${jobId}`]: { setAt: Date.now() } },
+                () => resolve()
+              );
+            } catch (_) { resolve(); }
+          });
+        } catch (_) {}
+      }
+      try {
+        window.open(url, "_blank", "noopener");
+        opened++;
+        bulkBtn.innerHTML = `⏳ Abriendo ${opened}/${topN.length}…`;
+      } catch (err) {
+        console.warn("[EmpleoAutomatico] bulk open failed", err);
+      }
+      // Stagger so we don't pile up.
+      if (opened < topN.length) {
+        await new Promise((r) => setTimeout(r, STAGGER_MS));
+      }
+    }
+
+    bulkBtn.disabled = false;
+    bulkBtn.innerHTML = original;
+    toast(`✓ ${opened} pestañas abiertas. Cada una hace su cadena automática.`, "success", { durationMs: 6000 });
   }
 
   // Bulk action: add the top 5 to the queue. Reports partial success.
