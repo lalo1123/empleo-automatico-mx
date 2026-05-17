@@ -1490,8 +1490,23 @@
   }
 
   async function tryUploadTailoredCv() {
+    // Restore lastJob from chrome.storage.session if it's not in-memory.
+    // The /apply/ tab can land here without lastJob populated when the
+    // user came in cold (no /vacante/ pre-visit in the same content-script
+    // context). onFabClickExpressApply does this restore too — we mirror
+    // the pattern so the CV-upload path works in the same scenarios as
+    // the cover-letter / Q&A path. Live test on E-Bitware showed the
+    // "Sin contexto" toast firing even when the user had clearly come
+    // through /vacante/, because the chain reloaded the content script
+    // context on navigation.
     if (!lastJob || !lastJob.title) {
-      console.log("[EmpleoAutomatico] CV upload skip: no lastJob");
+      try {
+        const restored = await restoreJobFromSession();
+        if (restored) lastJob = restored;
+      } catch (_) { /* fall through to the bail */ }
+    }
+    if (!lastJob || !lastJob.title) {
+      console.log("[EmpleoAutomatico] CV upload skip: no lastJob (after session restore attempt)");
       toast("Sin contexto de vacante. Reabre la vacante y reintenta.", "info");
       return false;
     }
