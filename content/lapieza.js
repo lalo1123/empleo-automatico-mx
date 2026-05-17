@@ -736,6 +736,17 @@
   // candidates ordered roughly by document order. Idempotent — does NOT
   // mutate detectedQuestions; the caller decides when to commit.
   function scanQuestionFields() {
+    // Bug-fix: the cover-letter textarea is ALSO labeled like a question
+    // on LaPieza ("¿Por qué eres la persona ideal para este puesto?"), so
+    // looksLikeQuestion happily picks it up — meaning the cover pipeline
+    // AND the Q&A pipeline both filled it, AND the Q&A answer (a separate
+    // Gemini call) overwrote the carefully-crafted cover letter with a
+    // shorter "email-style" response. User reported this as "se pone como
+    // dos veces — primero saca el bueno del resumen y luego en otro pega
+    // como si fuera correo". Exclude the cover field from the Q&A scan
+    // so the cover pipeline owns it cleanly.
+    let coverField = null;
+    try { coverField = findExpressCoverLetterField(); } catch (_) { /* ignore */ }
     const candidates = Array.from(document.querySelectorAll(
       "textarea, input[type='text']"
     ));
@@ -743,6 +754,8 @@
     const seenRefs = new Set();
     for (const el of candidates) {
       if (out.length >= 10) break;
+      // Skip the cover-letter field — owned by the cover pipeline.
+      if (coverField && el === coverField) continue;
       // Visibility: skip hidden/zero-area inputs.
       if (!isVisible(el)) continue;
       // Skip if disabled or read-only — user can't fill them anyway.
@@ -1178,17 +1191,27 @@
         if (quickApplyAborted) break;
         if (!isApplyPage()) break;
       } else if (isOnLaPiezaCvStep()) {
-        // CV-selection step. If we have lastJob context AND LaPieza is
-        // showing a CV file input, generate the tailored-CV PDF on the
-        // backend and inject it into the input BEFORE clicking Continuar.
-        // Fails silently to PRINCIPAL CV if anything goes wrong — the
-        // user always has a valid CV either way.
-        console.log("[EmpleoAutomatico] CV step detected — attempting tailored upload");
-        try { await tryUploadTailoredCv(); } catch (e) {
-          console.warn("[EmpleoAutomatico] tryUploadTailoredCv threw", e);
-        }
+        // CV-selection step. Ask the user whether to personalize the CV
+        // for this vacancy or use their PRINCIPAL — default PRINCIPAL on
+        // 8s timeout so the chain stays fast for power users. Per the
+        // explicit user request: "que agregue si quiere el usuario como
+        // un intermedio de quieres tu cv normal o el nuevo personalizado".
+        console.log("[EmpleoAutomatico] CV step detected — asking user");
+        let choice = "principal";
+        try { choice = await askCvChoice({ timeoutMs: 8000 }); } catch (_) {}
         if (quickApplyAborted) break;
         if (!isApplyPage()) break;
+        if (choice === "personalize") {
+          try { await tryUploadTailoredCv(); } catch (e) {
+            console.warn("[EmpleoAutomatico] tryUploadTailoredCv threw", e);
+          }
+          if (quickApplyAborted) break;
+          if (!isApplyPage()) break;
+        } else {
+          // Explicit PRINCIPAL — surface a one-line confirmation so the
+          // user knows nothing's broken; just chose the fast path.
+          toast("Listo, sigo con tu CV PRINCIPAL.", "info", { durationMs: 2500 });
+        }
       } else {
         console.log("[EmpleoAutomatico] chain step: no cover/Q&A and not CV step, will just click Continuar");
       }
@@ -1358,6 +1381,74 @@
       .replace(/\s+/g, "-")
       .slice(0, 40);
     return jobBit ? `${personName}-${jobBit}.pdf` : `${personName}-CV.pdf`;
+  }
+
+  // Inline modal that pauses the chain on the CV step and asks the user
+  // whether to personalize the CV for this vacancy or use their PRINCIPAL.
+  // Resolves to "personalize" | "principal". Defaults to "principal" if
+  // the user doesn't choose within timeoutMs (so the chain stays fast
+  // and never blocks indefinitely).
+  //
+  // Lives only while open — no module-level state — and resolves once
+  // either button is clicked OR the timeout fires. The modal is keyboard
+  // accessible (Enter = personalize, Esc = principal).
+  function askCvChoice({ timeoutMs = 8000 } = {}) {
+    return new Promise((resolve) => {
+      let settled = false;
+      const settle = (choice) => {
+        if (settled) return;
+        settled = true;
+        try { document.removeEventListener("keydown", onKey, true); } catch (_) {}
+        try { backdrop.remove(); } catch (_) {}
+        clearInterval(tickHandle);
+        resolve(choice);
+      };
+
+      const backdrop = document.createElement("div");
+      backdrop.className = "eamx-cv-choice";
+      backdrop.innerHTML = `
+        <div class="eamx-cv-choice__card" role="dialog" aria-modal="true">
+          <div class="eamx-cv-choice__title">¿Qué CV usar para esta vacante?</div>
+          <p class="eamx-cv-choice__sub">
+            Por defecto seguimos con tu CV PRINCIPAL. Si quieres uno reescrito
+            con las keywords de esta vacante específica, lo generamos en ~10s.
+          </p>
+          <div class="eamx-cv-choice__actions">
+            <button type="button" class="eamx-cv-choice__btn eamx-cv-choice__btn--primary" data-eamx-cv-choice="personalize">
+              ✨ Personalizar para esta vacante
+            </button>
+            <button type="button" class="eamx-cv-choice__btn" data-eamx-cv-choice="principal">
+              Usar mi CV PRINCIPAL
+            </button>
+          </div>
+          <div class="eamx-cv-choice__timer" data-eamx-cv-choice-timer>
+            Sin elegir en <span data-eamx-cv-choice-secs>${Math.ceil(timeoutMs / 1000)}</span>s usaré tu PRINCIPAL.
+          </div>
+        </div>
+      `;
+      document.documentElement.appendChild(backdrop);
+
+      backdrop.addEventListener("click", (ev) => {
+        const btn = ev.target.closest("[data-eamx-cv-choice]");
+        if (!btn) return;
+        settle(btn.getAttribute("data-eamx-cv-choice"));
+      });
+
+      const onKey = (ev) => {
+        if (ev.key === "Enter") { ev.preventDefault(); settle("personalize"); }
+        else if (ev.key === "Escape" || ev.key === "Esc") { ev.preventDefault(); settle("principal"); }
+      };
+      document.addEventListener("keydown", onKey, true);
+
+      // Countdown — visible to the user so the auto-default isn't surprising.
+      const secsEl = backdrop.querySelector("[data-eamx-cv-choice-secs]");
+      let remaining = Math.ceil(timeoutMs / 1000);
+      const tickHandle = setInterval(() => {
+        remaining -= 1;
+        if (secsEl) secsEl.textContent = String(Math.max(0, remaining));
+        if (remaining <= 0) settle("principal");
+      }, 1000);
+    });
   }
 
   async function tryUploadTailoredCv() {
