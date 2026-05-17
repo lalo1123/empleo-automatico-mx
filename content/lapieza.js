@@ -1574,6 +1574,15 @@
     // cachedProfile our auto-quiz and CV-personalized features bail
     // silently mid-flow; detecting at /vacante/ entry lets the user
     // upload their CV BEFORE losing 30+ seconds of chain time.
+    //
+    // BUG-FIX: profile is loaded lazily and ONLY on listing pages by
+    // default (see detectAndMount → isListingPath branch). On a direct
+    // /vacante/<slug> visit, cachedProfile stays null even when the user
+    // has a CV in extension storage. Force-load here so the gate uses
+    // ground truth from chrome.storage.local instead of a stale in-memory
+    // null. Without this, users with a perfectly-loaded CV in the welcome
+    // page were getting the "Para usar la cadena necesitas tu CV" toast.
+    try { await loadProfileOnce(); } catch (_) { /* fall through to gate */ }
     if (!cachedProfile) {
       toast(
         "Para usar la cadena necesitas tu CV cargado en la extensión. Te lleva 30s.",
