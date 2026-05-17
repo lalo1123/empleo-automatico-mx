@@ -1161,36 +1161,18 @@
         break;
       }
 
-      // Has fillable fields on THIS step? Run Express fill (opens overlay,
-      // generates cover letter / Q&A answers, fills them). Skip when there's
-      // nothing to fill (CV step, review step) so we don't show a noisy
-      // overlay on every step.
-      let hasCover = false, hasQuestions = false;
-      try { hasCover = !!findExpressCoverLetterField(); } catch (_) {}
-      try { hasQuestions = (scanQuestionFields() || []).length > 0; } catch (_) {}
-      if (hasCover || hasQuestions) {
-        // singleStep:true so onFabClickExpressApply doesn't recurse back
-        // into chainApplyStepsToFinalize (we're already inside it).
-        // skipCv:true means runExpressFill won't open a print-to-PDF tab;
-        // the tailored-CV PDF upload happens via tryUploadTailoredCv()
-        // below on the dedicated CV step.
-        // forceOverwrite:true → since the user explicitly clicked ⚡ Postular,
-        // we replace LaPieza's pre-existing cover letter text (from a
-        // previous submission) with our newly-generated personalized one.
-        // Without this, runExpressFill's isUserEdited gate (>30 chars =
-        // "user edited, leave alone") meant the chain never updated text
-        // for vacancies where LaPieza had pre-populated.
-        try {
-          await onFabClickExpressApply({
-            skipCv: true,
-            singleStep: true,
-            forceOverwrite: true
-          });
-        } catch (_) {}
-        await new Promise((r) => setTimeout(r, 2200));
-        if (quickApplyAborted) break;
-        if (!isApplyPage()) break;
-      } else if (isOnLaPiezaCvStep()) {
+      // CV step gets priority — checked BEFORE hasCover/hasQuestions
+      // because LaPieza's apply form can have unrelated text inputs
+      // (e.g. notes) on the CV step that would fool scanQuestionFields
+      // into reporting hasQuestions=true and routing us through the
+      // wrong branch (skipping the modal entirely).
+      const onCvStep = isOnLaPiezaCvStep();
+      console.log("[EmpleoAutomatico] chain step check:", {
+        onCvStep,
+        url: location.href.split("?")[0]
+      });
+
+      if (onCvStep) {
         // CV-selection step. Ask the user whether to personalize the CV
         // for this vacancy or use their PRINCIPAL — default PRINCIPAL on
         // 8s timeout so the chain stays fast for power users. Per the
@@ -1213,7 +1195,32 @@
           toast("Listo, sigo con tu CV PRINCIPAL.", "info", { durationMs: 2500 });
         }
       } else {
-        console.log("[EmpleoAutomatico] chain step: no cover/Q&A and not CV step, will just click Continuar");
+        // Has fillable fields on THIS step? Run Express fill (opens overlay,
+        // generates cover letter / Q&A answers, fills them). Skip when there's
+        // nothing to fill (review step) so we don't show a noisy
+        // overlay on every step.
+        let hasCover = false, hasQuestions = false;
+        try { hasCover = !!findExpressCoverLetterField(); } catch (_) {}
+        try { hasQuestions = (scanQuestionFields() || []).length > 0; } catch (_) {}
+        if (hasCover || hasQuestions) {
+          // singleStep:true so onFabClickExpressApply doesn't recurse back
+          // into chainApplyStepsToFinalize (we're already inside it).
+          // forceOverwrite:true → since the user explicitly clicked ⚡ Postular,
+          // we replace LaPieza's pre-existing cover letter text from a
+          // previous submission.
+          try {
+            await onFabClickExpressApply({
+              skipCv: true,
+              singleStep: true,
+              forceOverwrite: true
+            });
+          } catch (_) {}
+          await new Promise((r) => setTimeout(r, 2200));
+          if (quickApplyAborted) break;
+          if (!isApplyPage()) break;
+        } else {
+          console.log("[EmpleoAutomatico] chain step: no cover/Q&A and not CV step, will just click Continuar");
+        }
       }
 
       // Click Continuar to advance.
@@ -1319,13 +1326,41 @@
   // there's at least one visible file input on the page.
   function isOnLaPiezaCvStep() {
     try {
-      const headings = Array.from(document.querySelectorAll("h1, h2, h3"));
-      const cvHeading = headings.some((h) => {
-        const t = (h.textContent || "").trim();
-        return /a[ñn]ade\s+un\s+cv|cv\s+para\s+postular|selecciona.*cv/i.test(t);
+      // Signal A: a "CV"-titled section anywhere on the page. LaPieza
+      // uses non-semantic divs sometimes, so we cast a wider net than
+      // h1/h2/h3 — but ONLY scan elements that look like headings
+      // (short text, prominent role) to avoid false positives on the
+      // entire main element's text content.
+      const candidates = Array.from(document.querySelectorAll(
+        "h1, h2, h3, h4, [class*='title' i], [class*='heading' i], [class*='step' i] p"
+      ));
+      const rx = /a[ñn]ade\s+un\s+cv|cv\s+para\s+postular|selecciona.*cv|sube\s+tu\s+cv/i;
+      const cvHeading = candidates.some((el) => {
+        const t = (el.textContent || "").trim();
+        // Heading-ish: short text. Anything > 120 chars is probably a
+        // paragraph that happens to contain "CV" — skip.
+        if (!t || t.length > 120) return false;
+        return rx.test(t);
       });
-      if (!cvHeading) return false;
-      return !!findLaPiezaCvFileInput();
+
+      // Signal B: visible CV file input.
+      const hasFileInput = !!findLaPiezaCvFileInput();
+
+      // Signal C: a "PRINCIPAL" CV card or radio with a CV name (the
+      // selected default CV LaPieza shows on the step). Catches cases
+      // where LaPieza hid the file input behind an "Añadir nuevo CV"
+      // button that's only mounted after the user clicks something.
+      let hasPrincipalCard = false;
+      try {
+        const principalEls = Array.from(document.querySelectorAll(
+          "[class*='principal' i], [class*='cv-card' i], [class*='cvCard' i]"
+        )).filter((el) => /principal|cv\s*-/i.test((el.textContent || "").slice(0, 200)));
+        hasPrincipalCard = principalEls.length > 0;
+      } catch (_) {}
+
+      // True if EITHER (heading AND any CV signal) OR (both Signal B + Signal C).
+      return (cvHeading && (hasFileInput || hasPrincipalCard))
+          || (hasFileInput && hasPrincipalCard);
     } catch (_) { return false; }
   }
 
