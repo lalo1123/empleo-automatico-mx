@@ -2452,6 +2452,89 @@
   color: #64748b;
 }
 
+/* Bulk auto-postular progress card — appears inline above the best-
+   matches list while a bulk run is in flight. Shows live status per
+   vacancy so the user sees what's happening across all 5 tabs without
+   having to switch between them. */
+.eamx-bulk-progress {
+  margin: 12px 22px 14px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(31, 159, 149, 0.08);
+  border: 1px solid rgba(168, 230, 218, 0.32);
+}
+.eamx-bulk-progress__head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 10px;
+}
+.eamx-bulk-progress__title {
+  font: 700 13px inherit;
+  color: #a8e6da;
+}
+.eamx-bulk-progress__hint {
+  font: 12px inherit;
+  color: #94a3b8;
+}
+.eamx-bulk-progress__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.eamx-bulk-progress__item {
+  display: grid;
+  grid-template-columns: 22px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.35);
+  border: 1px solid rgba(94, 234, 212, 0.12);
+  transition: background 150ms ease;
+}
+.eamx-bulk-progress__item--running {
+  background: rgba(31, 159, 149, 0.14);
+  border-color: rgba(94, 234, 212, 0.32);
+}
+.eamx-bulk-progress__item--error {
+  background: rgba(185, 28, 28, 0.12);
+  border-color: rgba(252, 165, 165, 0.32);
+}
+.eamx-bulk-progress__num {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(94, 234, 212, 0.18);
+  color: #5eead4;
+  display: grid;
+  place-items: center;
+  font: 700 11px inherit;
+}
+.eamx-bulk-progress__body { min-width: 0; }
+.eamx-bulk-progress__job {
+  font: 600 12.5px inherit;
+  color: #e2e8f0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.eamx-bulk-progress__company {
+  font: 11.5px inherit;
+  color: #94a3b8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.eamx-bulk-progress__status {
+  font: 600 11.5px inherit;
+  color: #cbd5e1;
+  white-space: nowrap;
+}
+
 /* Tiny "✓ Ya apliqué" link under the Marcar/Postular row. Manual marker
    for vacancies the user applied to outside our chain — easy to miss
    when intentionally browsing, easy to find when wanting to clean up

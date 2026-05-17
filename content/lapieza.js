@@ -1490,12 +1490,31 @@
   async function tryUploadTailoredCv() {
     if (!lastJob || !lastJob.title) {
       console.log("[EmpleoAutomatico] CV upload skip: no lastJob");
+      toast("Sin contexto de vacante. Reabre la vacante y reintenta.", "info");
       return false;
     }
-    const fileInput = findLaPiezaCvFileInput();
+    // Look for the file input. LaPieza hides it behind a click on
+    // "Añadir nuevo CV", so on first detect it might not be in DOM
+    // yet. Auto-click that trigger button + poll for the input.
+    let fileInput = findLaPiezaCvFileInput();
     if (!fileInput) {
-      console.log("[EmpleoAutomatico] CV upload skip: no file input found on page");
-      return false;
+      console.log("[EmpleoAutomatico] CV upload: no file input — clicking 'Añadir nuevo CV' trigger");
+      const addCvBtn = Array.from(document.querySelectorAll("button, a"))
+        .find((el) => /a[ñn]adir\s+nuevo\s+cv/i.test((el.textContent || "").trim()));
+      if (addCvBtn) {
+        try { addCvBtn.click(); } catch (_) {}
+        // Poll up to 3s for the file input to appear.
+        for (let i = 0; i < 15; i++) {
+          await new Promise((r) => setTimeout(r, 200));
+          fileInput = findLaPiezaCvFileInput();
+          if (fileInput) break;
+        }
+      }
+      if (!fileInput) {
+        console.log("[EmpleoAutomatico] CV upload skip: no file input found even after triggering");
+        toast("No encontré dónde subir el CV. Sigo con tu PRINCIPAL.", "info", { durationMs: 4000 });
+        return false;
+      }
     }
     console.log("[EmpleoAutomatico] CV upload starting — fileInput found:", fileInput);
 
@@ -3954,18 +3973,24 @@
       toast("No hay vacantes para postular.", "info");
       return;
     }
-    // Honest confirmation — opening 5 tabs IS a lot. Make the user agree.
-    const confirmMsg = `Voy a abrir ${topN.length} pestañas (una por vacante) y disparar la cadena en cada una. ¿Continuar?`;
-    if (!window.confirm(confirmMsg)) return;
+
+    // Inline progress card inside the matches panel — user sees live
+    // status of each vacancy in the bulk run without leaving this tab.
+    // Persists across the stagger loop AND across the open tabs by
+    // listening on chrome.storage.session for per-tab status updates.
+    const progressHost = renderBulkProgressCard(topN);
 
     bulkBtn.disabled = true;
     const original = bulkBtn.innerHTML;
-    bulkBtn.innerHTML = `⏳ Abriendo 0/${topN.length}…`;
+    bulkBtn.innerHTML = `⏳ Lanzando ${topN.length}…`;
 
     let opened = 0;
-    for (const m of topN) {
+    for (let i = 0; i < topN.length; i++) {
+      const m = topN[i];
       const jobId = m.jobLite.id;
       const url = m.jobLite.url;
+      // Mark this slot as "abriendo" in the progress card.
+      updateBulkProgressItem(progressHost, jobId, "opening", "Abriendo pestaña…");
       // Set the quickapply flag for this vacancy id so when the new
       // tab's content script reads it, the chain fires automatically.
       if (jobId && chrome?.storage?.session) {
@@ -3983,19 +4008,78 @@
       try {
         window.open(url, "_blank", "noopener");
         opened++;
-        bulkBtn.innerHTML = `⏳ Abriendo ${opened}/${topN.length}…`;
+        updateBulkProgressItem(progressHost, jobId, "running", "Cadena corriendo en su pestaña");
       } catch (err) {
         console.warn("[EmpleoAutomatico] bulk open failed", err);
+        updateBulkProgressItem(progressHost, jobId, "error", "No se pudo abrir");
       }
+      bulkBtn.innerHTML = `⏳ ${opened}/${topN.length} en curso…`;
       // Stagger so we don't pile up.
-      if (opened < topN.length) {
+      if (i < topN.length - 1) {
         await new Promise((r) => setTimeout(r, STAGGER_MS));
       }
     }
 
     bulkBtn.disabled = false;
     bulkBtn.innerHTML = original;
-    toast(`✓ ${opened} pestañas abiertas. Cada una hace su cadena automática.`, "success", { durationMs: 6000 });
+    toast(`✓ ${opened} pestañas abiertas. Revisa cada una y dale Finalizar.`, "success", { durationMs: 6000 });
+  }
+
+  // Render the inline progress card under the bulk buttons. Returns the
+  // host element so subsequent updateBulkProgressItem calls can patch
+  // individual rows without re-rendering the whole thing.
+  function renderBulkProgressCard(topN) {
+    // Remove any prior card (if user clicked bulk twice).
+    try { matchesPanelEl?.querySelector("[data-eamx-bulk-progress]")?.remove(); } catch (_) {}
+    const host = document.createElement("div");
+    host.className = "eamx-bulk-progress";
+    host.setAttribute("data-eamx-bulk-progress", "");
+    host.innerHTML = `
+      <div class="eamx-bulk-progress__head">
+        <span class="eamx-bulk-progress__title">⚡ Auto-postulación en curso (${topN.length})</span>
+        <span class="eamx-bulk-progress__hint">Cada vacante en su propia pestaña — verifica cada una y dale Finalizar</span>
+      </div>
+      <ul class="eamx-bulk-progress__list">
+        ${topN.map((m, i) => `
+          <li class="eamx-bulk-progress__item" data-bulk-item="${escapeHtml(m.jobLite.id)}">
+            <span class="eamx-bulk-progress__num">${i + 1}</span>
+            <div class="eamx-bulk-progress__body">
+              <div class="eamx-bulk-progress__job">${escapeHtml(m.jobLite.title || "(sin título)")}</div>
+              <div class="eamx-bulk-progress__company">${escapeHtml(m.jobLite.company || "")}</div>
+            </div>
+            <span class="eamx-bulk-progress__status" data-bulk-status>⏸ En espera</span>
+          </li>
+        `).join("")}
+      </ul>
+    `;
+    // Insert at the top of the content area so it's visible above the
+    // best-matches list.
+    const content = matchesPanelEl?.querySelector("[data-eamx-matches-content]");
+    if (content && content.parentElement) {
+      content.parentElement.insertBefore(host, content);
+    } else if (matchesPanelEl) {
+      matchesPanelEl.appendChild(host);
+    }
+    return host;
+  }
+
+  // Patch a single row in the bulk progress card.
+  // status: "opening" | "running" | "error"
+  function updateBulkProgressItem(host, jobId, status, text) {
+    if (!host || !jobId) return;
+    let row;
+    try { row = host.querySelector(`[data-bulk-item="${CSS.escape(jobId)}"]`); } catch (_) {}
+    if (!row) return;
+    const statusEl = row.querySelector("[data-bulk-status]");
+    if (!statusEl) return;
+    const icon = status === "running" ? "🔄" : status === "error" ? "✗" : "⏳";
+    statusEl.textContent = `${icon} ${text}`;
+    row.classList.remove(
+      "eamx-bulk-progress__item--opening",
+      "eamx-bulk-progress__item--running",
+      "eamx-bulk-progress__item--error"
+    );
+    row.classList.add(`eamx-bulk-progress__item--${status}`);
   }
 
   // Bulk action: add the top 5 to the queue. Reports partial success.
