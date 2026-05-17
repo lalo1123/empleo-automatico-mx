@@ -26,6 +26,8 @@
     REJECT_DRAFT: "REJECT_DRAFT",
     OPEN_BILLING: "OPEN_BILLING",
     OPEN_WELCOME: "OPEN_WELCOME",
+    OPEN_BACKGROUND_TAB: "OPEN_BACKGROUND_TAB",
+    FOCUS_TAB: "FOCUS_TAB",
     GENERATE_CV: "GENERATE_CV",
     GENERATE_CV_PDF: "GENERATE_CV_PDF",
     OPEN_GENERATED_CV: "OPEN_GENERATED_CV",
@@ -3022,9 +3024,9 @@
         <div class="eamx-matches-panel__loading">Analizando vacantes…</div>
       </div>
       <div class="eamx-matches-panel__bulk" data-eamx-matches-bulk hidden>
-        <button type="button" class="eamx-matches-panel__bulk-btn eamx-matches-panel__bulk-btn--primary" data-action="bulk-apply-top">⚡ Auto-postular top 5 (abre 5 pestañas)</button>
+        <button type="button" class="eamx-matches-panel__bulk-btn eamx-matches-panel__bulk-btn--primary" data-action="bulk-apply-top">⚡ Auto-postular top 5 (sin sacarte de aquí)</button>
         <button type="button" class="eamx-matches-panel__bulk-btn" data-action="mark-top-5">⭐ Solo marcar top 5 en mi cola</button>
-        <p class="eamx-matches-panel__bulk-hint"><strong>⚡ Auto-postular</strong> abre cada vacante en su propia pestaña y dispara la cadena (carta + CV + Q&A + quiz, para en Finalizar). <strong>⭐ Marcar</strong> solo guarda para postular después.</p>
+        <p class="eamx-matches-panel__bulk-hint"><strong>⚡ Auto-postular</strong> abre cada vacante en una pestaña EN SEGUNDO PLANO y corre la cadena (carta + CV + Q&A + quiz). Te quedas aquí viendo el progreso; haces clic en "Ver pestaña" cuando quieras revisar y Finalizar. <strong>⭐ Marcar</strong> solo guarda para postular después.</p>
       </div>
     `;
 
@@ -3128,6 +3130,16 @@
     if (what === "bulk-apply-top") {
       ev.preventDefault();
       onMatchesBulkApplyTop(action);
+      return;
+    }
+    if (what === "focus-tab") {
+      // "Ver pestaña" inside the bulk-progress card — message the
+      // background to bring that background tab to focus.
+      ev.preventDefault();
+      const tabId = Number(action.getAttribute("data-tab-id"));
+      if (Number.isFinite(tabId)) {
+        try { chrome.runtime.sendMessage({ type: MSG.FOCUS_TAB, tabId }); } catch (_) {}
+      }
       return;
     }
     if (what === "open-options") {
@@ -4005,12 +4017,23 @@
           });
         } catch (_) {}
       }
+      // Open the tab via the background service worker so it lands as
+      // active:false (background). Keeps the user anchored in the
+      // matches panel watching the progress card instead of getting
+      // 5 tabs slammed in their face.
+      let openedTabId = null;
       try {
-        window.open(url, "_blank", "noopener");
-        opened++;
-        updateBulkProgressItem(progressHost, jobId, "running", "Cadena corriendo en su pestaña");
+        const res = await sendMsg({ type: MSG.OPEN_BACKGROUND_TAB, url });
+        if (res && res.ok && res.tabId != null) {
+          openedTabId = res.tabId;
+          opened++;
+          updateBulkProgressItem(progressHost, jobId, "running", "Cadena corriendo en background", openedTabId);
+        } else {
+          console.warn("[EmpleoAutomatico] bulk open failed (msg)", res);
+          updateBulkProgressItem(progressHost, jobId, "error", (res && res.message) || "No se pudo abrir");
+        }
       } catch (err) {
-        console.warn("[EmpleoAutomatico] bulk open failed", err);
+        console.warn("[EmpleoAutomatico] bulk open failed (throw)", err);
         updateBulkProgressItem(progressHost, jobId, "error", "No se pudo abrir");
       }
       bulkBtn.innerHTML = `⏳ ${opened}/${topN.length} en curso…`;
@@ -4022,7 +4045,11 @@
 
     bulkBtn.disabled = false;
     bulkBtn.innerHTML = original;
-    toast(`✓ ${opened} pestañas abiertas. Revisa cada una y dale Finalizar.`, "success", { durationMs: 6000 });
+    toast(
+      `✓ ${opened} cadenas corriendo en segundo plano. Dale "Ver pestaña" en cada fila para Finalizar.`,
+      "success",
+      { durationMs: 7000 }
+    );
   }
 
   // Render the inline progress card under the bulk buttons. Returns the
@@ -4065,7 +4092,10 @@
 
   // Patch a single row in the bulk progress card.
   // status: "opening" | "running" | "error"
-  function updateBulkProgressItem(host, jobId, status, text) {
+  // tabId (optional): when provided, replaces the status text with a
+  // "Ver pestaña X" button that focuses the background tab so the user
+  // can review/Finalize without hunting through their tab bar.
+  function updateBulkProgressItem(host, jobId, status, text, tabId) {
     if (!host || !jobId) return;
     let row;
     try { row = host.querySelector(`[data-bulk-item="${CSS.escape(jobId)}"]`); } catch (_) {}
@@ -4073,7 +4103,16 @@
     const statusEl = row.querySelector("[data-bulk-status]");
     if (!statusEl) return;
     const icon = status === "running" ? "🔄" : status === "error" ? "✗" : "⏳";
-    statusEl.textContent = `${icon} ${text}`;
+    if (status === "running" && Number.isFinite(tabId)) {
+      // Replace static text with a clickable button — user jumps to the
+      // tab when ready to Finalize.
+      statusEl.innerHTML = `
+        <span class="eamx-bulk-progress__status-text">${icon} ${escapeHtml(text)}</span>
+        <button type="button" class="eamx-bulk-progress__jump" data-action="focus-tab" data-tab-id="${tabId}">Ver pestaña →</button>
+      `;
+    } else {
+      statusEl.textContent = `${icon} ${text}`;
+    }
     row.classList.remove(
       "eamx-bulk-progress__item--opening",
       "eamx-bulk-progress__item--running",

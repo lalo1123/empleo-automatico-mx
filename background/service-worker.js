@@ -701,6 +701,44 @@ async function handleOpenBilling() {
   }
 }
 
+// Open an arbitrary URL in a BACKGROUND tab (active:false). Used by the
+// matches-panel bulk auto-postular flow — keeps the user anchored to
+// the source tab while 5 chains spin up next to it. Returns the new
+// tab's id so the caller can wire a "Ver pestaña" jump-to button.
+async function handleOpenBackgroundTab(msg) {
+  const url = msg && typeof msg.url === "string" ? msg.url : "";
+  if (!url) {
+    return { ok: false, error: ERROR_CODES.INVALID_INPUT, message: "Falta URL" };
+  }
+  try {
+    const tab = await chrome.tabs.create({ url, active: false });
+    return { ok: true, tabId: tab && tab.id };
+  } catch (e) {
+    return { ok: false, error: ERROR_CODES.SERVER_ERROR, message: (e && e.message) || "No se pudo abrir la pestaña" };
+  }
+}
+
+// Focus an existing tab by id. Used when the user clicks "Ver pestaña"
+// on a bulk-progress row.
+async function handleFocusTab(msg) {
+  const tabId = msg && Number(msg.tabId);
+  if (!Number.isFinite(tabId)) {
+    return { ok: false, error: ERROR_CODES.INVALID_INPUT, message: "Falta tabId" };
+  }
+  try {
+    await chrome.tabs.update(tabId, { active: true });
+    // Also focus the window holding that tab — the user may have it
+    // minimized or behind another window.
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      if (tab && tab.windowId) await chrome.windows.update(tab.windowId, { focused: true });
+    } catch (_) { /* ignore — fallback to just activating the tab */ }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: ERROR_CODES.SERVER_ERROR, message: (e && e.message) || "Esa pestaña ya no existe" };
+  }
+}
+
 // Open the first-install welcome page in a new tab. Content scripts can't
 // chrome.tabs.create directly — they message us and we open it. This is
 // also more reliable than window.open(chrome.runtime.getURL(...)) from a
@@ -777,6 +815,10 @@ onMessage(async (msg) => {
       return handleOpenBilling();
     case MESSAGE_TYPES.OPEN_WELCOME:
       return handleOpenWelcome();
+    case MESSAGE_TYPES.OPEN_BACKGROUND_TAB:
+      return handleOpenBackgroundTab(msg);
+    case MESSAGE_TYPES.FOCUS_TAB:
+      return handleFocusTab(msg);
     case MESSAGE_TYPES.ADMIN_SET_PLAN:
       return handleAdminSetPlan(msg);
     case MESSAGE_TYPES.GENERATE_CV:

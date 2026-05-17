@@ -2533,6 +2533,26 @@
   font: 600 11.5px inherit;
   color: #cbd5e1;
   white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.eamx-bulk-progress__status-text {
+  white-space: nowrap;
+}
+.eamx-bulk-progress__jump {
+  padding: 4px 9px;
+  border-radius: 6px;
+  border: 1px solid rgba(94, 234, 212, 0.32);
+  background: rgba(94, 234, 212, 0.1);
+  color: #5eead4;
+  font: 600 11px inherit;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.eamx-bulk-progress__jump:hover {
+  background: rgba(94, 234, 212, 0.22);
+  border-color: rgba(94, 234, 212, 0.5);
 }
 
 /* Tiny "✓ Ya apliqué" link under the Marcar/Postular row. Manual marker
