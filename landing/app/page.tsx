@@ -35,16 +35,20 @@ export const metadata: Metadata = {
 
 const FAQ_ITEMS = [
   {
-    q: "¿En qué se diferencia de AIApply, LazyApply o Sonara?",
-    a: "Esas herramientas postulan automáticamente sin que veas nada. Suena rápido, pero el resultado en la práctica son cartas genéricas idénticas para 700 vacantes y cuentas restringidas: estudios de 2026 reportan que ~23% de los usuarios de auto-apply tienen su cuenta de LinkedIn restringida en los primeros 90 días. Empleo Automático MX hace lo opuesto: 1 carta personalizada por vacante con tu CV real, el botón de enviar lo activas tú, y nunca te van a banear porque cada postulación se ve como una sesión humana normal.",
+    q: "¿En qué se diferencia de AIApply, LazyApply, Sonara o Breeze Apply?",
+    a: "Esas herramientas postulan automáticamente sin que veas nada, sin personalizar la carta y sin caps de seguridad. El resultado: cartas genéricas idénticas para 700 vacantes y cuentas restringidas — estudios de 2026 reportan ~23% de usuarios con LinkedIn restringido en los primeros 90 días (Growleads, 2026). Empleo Automático MX hace lo opuesto: 1 carta personalizada por vacante + CV reescrito específicamente para esa chamba, y por defecto tú das el último clic. Si quieres auto-submit, está disponible en Premium pero con caps responsables (15/día en LinkedIn e Indeed, 30/día en otros portales) — el rango que los portales toleran sin marcar como bot.",
+  },
+  {
+    q: "¿Tiene auto-submit (Modo Auto)?",
+    a: "Sí, pero gated por seguridad. En planes Free y Pro, tú siempre das el clic final (cero riesgo de ban). En Premium puedes activar Modo Auto que envía automáticamente, con 4 protecciones: (1) acepta el disclaimer una vez antes de activarlo, (2) caps por portal (15/día LinkedIn/Indeed, 30/día otros, 110/día total), (3) delay aleatorio 30-90s entre postulaciones, (4) detección de CAPTCHA y day-pause automático si fallan 2 postulaciones seguidas. No es velocidad bruta — es velocidad responsable que respeta los límites de los portales.",
   },
   {
     q: "¿Es legal?",
-    a: "Sí. Empleo Automático MX no envía postulaciones sin tu aprobación. Siempre eres tú quien revisa la carta y da el último clic para enviar. No hacemos scraping masivo ni automatizamos envíos sin supervisión humana.",
+    a: "Sí. La extensión funciona como una ayuda dentro de tu sesión normal en el navegador (NO scraping masivo, NO acceso a credenciales del portal). En planes Free/Pro tú das el último clic explícito. En Premium con Modo Auto firmas un disclaimer y aceptas los caps de seguridad por adelantado.",
   },
   {
     q: "¿Qué pasa si los portales bloquean cuentas por bots?",
-    a: "No hay riesgo. La extensión funciona como una ayuda dentro de tu sesión normal en el navegador. Generamos la carta y rellenamos el formulario, pero el botón de enviar solo lo activas tú. Cada portal ve una sesión humana normal. En LinkedIn e Indeed además aplicamos un límite responsable de 15 cartas al día para proteger tu cuenta.",
+    a: "Por diseño, no debería pasarte. Cada postulación se ve como una sesión humana normal (mismo browser, mismas cookies, mismo IP). Free/Pro: tú das el clic, los portales literalmente no pueden distinguir. Premium con Modo Auto: 15/día LinkedIn/Indeed es el rango documentado como seguro por la industria; delays aleatorios entre envíos imitan comportamiento humano; CAPTCHA detector pausa el flujo si el portal sospecha. Si por alguna razón el portal restringe tu cuenta usando Empleo Automático MX, contáctanos.",
   },
   {
     q: "¿Puedo cancelar cuando quiera?",
@@ -421,8 +425,8 @@ export default function LandingPage() {
 
             <div className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
               <FeatureCard
-                title="No te van a banear"
-                description="Cada postulación se ve como sesión humana normal. Cero riesgo de que LinkedIn restrinja tu cuenta como pasa con las herramientas que postulan en automático."
+                title="Auto-submit seguro (Premium)"
+                description="Sí postulamos automático en Premium — pero con caps de 15/día en LinkedIn e Indeed, delays aleatorios y CAPTCHA detector. Velocidad responsable, sin el ban que viene con Breeze, AIApply o LazyApply."
                 icon={
                   <svg
                     viewBox="0 0 24 24"

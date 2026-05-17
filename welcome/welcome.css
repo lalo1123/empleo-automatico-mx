@@ -454,6 +454,57 @@ html, body {
 }
 
 /* =============================================================================
+ * Modo Auto upsell (Step 3) — Premium feature surface
+ * ============================================================================= */
+.modo-auto-upsell {
+  margin-top: 18px;
+  padding: 16px 18px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--c-brand-200);
+  background: linear-gradient(135deg, var(--c-brand-50) 0%, #ffffff 80%);
+}
+.modo-auto-upsell__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.modo-auto-upsell__badge {
+  flex: none;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--c-brand-700);
+  color: #ffffff;
+  font: 700 10px var(--font-sans);
+  letter-spacing: 0.06em;
+}
+.modo-auto-upsell__title {
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--c-ink);
+}
+.modo-auto-upsell__sub {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--c-ink-soft);
+}
+.modo-auto-upsell__cta {
+  display: inline-block;
+  padding: 6px 14px;
+  background: transparent;
+  border: 1px solid var(--c-brand-700);
+  color: var(--c-brand-700);
+  border-radius: var(--r-sm);
+  font: 600 13px var(--font-sans);
+  text-decoration: none;
+  transition: background 150ms ease;
+}
+.modo-auto-upsell__cta:hover {
+  background: var(--c-brand-700);
+  color: #ffffff;
+}
+
+/* =============================================================================
  * Footer
  * ============================================================================= */
 .foot {
