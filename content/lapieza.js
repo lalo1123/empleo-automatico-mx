@@ -1581,13 +1581,33 @@
 
     if (!pdfBase64) return false;
 
-    let file;
+    let bytes, file, blobUrl;
     try {
-      const bytes = base64ToBytes(pdfBase64);
+      bytes = base64ToBytes(pdfBase64);
       const filename = buildCvFilename(lastJob, cachedProfile);
       file = new File([bytes], filename, { type: "application/pdf" });
+      // Build a blob URL for the preview iframe. Revoked after the
+      // modal resolves (success path) or on bail.
+      const blob = new Blob([bytes], { type: "application/pdf" });
+      blobUrl = URL.createObjectURL(blob);
     } catch (err) {
       console.warn("[EmpleoAutomatico] CV decode failed", err);
+      return false;
+    }
+
+    // Preview modal — show the generated PDF in an iframe and let the
+    // user explicitly confirm before we inject it into LaPieza's file
+    // input. Replaces the previous "trust me, uploading" black-box UX.
+    let confirmed = false;
+    try {
+      confirmed = await askCvPreviewConfirm(blobUrl, lastJob);
+    } catch (_) { confirmed = false; }
+
+    // Always revoke the blob URL — browsers don't reclaim it on its own.
+    try { URL.revokeObjectURL(blobUrl); } catch (_) {}
+
+    if (!confirmed) {
+      toast("Cancelado. Sigo con tu CV PRINCIPAL.", "info", { durationMs: 3000 });
       return false;
     }
 
@@ -1611,6 +1631,66 @@
     toast("✓ CV personalizado subido. Validando…", "success", { durationMs: 3000 });
     await new Promise((r) => setTimeout(r, 2000));
     return true;
+  }
+
+  // Preview modal — shown after the backend returns the personalized
+  // PDF, BEFORE we inject it into LaPieza's file input. Resolves true
+  // when the user explicitly confirms "Sí, subir este CV" and false
+  // on cancel / Escape / 30s timeout. The user always knows what's
+  // being uploaded on their behalf.
+  function askCvPreviewConfirm(blobUrl, job) {
+    return new Promise((resolve) => {
+      let settled = false;
+      const settle = (val) => {
+        if (settled) return;
+        settled = true;
+        try { document.removeEventListener("keydown", onKey, true); } catch (_) {}
+        try { backdrop.remove(); } catch (_) {}
+        resolve(val);
+      };
+      const jobLabel = `${(job && job.title) || "esta vacante"}${(job && job.company) ? " · " + job.company : ""}`;
+      const backdrop = document.createElement("div");
+      backdrop.className = "eamx-cv-preview";
+      backdrop.innerHTML = `
+        <div class="eamx-cv-preview__card" role="dialog" aria-modal="true">
+          <div class="eamx-cv-preview__head">
+            <div>
+              <div class="eamx-cv-preview__title">CV personalizado generado</div>
+              <div class="eamx-cv-preview__sub">Para ${escapeHtml(jobLabel)}</div>
+            </div>
+            <button type="button" class="eamx-cv-preview__close" data-eamx-cv-preview="cancel" aria-label="Cancelar">✕</button>
+          </div>
+          <div class="eamx-cv-preview__viewer">
+            <iframe src="${blobUrl}" title="Preview CV" loading="eager"></iframe>
+          </div>
+          <div class="eamx-cv-preview__actions">
+            <button type="button" class="eamx-cv-preview__btn" data-eamx-cv-preview="cancel">
+              Cancelar — usar PRINCIPAL
+            </button>
+            <button type="button" class="eamx-cv-preview__btn eamx-cv-preview__btn--primary" data-eamx-cv-preview="confirm">
+              ✓ Sí, subir este CV
+            </button>
+          </div>
+        </div>
+      `;
+      document.documentElement.appendChild(backdrop);
+
+      backdrop.addEventListener("click", (ev) => {
+        const btn = ev.target.closest("[data-eamx-cv-preview]");
+        if (!btn) return;
+        settle(btn.getAttribute("data-eamx-cv-preview") === "confirm");
+      });
+      const onKey = (ev) => {
+        if (ev.key === "Escape" || ev.key === "Esc") { ev.preventDefault(); settle(false); }
+        else if (ev.key === "Enter") { ev.preventDefault(); settle(true); }
+      };
+      document.addEventListener("keydown", onKey, true);
+
+      // Hard timeout — 30s is generous for the user to scan the PDF.
+      // Default to PRINCIPAL on timeout (safe fallback) so the chain
+      // doesn't deadlock forever if the user wanders off.
+      setTimeout(() => settle(false), 30_000);
+    });
   }
 
   // Match LaPieza's apply-flow "Continuar" button (NOT the final submit).

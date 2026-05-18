@@ -2373,6 +2373,115 @@
   opacity: 1;
 }
 
+/* CV-preview modal — appears after the backend returns the personalized
+   PDF, BEFORE we inject it into LaPieza's file input. Shows the actual
+   PDF in an iframe so the user can scan it and confirm before we
+   commit. Takes ~80% of the viewport so the user can actually read
+   the CV; cancel button is a dedicated red text button (not the icon
+   X alone) so the "I changed my mind" path is unambiguous. */
+.eamx-cv-preview {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483700;
+  background: rgba(15, 23, 42, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  animation: eamxCvChoiceFadeIn 180ms ease-out;
+}
+.eamx-cv-preview__card {
+  background: #ffffff;
+  border-radius: 16px;
+  box-shadow: 0 28px 70px -16px rgba(15, 23, 42, 0.5);
+  width: min(880px, 100%);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  color: #0f1d2c;
+  font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.eamx-cv-preview__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 22px;
+  border-bottom: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+.eamx-cv-preview__title {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.eamx-cv-preview__sub {
+  font-size: 12.5px;
+  color: #64748b;
+  margin-top: 2px;
+}
+.eamx-cv-preview__close {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: transparent;
+  border: 1px solid #cbd5e1;
+  color: #475569;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  transition: all 120ms ease;
+}
+.eamx-cv-preview__close:hover {
+  background: #f1f5f9;
+  color: #0f1d2c;
+}
+.eamx-cv-preview__viewer {
+  flex: 1;
+  min-height: 0;
+  background: #f1f5f9;
+}
+.eamx-cv-preview__viewer iframe {
+  width: 100%;
+  height: 100%;
+  min-height: 480px;
+  border: 0;
+  display: block;
+}
+.eamx-cv-preview__actions {
+  display: flex;
+  gap: 10px;
+  padding: 14px 22px;
+  border-top: 1px solid #e2e8f0;
+  background: #ffffff;
+}
+.eamx-cv-preview__btn {
+  flex: 1;
+  padding: 11px 16px;
+  border-radius: 10px;
+  font: 600 14px inherit;
+  cursor: pointer;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #475569;
+  transition: all 150ms ease;
+}
+.eamx-cv-preview__btn:hover {
+  background: #f8fafc;
+  border-color: #94a3b8;
+}
+.eamx-cv-preview__btn--primary {
+  background: linear-gradient(135deg, #1f9f95 0%, #105971 100%);
+  color: #ffffff;
+  border-color: transparent;
+  box-shadow: 0 6px 16px -6px rgba(16, 89, 113, 0.45);
+}
+.eamx-cv-preview__btn--primary:hover {
+  background: linear-gradient(135deg, #137e7a 0%, #0a3a4d 100%);
+  color: #ffffff;
+}
+
 /* CV-choice modal — pauses the apply chain on the CV step and asks
    the user whether to personalize the CV for this vacancy or use their
    PRINCIPAL. Floating card with a centered backdrop so it captures
