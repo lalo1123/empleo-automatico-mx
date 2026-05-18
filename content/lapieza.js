@@ -320,27 +320,49 @@
     const id = idFromUrl(url || location.href);
     return JOB_CACHE_PREFIX + id;
   }
+  // Sentinel key for the "most recently persisted job in this session".
+  // /vacante/ uses slug ids, /apply/ uses UUID ids — they DON'T match,
+  // so the URL-specific cache key built from idFromUrl() can't be read
+  // on /apply/ after writing on /vacante/. The sentinel solves that:
+  // every persistJobToSession also writes here, and restoreJobFromSession
+  // falls back to it when the URL-specific lookup misses. Single-job
+  // semantics are fine — the user is in one chain at a time per session
+  // for the same vacancy.
+  const JOB_LATEST_KEY = "eamx:lapieza:job:__latest";
+
   function persistJobToSession(job) {
     if (!job || !chrome?.storage?.session) return;
     try {
       const key = jobCacheKey(job.url || location.href);
-      // chrome.storage.session.set returns a Promise in MV3; without a
-      // .catch() handler the rejection becomes an unhandled exception
-      // ("Access to storage is not allowed from this context") that
-      // surfaced as a click-handler abort during live testing. Always
-      // attach a noop catch.
-      Promise.resolve(chrome.storage.session.set({ [key]: job })).catch(() => {});
+      // Write BOTH the URL-keyed entry (fast path for the same URL on
+      // refresh) AND the latest-sentinel entry (cross-URL fallback
+      // /vacante/ → /apply/). MV3 returns a Promise on .set; .catch is
+      // mandatory or rejections surface as unhandled exceptions.
+      Promise.resolve(chrome.storage.session.set({
+        [key]: job,
+        [JOB_LATEST_KEY]: { ...job, persistedAt: Date.now() }
+      })).catch(() => {});
     } catch (_) { /* ignore */ }
   }
   async function restoreJobFromSession() {
     if (!chrome?.storage?.session) return null;
     try {
-      const key = jobCacheKey(location.href);
+      const urlKey = jobCacheKey(location.href);
       const obj = await new Promise((resolve) => {
-        chrome.storage.session.get([key], (r) => resolve(r || {}));
+        chrome.storage.session.get([urlKey, JOB_LATEST_KEY], (r) => resolve(r || {}));
       });
-      const job = obj && obj[key];
-      if (job && typeof job === "object" && job.title) return job;
+      // Try URL-specific first (most precise match).
+      const urlJob = obj && obj[urlKey];
+      if (urlJob && typeof urlJob === "object" && urlJob.title) return urlJob;
+      // Fall back to the latest-job sentinel. Stale-guard: 10 minutes
+      // — chains finish in under 5 minutes typically, so anything older
+      // is probably a leftover from a previous session and should not
+      // contaminate the current one.
+      const latestJob = obj && obj[JOB_LATEST_KEY];
+      if (latestJob && typeof latestJob === "object" && latestJob.title) {
+        const age = Date.now() - (latestJob.persistedAt || 0);
+        if (age < 10 * 60_000) return latestJob;
+      }
     } catch (_) { /* ignore */ }
     return null;
   }
