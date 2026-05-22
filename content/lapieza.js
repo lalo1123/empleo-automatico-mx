@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-22-overlayfirst";
+  const EAMX_LAPIEZA_VERSION = "2026-05-22-openqa";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -690,6 +690,14 @@
   //  4) the field's `aria-label`
   //  5) a sibling/parent heading (h1-h4) within 4 DOM levels
   // Returns trimmed text or "".
+  // Generic placeholders that hide the real question — don't trust these
+  // as the question source. LaPieza's open-ended Q&A step (live debug on
+  // Oportun Lifecycle Marketing Manager 16/18) puts the actual question
+  // in a sibling heading and uses "Tu respuesta" as the textarea
+  // placeholder, which our heuristic previously prioritized over the
+  // heading → looksLikeQuestion returned false → chain skipped the step.
+  const GENERIC_PLACEHOLDER_RX = /^(tu\s+respuesta|your\s+answer|escribe.*aqu[íi]?|type\s+(?:your\s+)?answer|respuesta|answer)\s*[.…]?\s*$/i;
+
   function questionTextFor(el) {
     const tryText = (s) => (s || "").replace(/\s+/g, " ").trim();
     // 1) Explicit label
@@ -709,31 +717,38 @@
       const t = tryText(wrap.textContent);
       if (t) return t;
     }
-    // 3) Placeholder
-    const ph = tryText(el.getAttribute("placeholder"));
-    if (ph) return ph;
-    // 4) aria-label
-    const al = tryText(el.getAttribute("aria-label"));
-    if (al) return al;
-    // 5) Walk ancestors looking for headings/legends within 4 levels.
+    // 3) Ancestor headings — checked BEFORE placeholder/aria-label
+    // because the real question often lives in a h1-h4 / p above the
+    // textarea while placeholder is generic ("Tu respuesta"). Walk up
+    // to 5 ancestors looking for a heading sibling or a heading child
+    // that isn't an ancestor of the field itself.
     let p = el.parentElement;
     let depth = 0;
-    while (p && depth < 4) {
-      // Direct heading inside the parent
-      const h = p.querySelector("h1, h2, h3, h4, legend");
-      if (h && h.contains(el) === false) {
+    while (p && depth < 5) {
+      const headings = Array.from(p.querySelectorAll("h1, h2, h3, h4, legend"));
+      for (const h of headings) {
+        if (h.contains(el)) continue;
         const t = tryText(h.textContent);
-        if (t && t.length < 280) return t;
+        if (t && t.length >= 20 && t.length < 400) return t;
       }
-      // Previous sibling heading
       const prev = p.previousElementSibling;
-      if (prev && /^(H[1-4]|LEGEND|P|DIV|SPAN)$/i.test(prev.tagName)) {
+      if (prev) {
         const t = tryText(prev.textContent);
-        if (t && t.length < 280) return t;
+        if (t && t.length >= 20 && t.length < 400) return t;
       }
       p = p.parentElement;
       depth++;
     }
+    // 4) Placeholder — but skip generic "Tu respuesta" / "Your answer"
+    // type strings that aren't real questions.
+    const ph = tryText(el.getAttribute("placeholder"));
+    if (ph && !GENERIC_PLACEHOLDER_RX.test(ph)) return ph;
+    // 5) aria-label (same generic-skip rule)
+    const al = tryText(el.getAttribute("aria-label"));
+    if (al && !GENERIC_PLACEHOLDER_RX.test(al)) return al;
+    // 6) Last-resort: even generic placeholder is better than nothing.
+    if (ph) return ph;
+    if (al) return al;
     return "";
   }
 
