@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-16-cvfirst";
+  const EAMX_LAPIEZA_VERSION = "2026-05-22-quizfix";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -1311,6 +1311,18 @@
   // radio buttons inside option-card structures. CV-selection radios
   // (also radios) live inside cards labelled "PRINCIPAL" / "CV - ...";
   // we exclude those.
+  //
+  // Why `closest()` alone wasn't enough: LaPieza's CV step wraps each
+  // radio in `<label class="MuiFormControlLabel-root">` (matched by the
+  // `label` selector) but the actual CV title text ("CV - EDUARDO ...
+  // PRINCIPAL") lives in a SIBLING `<div class="MuiBox-root">`, so the
+  // label's textContent is empty and the exclusion regex never fires.
+  // Result: looksLikeQuizStep was incorrectly returning true on the CV
+  // step, which short-circuited isOnLaPiezaCvStep and the chain went
+  // into a 90s quiz wait on the CV screen. Fix: if the closest match
+  // has empty text, widen the search by walking up to 5 ancestors and
+  // taking the FIRST one with meaningful text content — that's the
+  // CV option-card box.
   function looksLikeQuizStep() {
     let radios = [];
     try { radios = Array.from(document.querySelectorAll('input[type="radio"]')); } catch (_) { return false; }
@@ -1319,11 +1331,28 @@
       try {
         if (!isVisible(r)) continue;
       } catch (_) { continue; }
-      const ctx = r.closest("label, [class*='option' i], [class*='question' i], [class*='quiz' i], [class*='answer' i]");
+      let ctx = r.closest("label, [class*='option' i], [class*='question' i], [class*='quiz' i], [class*='answer' i]");
       if (!ctx) continue;
-      const txt = (ctx.textContent || "").toLowerCase();
-      // Exclude CV-selection cards.
-      if (/principal|hoja\s*de\s*vida|^cv\s*-/i.test(txt)) continue;
+      let txt = (ctx.textContent || "").trim().toLowerCase();
+      // If the matched ancestor is empty (e.g. MUI's bare <label> wrapper
+      // around a hidden radio input), walk up the DOM to find the real
+      // container that holds the option's display text. Cap at 5 hops to
+      // avoid scanning the whole page.
+      if (!txt) {
+        let p = ctx.parentElement;
+        for (let i = 0; i < 5 && p; i++, p = p.parentElement) {
+          const pTxt = (p.textContent || "").trim().toLowerCase();
+          if (pTxt) { txt = pTxt; break; }
+        }
+      }
+      // Exclude CV-selection cards. We match a broad set of signals
+      // because the user may have multiple uploaded CVs and only one
+      // will carry the "PRINCIPAL" tag — the others look like generic
+      // filenames (e.g. "EDUARDO-SERRATOS-GUTIRREZ-Ejecutivo-de-Ventas-
+      // B2B.pdf 0 may 2026"), so we ALSO exclude any ancestor whose
+      // text ends with a `.pdf <date>` pattern that is unmistakably a
+      // CV-list card on LaPieza's CV-selection step.
+      if (/principal|hoja\s*de\s*vida|cv\s*-|\.pdf\s*\d+\s*[a-z]{3}\s*\d{4}/i.test(txt)) continue;
       count++;
       if (count >= 2) return true;
     }
