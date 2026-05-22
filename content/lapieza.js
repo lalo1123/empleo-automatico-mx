@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-16-tracelogs2";
+  const EAMX_LAPIEZA_VERSION = "2026-05-16-cvfirst";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -1163,6 +1163,36 @@
       if (quickApplyAborted) break;
       if (!isApplyPage()) break;
 
+      // CV step takes PRIORITY over quiz/finalize detection. LaPieza's
+      // CV step has visible radio buttons (PRINCIPAL + any uploaded CVs)
+      // that can fool looksLikeQuizStep into a 90s false-positive wait
+      // (live debug confirmed: chain entered the quiz-wait loop on the
+      // CV step and never exited). Check + handle CV step FIRST.
+      const onCvStepEarly = isOnLaPiezaCvStep();
+      console.log("[EmpleoAutomatico] chain iter:", i, "onCvStep:", onCvStepEarly);
+      if (onCvStepEarly) {
+        console.log("[EmpleoAutomatico] chain iter:", i, "→ CV step branch (skip quiz checks)");
+        // Skip quiz/quizWarn checks entirely — they only apply AFTER
+        // the CV step. Jump straight to the CV decision modal.
+        let choice = "principal";
+        try { choice = await askCvChoice({ timeoutMs: 8000 }); } catch (_) {}
+        if (quickApplyAborted) break;
+        if (!isApplyPage()) break;
+        if (choice === "personalize") {
+          try { await tryUploadTailoredCv(); } catch (e) {
+            console.warn("[EmpleoAutomatico] tryUploadTailoredCv threw", e);
+          }
+          if (quickApplyAborted) break;
+          if (!isApplyPage()) break;
+        } else {
+          toast("Listo, sigo con tu CV PRINCIPAL.", "info", { durationMs: 2500 });
+        }
+        // Now click Continuar to advance past the CV step.
+        const continueBtnCv = findApplyFlowContinueBtn();
+        if (continueBtnCv) { try { continueBtnCv.click(); } catch (_) {} }
+        continue; // next iteration handles the post-CV step
+      }
+
       // Quiz-warning modal: LaPieza pops a "Toma en cuenta lo siguiente"
       // dialog before the actual quiz step on vacancies that have a
       // knowledge test, with two buttons:
@@ -1230,29 +1260,11 @@
         break;
       }
 
-      if (onCvStep) {
-        // CV-selection step. Ask the user whether to personalize the CV
-        // for this vacancy or use their PRINCIPAL — default PRINCIPAL on
-        // 8s timeout so the chain stays fast for power users. Per the
-        // explicit user request: "que agregue si quiere el usuario como
-        // un intermedio de quieres tu cv normal o el nuevo personalizado".
-        console.log("[EmpleoAutomatico] CV step detected — asking user");
-        let choice = "principal";
-        try { choice = await askCvChoice({ timeoutMs: 8000 }); } catch (_) {}
-        if (quickApplyAborted) break;
-        if (!isApplyPage()) break;
-        if (choice === "personalize") {
-          try { await tryUploadTailoredCv(); } catch (e) {
-            console.warn("[EmpleoAutomatico] tryUploadTailoredCv threw", e);
-          }
-          if (quickApplyAborted) break;
-          if (!isApplyPage()) break;
-        } else {
-          // Explicit PRINCIPAL — surface a one-line confirmation so the
-          // user knows nothing's broken; just chose the fast path.
-          toast("Listo, sigo con tu CV PRINCIPAL.", "info", { durationMs: 2500 });
-        }
-      } else if (hasFillable) {
+      // onCvStep here is ALWAYS false because we already handled the CV
+      // step at the top of this iteration (the "onCvStepEarly" branch),
+      // and that branch `continue`d. The redundant branch was removed
+      // when we moved CV detection ahead of the quiz-check choke point.
+      if (hasFillable) {
         // Run Express fill on this step. singleStep:true so
         // onFabClickExpressApply doesn't recurse back into
         // chainApplyStepsToFinalize. forceOverwrite:true → since the
