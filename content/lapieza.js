@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-16-8ac68fb-mui-autoselect";
+  const EAMX_LAPIEZA_VERSION = "2026-05-16-tracelogs";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -1135,6 +1135,7 @@
   }
 
   async function chainApplyStepsToFinalizeInner() {
+    console.log("[EmpleoAutomatico] chain inner: starting", { isApplyPage: isApplyPage(), url: location.href.split("?")[0] });
     quickApplyAborted = false;
     quickApplyEscHandler = (ev) => {
       if (ev.key === "Escape" || ev.key === "Esc") {
@@ -1147,8 +1148,10 @@
     try { document.addEventListener("keydown", quickApplyEscHandler, true); } catch (_) {}
 
     toast("⚡ Cadena: te llevo paso a paso… (Esc cancela)", "info", { durationMs: 4500 });
+    console.log("[EmpleoAutomatico] chain inner: toast fired, entering loop");
 
     for (let i = 0; i < 8; i++) {
+      console.log("[EmpleoAutomatico] chain iter:", i, { aborted: quickApplyAborted, isApplyPage: isApplyPage() });
       if (quickApplyAborted) break;
       if (!isApplyPage()) break;
 
@@ -1156,6 +1159,7 @@
       // Continuar click LaPieza needs ~600-1200ms to swap step content;
       // 1000ms is a safe middle ground.
       await new Promise((r) => setTimeout(r, 1000));
+      console.log("[EmpleoAutomatico] chain iter:", i, "post-wait");
       if (quickApplyAborted) break;
       if (!isApplyPage()) break;
 
