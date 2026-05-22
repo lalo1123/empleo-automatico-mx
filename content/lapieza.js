@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-22-quizfix";
+  const EAMX_LAPIEZA_VERSION = "2026-05-22-overlayfirst";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -1163,17 +1163,31 @@
       if (quickApplyAborted) break;
       if (!isApplyPage()) break;
 
-      // CV step takes PRIORITY over quiz/finalize detection. LaPieza's
-      // CV step has visible radio buttons (PRINCIPAL + any uploaded CVs)
-      // that can fool looksLikeQuizStep into a 90s false-positive wait
-      // (live debug confirmed: chain entered the quiz-wait loop on the
-      // CV step and never exited). Check + handle CV step FIRST.
+      // PRIORITY 1: Quiz-warning modal ("Toma en cuenta lo siguiente").
+      // This modal can pop AFTER the cover step AS AN OVERLAY — meaning
+      // the CV-step background text is STILL in the DOM, fooling
+      // isOnLaPiezaCvStep into a false positive. Live user screenshot
+      // showed the CV-choice modal stacked on top of the quiz-warning
+      // modal. Check overlay-modal CTAs FIRST so they take precedence.
+      console.log("[EmpleoAutomatico] chain iter:", i, "checking quizWarn");
+      const quizWarnBtn = findLaPiezaQuizWarningCTA();
+      if (quizWarnBtn) {
+        console.log("[EmpleoAutomatico] chain iter:", i, "quizWarn FOUND, clicking");
+        try { quizWarnBtn.click(); } catch (_) {}
+        await new Promise((r) => setTimeout(r, 800));
+        continue;
+      }
+
+      // PRIORITY 2: CV step (only when no overlay modal is active).
+      // Order matters here — moving CV step ahead of quiz-warn earlier
+      // fixed the 90s quiz-wait false positive. Now we put quiz-warn
+      // BACK to first because it's a more specific modal-overlay signal,
+      // while looksLikeQuizStep's false positive on CV-step radios is
+      // already fixed (c2822de — walk up empty MUI labels).
       const onCvStepEarly = isOnLaPiezaCvStep();
       console.log("[EmpleoAutomatico] chain iter:", i, "onCvStep:", onCvStepEarly);
       if (onCvStepEarly) {
-        console.log("[EmpleoAutomatico] chain iter:", i, "→ CV step branch (skip quiz checks)");
-        // Skip quiz/quizWarn checks entirely — they only apply AFTER
-        // the CV step. Jump straight to the CV decision modal.
+        console.log("[EmpleoAutomatico] chain iter:", i, "→ CV step branch");
         let choice = "principal";
         try { choice = await askCvChoice({ timeoutMs: 8000 }); } catch (_) {}
         if (quickApplyAborted) break;
@@ -1187,25 +1201,8 @@
         } else {
           toast("Listo, sigo con tu CV PRINCIPAL.", "info", { durationMs: 2500 });
         }
-        // Now click Continuar to advance past the CV step.
         const continueBtnCv = findApplyFlowContinueBtn();
         if (continueBtnCv) { try { continueBtnCv.click(); } catch (_) {} }
-        continue; // next iteration handles the post-CV step
-      }
-
-      // Quiz-warning modal: LaPieza pops a "Toma en cuenta lo siguiente"
-      // dialog before the actual quiz step on vacancies that have a
-      // knowledge test, with two buttons:
-      //   - "Seguir postulándome" (red, primary) → continue to quiz
-      //   - "Guardar vacante y postularme más tarde" (gray) → abandon
-      // Auto-click the primary one to advance to the quiz.
-      console.log("[EmpleoAutomatico] chain iter:", i, "checking quizWarn");
-      const quizWarnBtn = findLaPiezaQuizWarningCTA();
-      if (quizWarnBtn) {
-        console.log("[EmpleoAutomatico] chain iter:", i, "quizWarn FOUND, clicking");
-        try { quizWarnBtn.click(); } catch (_) {}
-        // Give LaPieza a beat to dismiss the modal and render the quiz.
-        await new Promise((r) => setTimeout(r, 800));
         continue;
       }
 
