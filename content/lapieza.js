@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-16-tracelogs";
+  const EAMX_LAPIEZA_VERSION = "2026-05-16-tracelogs2";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -1169,8 +1169,10 @@
       //   - "Seguir postulándome" (red, primary) → continue to quiz
       //   - "Guardar vacante y postularme más tarde" (gray) → abandon
       // Auto-click the primary one to advance to the quiz.
+      console.log("[EmpleoAutomatico] chain iter:", i, "checking quizWarn");
       const quizWarnBtn = findLaPiezaQuizWarningCTA();
       if (quizWarnBtn) {
+        console.log("[EmpleoAutomatico] chain iter:", i, "quizWarn FOUND, clicking");
         try { quizWarnBtn.click(); } catch (_) {}
         // Give LaPieza a beat to dismiss the modal and render the quiz.
         await new Promise((r) => setTimeout(r, 800));
@@ -1180,7 +1182,10 @@
       // Quiz step → auto-quiz module handles. Wait for its radios to
       // disappear before we look for Continuar. Cap wait at 90s in case
       // the quiz hangs.
-      if (looksLikeQuizStep()) {
+      console.log("[EmpleoAutomatico] chain iter:", i, "checking quizStep");
+      const isQuizStep = looksLikeQuizStep();
+      console.log("[EmpleoAutomatico] chain iter:", i, "quizStep:", isQuizStep);
+      if (isQuizStep) {
         const startedAt = Date.now();
         while (looksLikeQuizStep() && Date.now() - startedAt < 90_000) {
           if (quickApplyAborted) break;
