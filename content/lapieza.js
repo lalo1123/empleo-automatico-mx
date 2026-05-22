@@ -1627,10 +1627,72 @@
     }
 
     // Give LaPieza ~2s to process the upload (POST to their server,
-    // update the radio selection, mark the new CV as active).
+    // append the new CV card to the radio list).
     toast("✓ CV personalizado subido. Validando…", "success", { durationMs: 3000 });
     await new Promise((r) => setTimeout(r, 2000));
+
+    // CRITICAL: LaPieza appends the uploaded CV as a NEW card but DOES
+    // NOT auto-switch the radio selection — PRINCIPAL stays active.
+    // Live test on /apply/cf8e8a5a... (BI Analyst II en TP) confirmed:
+    // both CV cards present, but PRINCIPAL still radio-checked → the
+    // recruiter ends up receiving the PRINCIPAL, not our personalized
+    // one. Auto-click the new card's radio so the personalized version
+    // is the one LaPieza actually submits.
+    try {
+      await selectNewlyUploadedCv(file.name);
+    } catch (err) {
+      console.warn("[EmpleoAutomatico] could not auto-select new CV card", err);
+      toast("Subí el CV pero no pude auto-seleccionarlo — clic en el nuevo card.", "info", { durationMs: 5000 });
+    }
     return true;
+  }
+
+  // Find the CV card that matches the just-uploaded filename and click
+  // its radio so LaPieza submits THAT CV instead of PRINCIPAL. We poll
+  // for up to 4s because the card render is async (LaPieza POSTs the
+  // file to their server, gets an id back, then renders the card).
+  async function selectNewlyUploadedCv(filename) {
+    if (!filename) return false;
+    // Build the slug we'll match against — LaPieza shows the filename
+    // (without .pdf) inside the CV card. Match the first ~20 chars to
+    // tolerate truncation ellipses.
+    const stem = filename.replace(/\.pdf$/i, "").slice(0, 24).toLowerCase();
+    const polls = 20;
+    const intervalMs = 200;
+    for (let i = 0; i < polls; i++) {
+      // Find all visible CV cards. LaPieza uses radio inputs nested
+      // inside the card; we click the LABEL/CARD so the radio toggles
+      // through native HTML association.
+      const cards = Array.from(document.querySelectorAll("label, [class*='cv' i] [class*='card' i], [class*='card' i]"));
+      const match = cards.find((el) => {
+        const txt = (el.textContent || "").slice(0, 200).toLowerCase();
+        // Skip the PRINCIPAL card explicitly — we never want to re-
+        // select it.
+        if (/principal/.test(txt)) return false;
+        return txt.includes(stem);
+      });
+      if (match) {
+        // Try the radio inside it first (more reliable than clicking
+        // the wrapper label which can be intercepted by other handlers).
+        const radio = match.querySelector('input[type="radio"]') || match.closest("label")?.querySelector?.('input[type="radio"]');
+        if (radio && !radio.checked) {
+          try {
+            radio.click();
+            radio.dispatchEvent(new Event("change", { bubbles: true }));
+            console.log("[EmpleoAutomatico] new CV auto-selected via radio click");
+            return true;
+          } catch (_) { /* fall through to label click */ }
+        }
+        // Fallback: click the card itself.
+        try {
+          match.click();
+          console.log("[EmpleoAutomatico] new CV auto-selected via card click");
+          return true;
+        } catch (_) { /* keep polling */ }
+      }
+      await new Promise((r) => setTimeout(r, intervalMs));
+    }
+    return false;
   }
 
   // Preview modal — shown after the backend returns the personalized
