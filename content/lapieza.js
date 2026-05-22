@@ -1648,50 +1648,83 @@
   }
 
   // Find the CV card that matches the just-uploaded filename and click
-  // its radio so LaPieza submits THAT CV instead of PRINCIPAL. We poll
-  // for up to 4s because the card render is async (LaPieza POSTs the
-  // file to their server, gets an id back, then renders the card).
+  // its radio so LaPieza submits THAT CV instead of PRINCIPAL. Polls
+  // up to 6s because the card render is async (LaPieza POSTs the file
+  // to their server, gets an id back, then renders the card).
+  //
+  // Live DOM inspection on /apply/cf8e8a5a... showed LaPieza uses MUI:
+  //   - FormControlLabel wraps each radio
+  //   - A SIBLING div.container-info-cv has the visible CV name
+  //   - The radio's parent label/container does NOT contain the text
+  // So we can't just match label.textContent. New strategy:
+  //   1. Find ALL radios on the page (Array.from input[type=radio])
+  //   2. For each radio, find its associated card by walking up to a
+  //      sane ancestor AND looking at the ancestor's combined text
+  //   3. Match the card whose text contains our filename stem
+  //      (excluding the PRINCIPAL card explicitly)
+  //   4. Click that radio + dispatch change event
   async function selectNewlyUploadedCv(filename) {
     if (!filename) return false;
-    // Build the slug we'll match against — LaPieza shows the filename
-    // (without .pdf) inside the CV card. Match the first ~20 chars to
-    // tolerate truncation ellipses.
-    const stem = filename.replace(/\.pdf$/i, "").slice(0, 24).toLowerCase();
-    const polls = 20;
+    // Build several candidate stems to match against because LaPieza
+    // truncates long filenames. We try the first 16, 24, and 32 chars.
+    const base = filename.replace(/\.pdf$/i, "").toLowerCase();
+    const stems = [base.slice(0, 16), base.slice(0, 24), base.slice(0, 32), base].filter((s, i, a) => s && a.indexOf(s) === i);
+
+    const polls = 30;
     const intervalMs = 200;
-    for (let i = 0; i < polls; i++) {
-      // Find all visible CV cards. LaPieza uses radio inputs nested
-      // inside the card; we click the LABEL/CARD so the radio toggles
-      // through native HTML association.
-      const cards = Array.from(document.querySelectorAll("label, [class*='cv' i] [class*='card' i], [class*='card' i]"));
-      const match = cards.find((el) => {
-        const txt = (el.textContent || "").slice(0, 200).toLowerCase();
-        // Skip the PRINCIPAL card explicitly — we never want to re-
-        // select it.
-        if (/principal/.test(txt)) return false;
-        return txt.includes(stem);
-      });
-      if (match) {
-        // Try the radio inside it first (more reliable than clicking
-        // the wrapper label which can be intercepted by other handlers).
-        const radio = match.querySelector('input[type="radio"]') || match.closest("label")?.querySelector?.('input[type="radio"]');
-        if (radio && !radio.checked) {
-          try {
-            radio.click();
-            radio.dispatchEvent(new Event("change", { bubbles: true }));
-            console.log("[EmpleoAutomatico] new CV auto-selected via radio click");
-            return true;
-          } catch (_) { /* fall through to label click */ }
+
+    for (let attempt = 0; attempt < polls; attempt++) {
+      const radios = Array.from(document.querySelectorAll('input[type="radio"]'));
+      // Walk up each radio looking for the smallest ancestor whose
+      // textContent includes our filename. Cap at 6 levels — beyond
+      // that we'd be matching the whole page.
+      for (const radio of radios) {
+        if (radio.checked) continue; // already selected, skip
+        if (!radio.offsetParent && radio.tagName !== "BODY") continue; // hidden
+        let walker = radio;
+        for (let depth = 0; depth < 6 && walker; depth++) {
+          const txt = (walker.textContent || "").toLowerCase();
+          // Hard skip if this ancestor scopes the PRINCIPAL card — we
+          // never want to re-select PRINCIPAL.
+          if (/principal/.test(txt) && depth < 4) {
+            // PRINCIPAL is in this subtree. Skip up only if the text
+            // ALSO mentions our filename (the ancestor wraps both
+            // cards — keep walking up at depth 4+).
+            const hasFilenameStem = stems.some((s) => s && txt.includes(s));
+            if (!hasFilenameStem) {
+              walker = null; // bail out of this radio's walk
+              break;
+            }
+          }
+          const hasOurStem = stems.some((s) => s && txt.includes(s));
+          if (hasOurStem) {
+            // Found it. Click the radio + dispatch change.
+            try {
+              radio.click();
+              radio.dispatchEvent(new Event("change", { bubbles: true }));
+              radio.dispatchEvent(new Event("input", { bubbles: true }));
+              console.log("[EmpleoAutomatico] new CV auto-selected via radio click (depth=" + depth + ")");
+              await new Promise((r) => setTimeout(r, 200));
+              if (radio.checked) return true;
+            } catch (_) { /* fall through to wrapper click */ }
+            // Fallback: click the wrapper (label or MUI FormControlLabel).
+            try {
+              const clickTarget = radio.closest("label") || walker;
+              clickTarget.click();
+              await new Promise((r) => setTimeout(r, 200));
+              if (radio.checked) {
+                console.log("[EmpleoAutomatico] new CV auto-selected via wrapper click");
+                return true;
+              }
+            } catch (_) { /* keep polling */ }
+            break; // try next radio
+          }
+          walker = walker.parentElement;
         }
-        // Fallback: click the card itself.
-        try {
-          match.click();
-          console.log("[EmpleoAutomatico] new CV auto-selected via card click");
-          return true;
-        } catch (_) { /* keep polling */ }
       }
       await new Promise((r) => setTimeout(r, intervalMs));
     }
+    console.log("[EmpleoAutomatico] selectNewlyUploadedCv timed out — filename stems:", stems);
     return false;
   }
 
