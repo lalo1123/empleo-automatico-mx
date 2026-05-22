@@ -19,6 +19,16 @@
 (function () {
   "use strict";
 
+  // Version identifier — bumped on every meaningful change to the chain
+  // logic. If this log doesn't appear in the user's console after they
+  // claim to have reloaded the extension, they're still on the old code.
+  // BUMP this on every commit that touches chain behavior so we have a
+  // ground truth.
+  const EAMX_LAPIEZA_VERSION = "2026-05-16-8ac68fb-mui-autoselect";
+  console.log(
+    `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
+  );
+
   const SOURCE = "lapieza";
   const MSG = {
     GENERATE_DRAFT: "GENERATE_DRAFT",
@@ -1104,7 +1114,11 @@
   //   - 8 iterations         → toast + exit (safety cap)
   //   - chainInProgress flag prevents concurrent chains from racing
   async function chainApplyStepsToFinalize() {
-    if (chainInProgress) return;
+    console.log("[EmpleoAutomatico] chainApplyStepsToFinalize() called", { chainInProgress, url: location.href.split("?")[0] });
+    if (chainInProgress) {
+      console.log("[EmpleoAutomatico] chain already in progress, skipping");
+      return;
+    }
     chainInProgress = true;
     try {
       await chainApplyStepsToFinalizeInner();
