@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-22-aibtn";
+  const EAMX_LAPIEZA_VERSION = "2026-05-22-quizbtn";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -1188,7 +1188,13 @@
     toast("⚡ Cadena: te llevo paso a paso… (Esc cancela)", "info", { durationMs: 4500 });
     console.log("[EmpleoAutomatico] chain inner: toast fired, entering loop");
 
-    for (let i = 0; i < 8; i++) {
+    // Iteration cap. Live data (Oportun Lifecycle Marketing Manager, 18-Q
+    // quiz + 2-3 open-ended questions): the chain needs to survive the
+    // quiz-wait loop AND the per-step Continuar clicks that come after.
+    // 8 was too low — chain exited at iter 7 while the quiz was still on
+    // question 6 of 18, so the open-ended Q&A step never got reached by
+    // the in-chain runExpressFill call. 20 gives comfortable headroom.
+    for (let i = 0; i < 20; i++) {
       console.log("[EmpleoAutomatico] chain iter:", i, { aborted: quickApplyAborted, isApplyPage: isApplyPage() });
       if (quickApplyAborted) break;
       if (!isApplyPage()) break;
@@ -1359,6 +1365,25 @@
   // taking the FIRST one with meaningful text content — that's the
   // CV option-card box.
   function looksLikeQuizStep() {
+    // PATH 1: radio-based quizzes (legacy LaPieza form / other portals).
+    // PATH 2: button.multi-select-button quizzes — LaPieza's modern apply
+    //   flow uses these on its knowledge-quiz step. detectQuizQuestion
+    //   below uses the SAME selector — keep them in sync.
+    //
+    // Bug history (2026-05-22): the original implementation only checked
+    // for radio inputs. LaPieza shipped a button-based quiz that has zero
+    // <input type="radio"> nodes, so this returned false during a live
+    // 18-question quiz and the chain incorrectly tried to click Continuar
+    // every iteration (exhausting the 8-iter cap before the quiz finished
+    // and the open-ended Q&A textarea even rendered).
+    try {
+      const quizBtns = Array.from(document.querySelectorAll("button.multi-select-button"))
+        .filter((b) => {
+          try { return isVisible(b); } catch (_) { return false; }
+        });
+      if (quizBtns.length >= 2) return true;
+    } catch (_) { /* fall through to radio path */ }
+
     let radios = [];
     try { radios = Array.from(document.querySelectorAll('input[type="radio"]')); } catch (_) { return false; }
     let count = 0;
@@ -6866,6 +6891,15 @@
         setTimeout(() => maybeAutoPrewarmFromQuickApply(), 1500);
       } else if (fabMode() === "apply") {
         setTimeout(() => maybeAutoFireExpressOnApply(), 600);
+        // Always arm the flow assistant on /apply/ — even if the user
+        // never clicked the FAB and even if the chain bailed early.
+        // detectAdaptiveQuestions inside runFlowDetectors is the one path
+        // that catches LATE-appearing open-ended Q&A textareas (e.g.
+        // questions 16-18 of an 18-step LaPieza quiz). Without this,
+        // adaptive detection only ran when runExpressFill armed it,
+        // missing the open-ended step entirely if the chain finished its
+        // iterations before the textarea rendered.
+        setTimeout(() => { try { startFlowAssistant(); } catch (_) {} }, 1200);
       }
     } else {
       // Left the job-detail / listing context entirely — drop the
