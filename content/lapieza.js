@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-22-pquestion";
+  const EAMX_LAPIEZA_VERSION = "2026-05-22-aibtn";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -4882,6 +4882,20 @@
       target.classList.add("eamx-paste-success");
       setTimeout(() => { try { target.classList.remove("eamx-paste-success"); } catch (_) {} }, 1500);
     } catch (_) {}
+    // Sync the floating "✨ Respuesta con IA" button (if any) for this
+    // field — auto-paste from the chain / observer should also visually
+    // confirm on the button, so the user sees "✓ Respuesta IA pegada"
+    // immediately instead of the initial "Respuesta con IA" label.
+    try {
+      const ref = q.fieldRef;
+      const btn = document.querySelector(`.eamx-flow-paste-btn[data-eamx-ai-q-btn-for="${CSS.escape(ref)}"]`);
+      if (btn) {
+        btn.classList.remove("eamx-flow-paste-btn--loading", "eamx-flow-paste-btn--err");
+        btn.classList.add("eamx-flow-paste-btn--ok");
+        btn.innerHTML = '<span aria-hidden="true">✓</span><span>Respuesta IA · Regenerar</span>';
+        btn.disabled = false;
+      }
+    } catch (_) { /* best-effort sync */ }
     return true;
   }
 
@@ -5354,6 +5368,16 @@
     if (same) {
       for (const r of newRefs) { if (!oldRefs.has(r)) { same = false; break; } }
     }
+
+    // Even if the question set is unchanged, ensure every detected
+    // textarea has a visible "✨ Respuesta con IA" button. This makes
+    // the AI suggestion discoverable in MANUAL mode (no chain) —
+    // user can click the button to generate or regenerate on demand.
+    for (const q of scanned) {
+      const target = resolveFieldRef(q.fieldRef);
+      if (target) attachAiQuestionButton(target, q.fieldRef);
+    }
+
     if (same && questionsState !== "idle") return;
 
     detectedQuestions = scanned;
@@ -5376,6 +5400,76 @@
     // will auto-paste each answer once they come back (see the success
     // branch of setQuestionsState).
     fetchAnswersForDetectedQuestions();
+  }
+
+  // Inject a floating "✨ Respuesta con IA" button anchored to a
+  // detected Q&A textarea. State machine:
+  //   - initial: "✨ Respuesta con IA" — user hasn't generated yet
+  //   - fetching: "⏳ Generando…" — backend call in flight
+  //   - filled: "✓ Respuesta IA · Regenerar" — answer pasted, click to regen
+  //   - error: "✗ Reintentar" — backend / paste failed
+  // The button is idempotent per textarea via data-eamx-ai-q-btn attr —
+  // each textarea gets ONE button, even if detectAdaptiveQuestions fires
+  // many times on the same step (MutationObserver tick spam).
+  function attachAiQuestionButton(textarea, fieldRef) {
+    if (!textarea || textarea.dataset.eamxAiQBtn) return;
+    textarea.dataset.eamxAiQBtn = fieldRef;
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "eamx-flow-paste-btn";
+    btn.dataset.eamxAiQBtnFor = fieldRef;
+    btn.setAttribute("aria-label", "Generar respuesta con IA");
+    btn.innerHTML = '<span aria-hidden="true">✨</span><span>Respuesta con IA</span>';
+    document.documentElement.appendChild(btn);
+    anchorTo(btn, textarea, "above-right");
+
+    const setState = (state, label) => {
+      btn.classList.remove("eamx-flow-paste-btn--ok", "eamx-flow-paste-btn--err", "eamx-flow-paste-btn--loading");
+      if (state === "ok") btn.classList.add("eamx-flow-paste-btn--ok");
+      else if (state === "err") btn.classList.add("eamx-flow-paste-btn--err");
+      else if (state === "loading") btn.classList.add("eamx-flow-paste-btn--loading");
+      btn.innerHTML = label;
+      btn.disabled = state === "loading";
+    };
+
+    btn.addEventListener("click", async () => {
+      // Find the most recent index for this fieldRef in detectedQuestions.
+      // SPA re-renders can re-stamp fieldRefs, so we search live.
+      const idx = detectedQuestions.findIndex((q) => q.fieldRef === fieldRef);
+      const cachedAnswer = idx >= 0 ? questionAnswers[idx] : null;
+      const hasCached = !!(cachedAnswer && cachedAnswer.trim());
+      // Regenerate vs paste-from-cache: if the button shows "Regenerar"
+      // (ok state) we always re-call the backend. If the textarea has
+      // value already, also confirm before overwriting.
+      const existing = (textarea.value || "").trim();
+      if (existing.length > 50) {
+        const ok = window.confirm("¿Reemplazar lo que escribiste con la respuesta IA?");
+        if (!ok) return;
+      }
+      setState("loading", '<span aria-hidden="true">⏳</span><span>Generando…</span>');
+      try {
+        // Always refresh the cache by re-firing the fetch — the form
+        // may have advanced to a new question by the time the user
+        // clicks this button.
+        await fetchAnswersForDetectedQuestions();
+        // pasteQuestionAnswer uses the just-fetched answer.
+        const newIdx = detectedQuestions.findIndex((q) => q.fieldRef === fieldRef);
+        if (newIdx < 0) {
+          setState("err", '<span aria-hidden="true">✗</span><span>Pregunta no encontrada</span>');
+          return;
+        }
+        const ok = pasteQuestionAnswer(newIdx);
+        if (ok) {
+          setState("ok", '<span aria-hidden="true">✓</span><span>Respuesta IA · Regenerar</span>');
+        } else {
+          setState("err", '<span aria-hidden="true">✗</span><span>Reintentar</span>');
+        }
+      } catch (err) {
+        console.warn("[EmpleoAutomatico] AI question button click failed", err);
+        setState("err", '<span aria-hidden="true">✗</span><span>Reintentar</span>');
+      }
+    });
   }
 
   // Visibility check — element is rendered and inside the viewport-eligible
