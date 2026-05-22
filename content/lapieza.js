@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-22-openqa";
+  const EAMX_LAPIEZA_VERSION = "2026-05-22-pquestion";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -722,8 +722,19 @@
     // textarea while placeholder is generic ("Tu respuesta"). Walk up
     // to 5 ancestors looking for a heading sibling or a heading child
     // that isn't an ancestor of the field itself.
+    //
+    // LaPieza's open-ended Q&A step (live debug on Oportun Lifecycle
+    // Marketing Manager 16/18) puts the question in a <p class="
+    // MuiTypography-body1"> INSIDE the parent <div class="form"> — not
+    // in a heading or as previousElementSibling. So we ALSO scan <p>
+    // children, applying a question-shape filter to avoid grabbing
+    // unrelated paragraphs like "Postulación a vacante" or counters
+    // ("16/18"). The shape filter: must look like a question per
+    // looksLikeQuestion() — long enough OR ends with "?" OR contains
+    // question words.
     let p = el.parentElement;
     let depth = 0;
+    const SKIP_HEADING_RX = /^postulaci[oó]n\s+a\s+vacante|^sobre\s+ti$|^tu\s+respuesta$/i;
     while (p && depth < 5) {
       const headings = Array.from(p.querySelectorAll("h1, h2, h3, h4, legend"));
       for (const h of headings) {
@@ -731,10 +742,22 @@
         const t = tryText(h.textContent);
         if (t && t.length >= 20 && t.length < 400) return t;
       }
+      // Also scan <p> elements inside this ancestor — they're the most
+      // common container LaPieza uses for question prompts on the
+      // open-ended Q&A step. Filter by question-shape to avoid grabbing
+      // page furniture (titles, breadcrumbs, counters).
+      const paragraphs = Array.from(p.querySelectorAll("p"));
+      for (const pa of paragraphs) {
+        if (pa.contains(el)) continue;
+        const t = tryText(pa.textContent);
+        if (!t || t.length < 20 || t.length >= 400) continue;
+        if (SKIP_HEADING_RX.test(t)) continue;
+        if (looksLikeQuestion(t)) return t;
+      }
       const prev = p.previousElementSibling;
       if (prev) {
         const t = tryText(prev.textContent);
-        if (t && t.length >= 20 && t.length < 400) return t;
+        if (t && t.length >= 20 && t.length < 400 && !SKIP_HEADING_RX.test(t)) return t;
       }
       p = p.parentElement;
       depth++;
