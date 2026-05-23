@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-22-plan-modal";
+  const EAMX_LAPIEZA_VERSION = "2026-05-22-plan-modal-fix";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -1182,6 +1182,38 @@
   async function chainApplyStepsToFinalizeInner() {
     console.log("[EmpleoAutomatico] chain inner: starting", { isApplyPage: isApplyPage(), url: location.href.split("?")[0] });
     quickApplyAborted = false;
+
+    // PRE-FLIGHT: refuse to start the chain at all if the user has zero
+    // remaining quota. Without this gate the chain would show
+    // askCvChoice (asking "use principal or personalize?"), the user
+    // would pick "personalize", tryUploadTailoredCv would fail with
+    // PLAN_LIMIT_EXCEEDED and fall back to PRINCIPAL silently, then the
+    // cover step would ALSO fail with PLAN_LIMIT_EXCEEDED and show the
+    // plan-limit modal — by which point the user already chose a CV
+    // for nothing. User reported case: "desde ahi deberia de decirme
+    // que ya no tengo" (screenshot showed the CV picker appearing
+    // first instead of the plan-limit modal).
+    try {
+      const auth = await sendMsg({ type: MSG.GET_AUTH_STATUS });
+      if (auth && auth.ok && auth.loggedIn && auth.usage) {
+        const limit = Number(auth.usage.limit);
+        const current = Number(auth.usage.current) || 0;
+        if (limit !== -1 && Number.isFinite(limit) && current >= limit) {
+          // Show the pretty modal directly and refuse the chain. No
+          // toast — the modal is the message. Marking the chain as
+          // aborted (via the same flag the Esc handler sets) lets any
+          // downstream observer ticks bail out gracefully.
+          quickApplyAborted = true;
+          await showPlanLimitModal({
+            feature: "postulaciones IA",
+            usage: { current, limit },
+            planName: (auth.user && auth.user.plan) || ""
+          });
+          return;
+        }
+      }
+    } catch (_) { /* network blip — proceed; mid-chain failures handle the limit too */ }
+
     quickApplyEscHandler = (ev) => {
       if (ev.key === "Escape" || ev.key === "Esc") {
         quickApplyAborted = true;
@@ -1657,8 +1689,19 @@
   // Idempotent: re-opening replaces any existing modal.
   function showPlanLimitModal({ feature = "esta IA", usage = null, planName = "" } = {}) {
     return new Promise((resolve) => {
-      // Tear down any prior plan-limit modal so re-fires don't stack.
-      try { document.querySelectorAll(".eamx-plan-limit").forEach((el) => el.remove()); } catch (_) {}
+      // IDEMPOTENCY: if a plan-limit modal is already on screen, do NOT
+      // create another one. Multiple chain steps (carta → CV → Q&A)
+      // each call showPlanLimitModal when they hit PLAN_LIMIT_EXCEEDED,
+      // and without this guard the user sees the modal flicker as each
+      // call removed-the-previous + created-a-new one. User reported
+      // case: "ahi como que se buguea aparece y desaparece".
+      // We resolve immediately with "already_shown" so the caller can
+      // chain logic but doesn't wait on a duplicate modal.
+      const existing = document.querySelector(".eamx-plan-limit");
+      if (existing) {
+        resolve("already_shown");
+        return;
+      }
 
       let settled = false;
       const settle = (choice) => {
@@ -1810,13 +1853,22 @@
       const res = await sendMsg({ type: MSG.GENERATE_CV_PDF, job: lastJob });
       if (!res || !res.ok) {
         if (res && res.error === ERR.PLAN_LIMIT_EXCEEDED) {
-          // Surface a clickable upgrade CTA — easy to miss if it's just info.
-          // Long duration because the user needs to read it before deciding.
-          toast("CV personalizado: límite del mes alcanzado. Sigo con tu CV PRINCIPAL.", "info", {
-            label: "Ver planes",
-            onClick: () => openBilling(),
-            durationMs: 10000
-          });
+          // If we're mid-chain, the cover step is about to fail with
+          // the SAME PLAN_LIMIT_EXCEEDED — showing an info toast here
+          // then a modal there is a confusing 1-2 punch. Skip the
+          // toast, show the modal NOW, abort the chain. If we're not
+          // in a chain (rare — CV upload is rarely called standalone),
+          // keep the old fallback toast behaviour.
+          if (chainInProgress) {
+            quickApplyAborted = true;
+            showPlanLimitModal({ feature: "postulaciones IA" });
+          } else {
+            toast("CV personalizado: límite del mes alcanzado. Sigo con tu CV PRINCIPAL.", "info", {
+              label: "Ver planes",
+              onClick: () => openBilling(),
+              durationMs: 10000
+            });
+          }
         } else if (res && res.error === ERR.UNAUTHORIZED) {
           toast("Sesión expirada. Sigo con tu CV PRINCIPAL.", "info", {
             label: "Inicia sesión",
@@ -3265,6 +3317,11 @@
     const code = res?.error;
     const message = res?.message || "No se pudo generar la carta.";
     if (code === ERR.PLAN_LIMIT_EXCEEDED) {
+      // Stop the chain — otherwise the next iter would re-try the cover
+      // step or move to Q&A and re-fire PLAN_LIMIT_EXCEEDED, each call
+      // would try to show another modal (the idempotency guard catches
+      // this, but it still wastes backend calls and burns iterations).
+      quickApplyAborted = true;
       // Pretty modal instead of bare toast — user explicitly clicked
       // ⚡ Postular, so a modal is appropriate (they're in the loop).
       // Fire-and-forget: we don't await because the calling code
@@ -5044,6 +5101,10 @@
     }
     if (code === ERR.PLAN_LIMIT_EXCEEDED) {
       setQuestionsState("error", { error: "Llegaste al límite de respuestas IA de tu plan este mes." });
+      // If we're in a chain, abort it — otherwise the next iter would
+      // walk straight back into another AI call and hit the limit
+      // again. Safe to set unconditionally; harmless outside a chain.
+      quickApplyAborted = true;
       // Pretty modal — user clicked "Generar respuestas" or hit the
       // ✨ Respuesta con IA button, so they're actively in the loop.
       showPlanLimitModal({ feature: "respuestas IA" });
