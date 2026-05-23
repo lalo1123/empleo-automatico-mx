@@ -3131,14 +3131,233 @@
   color: #94a3b8;
 }
 
-/* Usage pill rendered above the stats strip in the best-matches panel.
-   Card layout with SVG icon + body containing: header row (label +
-   count), progress track, and meta line (plan + reset hint). No emoji
-   anywhere — emoji renders inconsistently across platforms (Windows
-   adds an ugly color background on monochrome emojis).
+/* Modern Linear/Vercel-style usage card. No icons (boxy), no emoji
+   (Windows color bg). Hierarchy from typography only: hero number
+   + eyebrow label + plan badge + 4px progress track. */
+.eamx-usage {
+  margin: 0 22px 14px;
+  padding: 16px 18px;
+  border-radius: 14px;
+  font-family: inherit;
+  display: block;
+  width: calc(100% - 44px);
+  text-align: left;
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.04) 0%, rgba(255, 255, 255, 0.01) 100%),
+    rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  color: #f8fafc;
+  transition: border-color 200ms ease, background 200ms ease, transform 200ms ease;
+}
+button.eamx-usage {
+  cursor: pointer;
+  appearance: none;
+  font-family: inherit;
+  font-size: inherit;
+}
+button.eamx-usage:hover {
+  transform: translateY(-1px);
+}
 
-   Four variants keyed by remaining count: unlimited / ok / low / over.
-   Over is a real <button> with hover affordance + Sube de plan → CTA. */
+.eamx-usage__row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.eamx-usage__col {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.eamx-usage__eyebrow {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(226, 232, 240, 0.5);
+  margin-bottom: 6px;
+}
+.eamx-usage__hero {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  line-height: 1;
+}
+.eamx-usage__num {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: #f8fafc;
+}
+.eamx-usage__suffix {
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(226, 232, 240, 0.45);
+  font-variant-numeric: tabular-nums;
+}
+.eamx-usage__badge {
+  flex: 0 0 auto;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(226, 232, 240, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Progress track — thin, full-width, sits below the hero row */
+.eamx-usage__track {
+  margin-top: 14px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+  position: relative;
+}
+.eamx-usage__fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 400ms cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+}
+/* Subtle shimmer on the fill for the modern dashboard feel */
+.eamx-usage__fill::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.18) 50%,
+    transparent 100%
+  );
+  animation: eamxUsageShimmer 2.4s ease-in-out infinite;
+}
+@keyframes eamxUsageShimmer {
+  0%, 100% { transform: translateX(-100%); }
+  50% { transform: translateX(100%); }
+}
+
+.eamx-usage__cta {
+  margin-top: 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #fca5a5;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.eamx-usage__cta-arrow {
+  transition: transform 200ms ease;
+  display: inline-block;
+}
+button.eamx-usage:hover .eamx-usage__cta-arrow {
+  transform: translateX(3px);
+}
+
+/* --- Unlimited (Premium) ----------------------------------------- */
+.eamx-usage--unlimited {
+  background:
+    linear-gradient(135deg, rgba(20, 184, 166, 0.16) 0%, rgba(20, 184, 166, 0.02) 100%),
+    rgba(15, 23, 42, 0.55);
+  border-color: rgba(45, 212, 191, 0.30);
+}
+.eamx-usage--unlimited .eamx-usage__num {
+  color: #5eead4;
+  font-size: 32px;
+}
+.eamx-usage--unlimited .eamx-usage__badge {
+  background: rgba(45, 212, 191, 0.14);
+  border-color: rgba(45, 212, 191, 0.35);
+  color: #5eead4;
+}
+
+/* --- OK ---------------------------------------------------------- */
+.eamx-usage--ok {
+  background:
+    linear-gradient(135deg, rgba(20, 184, 166, 0.10) 0%, rgba(255, 255, 255, 0.01) 100%),
+    rgba(15, 23, 42, 0.55);
+  border-color: rgba(45, 212, 191, 0.22);
+}
+.eamx-usage--ok .eamx-usage__num {
+  color: #f8fafc;
+}
+.eamx-usage--ok .eamx-usage__fill {
+  background: linear-gradient(90deg, #2dd4bf 0%, #14b8a6 100%);
+  box-shadow: 0 0 12px rgba(45, 212, 191, 0.40);
+}
+.eamx-usage--ok .eamx-usage__badge {
+  background: rgba(45, 212, 191, 0.10);
+  border-color: rgba(45, 212, 191, 0.25);
+  color: #5eead4;
+}
+
+/* --- Low (<= 25% remaining) ------------------------------------- */
+.eamx-usage--low {
+  background:
+    linear-gradient(135deg, rgba(251, 191, 36, 0.14) 0%, rgba(255, 255, 255, 0.01) 100%),
+    rgba(15, 23, 42, 0.55);
+  border-color: rgba(251, 191, 36, 0.35);
+}
+.eamx-usage--low .eamx-usage__num {
+  color: #fcd34d;
+}
+.eamx-usage--low .eamx-usage__fill {
+  background: linear-gradient(90deg, #fbbf24 0%, #f59e0b 100%);
+  box-shadow: 0 0 12px rgba(251, 191, 36, 0.40);
+}
+.eamx-usage--low .eamx-usage__badge {
+  background: rgba(251, 191, 36, 0.14);
+  border-color: rgba(251, 191, 36, 0.40);
+  color: #fcd34d;
+}
+
+/* --- Over (no quota, clickable) --------------------------------- */
+.eamx-usage--over {
+  background:
+    linear-gradient(135deg, rgba(239, 68, 68, 0.18) 0%, rgba(127, 29, 29, 0.06) 100%),
+    rgba(15, 23, 42, 0.55);
+  border-color: rgba(239, 68, 68, 0.45);
+}
+.eamx-usage--over:hover {
+  border-color: rgba(239, 68, 68, 0.70);
+  background:
+    linear-gradient(135deg, rgba(239, 68, 68, 0.22) 0%, rgba(127, 29, 29, 0.10) 100%),
+    rgba(15, 23, 42, 0.55);
+}
+.eamx-usage--over .eamx-usage__num {
+  color: #fca5a5;
+}
+.eamx-usage--over .eamx-usage__fill {
+  background: linear-gradient(90deg, #f87171 0%, #dc2626 100%);
+  box-shadow: 0 0 16px rgba(239, 68, 68, 0.45);
+}
+.eamx-usage__badge--over {
+  background: rgba(239, 68, 68, 0.18) !important;
+  border-color: rgba(239, 68, 68, 0.45) !important;
+  color: #fca5a5 !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .eamx-usage__fill { transition: none; }
+  .eamx-usage__fill::after { animation: none; }
+  button.eamx-usage:hover { transform: none; }
+  button.eamx-usage:hover .eamx-usage__cta-arrow { transform: none; }
+}
+
+/* Legacy class names kept around for back-compat — the old pill markup
+   is no longer rendered but external CSS might still reference it. */
 .eamx-matches-panel__usage {
   margin: 0 22px 12px;
   padding: 14px 16px;

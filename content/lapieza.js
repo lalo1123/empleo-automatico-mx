@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-23-usage-pill-v2";
+  const EAMX_LAPIEZA_VERSION = "2026-05-23-usage-modern";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -4359,72 +4359,75 @@
     const planName = (user && user.plan) || "free";
     const planLabel = planName.charAt(0).toUpperCase() + planName.slice(1);
 
-    // Inline SVG icons — no emoji. Emojis render with platform-specific
-    // colored backgrounds on Windows (the user reported the 📊 emoji
-    // showing up as an ugly green-yellow square). SVGs are pure stroke,
-    // pick up currentColor from the variant, look consistent everywhere.
-    const ICON_INFINITY = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18.178 8c5.096 0 5.096 8 0 8-5.095 0-7.133-8-12.739-8-4.585 0-4.585 8 0 8 5.606 0 7.644-8 12.74-8z"/></svg>`;
-    const ICON_SPARK = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2L4.5 13.5h7l-1.5 8.5L18.5 10.5h-7L13 2z"/></svg>`;
-    const ICON_WARN = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`;
-    const ICON_CHART = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>`;
+    // Modern dashboard-style stat card — Linear/Vercel/Stripe inspired.
+    // No icons (they made it look boxy). Hierarchy from typography only:
+    //   - hero number (24px / weight 700 / tabular nums / variant color)
+    //   - tiny eyebrow label "POSTULACIONES IA" (10px, tracking, muted)
+    //   - plan badge pill on the right
+    //   - 4px progress track at the bottom (no rounded fill so it
+    //     reads as a continuous bar like Linear's loading indicators)
+    // Glassmorphism: backdrop-blur + semi-transparent gradient
+    // background. Same four variants as before. Over is still a button.
 
     if (limit === -1) {
       return `
-        <div class="eamx-matches-panel__usage eamx-matches-panel__usage--unlimited" title="Plan ${escapeHtml(planLabel)} — sin tope mensual">
-          <div class="eamx-matches-panel__usage-icon-wrap">${ICON_INFINITY}</div>
-          <div class="eamx-matches-panel__usage-body">
-            <div class="eamx-matches-panel__usage-head">
-              <span class="eamx-matches-panel__usage-label">Postulaciones IA</span>
-              <span class="eamx-matches-panel__usage-count">Ilimitado</span>
+        <div class="eamx-usage eamx-usage--unlimited" title="Plan ${escapeHtml(planLabel)} — sin tope mensual">
+          <div class="eamx-usage__row">
+            <div class="eamx-usage__col">
+              <div class="eamx-usage__eyebrow">Postulaciones IA</div>
+              <div class="eamx-usage__hero">
+                <span class="eamx-usage__num">∞</span>
+                <span class="eamx-usage__suffix">este mes</span>
+              </div>
             </div>
-            <div class="eamx-matches-panel__usage-meta">Plan ${escapeHtml(planLabel)}</div>
+            <div class="eamx-usage__badge">${escapeHtml(planLabel)}</div>
           </div>
         </div>
       `;
     }
 
-    if (!Number.isFinite(limit) || limit <= 0) {
-      return "";
-    }
+    if (!Number.isFinite(limit) || limit <= 0) return "";
 
     const remaining = Math.max(0, limit - current);
     const pct = Math.min(100, Math.round((current / limit) * 100));
 
     if (remaining === 0) {
       return `
-        <button type="button" class="eamx-matches-panel__usage eamx-matches-panel__usage--over" data-action="open-billing" title="Click para subir de plan o comprar créditos extra">
-          <div class="eamx-matches-panel__usage-icon-wrap">${ICON_WARN}</div>
-          <div class="eamx-matches-panel__usage-body">
-            <div class="eamx-matches-panel__usage-head">
-              <span class="eamx-matches-panel__usage-label">Sin cuota este mes</span>
-              <span class="eamx-matches-panel__usage-count">${current}/${limit}</span>
+        <button type="button" class="eamx-usage eamx-usage--over" data-action="open-billing" title="Click para subir de plan o comprar créditos extra">
+          <div class="eamx-usage__row">
+            <div class="eamx-usage__col">
+              <div class="eamx-usage__eyebrow">Sin cuota este mes</div>
+              <div class="eamx-usage__hero">
+                <span class="eamx-usage__num">${current}</span>
+                <span class="eamx-usage__suffix">/ ${limit}</span>
+              </div>
             </div>
-            <div class="eamx-matches-panel__usage-track" aria-hidden="true">
-              <div class="eamx-matches-panel__usage-fill" style="width: 100%"></div>
-            </div>
-            <div class="eamx-matches-panel__usage-meta">
-              Plan ${escapeHtml(planLabel)} · <span class="eamx-matches-panel__usage-cta">Sube de plan →</span>
-            </div>
+            <div class="eamx-usage__badge eamx-usage__badge--over">${escapeHtml(planLabel)}</div>
           </div>
+          <div class="eamx-usage__track" aria-hidden="true">
+            <div class="eamx-usage__fill" style="width: 100%"></div>
+          </div>
+          <div class="eamx-usage__cta">Sube de plan <span class="eamx-usage__cta-arrow">→</span></div>
         </button>
       `;
     }
 
     const isLow = remaining <= Math.max(1, Math.floor(limit * 0.25));
-    const variantClass = isLow ? "eamx-matches-panel__usage--low" : "eamx-matches-panel__usage--ok";
-    const icon = isLow ? ICON_SPARK : ICON_CHART;
+    const variantClass = isLow ? "eamx-usage--low" : "eamx-usage--ok";
     return `
-      <div class="eamx-matches-panel__usage ${variantClass}" title="Tu cuota se reinicia el día 1">
-        <div class="eamx-matches-panel__usage-icon-wrap">${icon}</div>
-        <div class="eamx-matches-panel__usage-body">
-          <div class="eamx-matches-panel__usage-head">
-            <span class="eamx-matches-panel__usage-label">Postulaciones IA</span>
-            <span class="eamx-matches-panel__usage-count"><strong>${remaining}</strong> <span class="eamx-matches-panel__usage-count-sep">/</span> <span class="eamx-matches-panel__usage-count-total">${limit}</span></span>
+      <div class="eamx-usage ${variantClass}" title="Tu cuota se reinicia el día 1">
+        <div class="eamx-usage__row">
+          <div class="eamx-usage__col">
+            <div class="eamx-usage__eyebrow">Postulaciones IA</div>
+            <div class="eamx-usage__hero">
+              <span class="eamx-usage__num">${remaining}</span>
+              <span class="eamx-usage__suffix">/ ${limit} este mes</span>
+            </div>
           </div>
-          <div class="eamx-matches-panel__usage-track" aria-hidden="true">
-            <div class="eamx-matches-panel__usage-fill" style="width: ${pct}%"></div>
-          </div>
-          <div class="eamx-matches-panel__usage-meta">Plan ${escapeHtml(planLabel)} · reinicia el día 1</div>
+          <div class="eamx-usage__badge">${escapeHtml(planLabel)}</div>
+        </div>
+        <div class="eamx-usage__track" aria-hidden="true">
+          <div class="eamx-usage__fill" style="width: ${pct}%"></div>
         </div>
       </div>
     `;
