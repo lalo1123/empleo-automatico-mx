@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-22-plan-modal-fix";
+  const EAMX_LAPIEZA_VERSION = "2026-05-23-usage-pill";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -3753,6 +3753,13 @@
       }
       return;
     }
+    if (what === "open-billing") {
+      // Click on the usage pill when at-or-over the monthly limit. Goes
+      // straight to billing so the user can upgrade without hunting.
+      ev.preventDefault();
+      openBilling();
+      return;
+    }
     // "open" links are real <a target="_blank"> — let the browser handle them.
   }
 
@@ -4272,11 +4279,26 @@
     if (queueModule && typeof queueModule.appliedIdsForSource === "function") {
       try { appliedIds = await queueModule.appliedIdsForSource(SOURCE); } catch (_) {}
     }
+
+    // Fetch plan usage in parallel so the panel can surface "Te quedan
+    // X de Y este mes" right above the stats strip. User explicit ask:
+    // "que te salga cuantos te salen de tu plan" — without this they
+    // had to open the popup or guess before clicking Auto-postular top 5.
+    // Best-effort; if the auth ping fails we just skip the pill rather
+    // than blocking the whole panel render.
+    let usagePill = "";
+    try {
+      const auth = await sendMsg({ type: MSG.GET_AUTH_STATUS });
+      if (auth && auth.ok && auth.loggedIn && auth.usage) {
+        usagePill = renderUsagePill(auth.usage, auth.user);
+      }
+    } catch (_) { /* offline or network blip — skip pill */ }
+
     const list = topN.map((m, i) => renderMatchItem(m, i + 1, appliedIds)).join("");
     const footer = cards.length < 5
       ? `<p class="eamx-matches-panel__hint">Scroll para más vacantes.</p>`
       : "";
-    host.innerHTML = `${stats}${top1Banner}${lowFitNote}<ol class="eamx-matches-list">${list}</ol>${footer}`;
+    host.innerHTML = `${usagePill}${stats}${top1Banner}${lowFitNote}<ol class="eamx-matches-list">${list}</ol>${footer}`;
 
     // Resolve initial marked state for each row asynchronously. We render
     // optimistic "⭐ Marcar" first, then upgrade to "✓ Marcada" once the
@@ -4319,6 +4341,75 @@
     }
 
     console.log(`[EmpleoAutomatico] best matches panel opened: ${topN.length} matches`);
+  }
+
+  // Plan-usage pill rendered above the stats strip in the best-matches
+  // panel. Tells the user — BEFORE they click Auto-postular top 5 — how
+  // many AI-powered applications they still have for the month. Four
+  // visual states keyed off the remaining count:
+  //   - Premium ilimitado (limit === -1)  → green "✨ Ilimitado"
+  //   - At-or-over limit                   → red, clickable → openBilling
+  //   - Low (remaining < 25% of limit)     → amber warning
+  //   - Plenty                             → neutral teal
+  // The pill is a real <button> when in the at-limit state so the user
+  // can immediately upgrade; in the other states it's a static <div>.
+  function renderUsagePill(usage, user) {
+    const limit = Number(usage.limit);
+    const current = Math.max(0, Number(usage.current) || 0);
+    const planName = (user && user.plan) || "free";
+    const planLabel = planName.charAt(0).toUpperCase() + planName.slice(1);
+
+    if (limit === -1) {
+      return `
+        <div class="eamx-matches-panel__usage eamx-matches-panel__usage--unlimited" title="Plan ${escapeHtml(planLabel)} — sin tope mensual">
+          <span class="eamx-matches-panel__usage-icon">✨</span>
+          <span class="eamx-matches-panel__usage-text">
+            <strong>Postulaciones IA: ilimitadas</strong> este mes · Plan ${escapeHtml(planLabel)}
+          </span>
+        </div>
+      `;
+    }
+
+    if (!Number.isFinite(limit) || limit <= 0) {
+      // Defensive: shouldn't happen but if we got something weird from
+      // the backend, hide rather than show garbage.
+      return "";
+    }
+
+    const remaining = Math.max(0, limit - current);
+    const pct = Math.min(100, Math.round((current / limit) * 100));
+
+    if (remaining === 0) {
+      // At-or-over the limit. Render as a button so a single click goes
+      // straight to billing — saves the user from hunting for "Sube de
+      // plan" elsewhere.
+      return `
+        <button type="button" class="eamx-matches-panel__usage eamx-matches-panel__usage--over" data-action="open-billing" title="Click para subir de plan o comprar créditos extra">
+          <span class="eamx-matches-panel__usage-icon">⚠️</span>
+          <span class="eamx-matches-panel__usage-text">
+            <strong>Sin cuota</strong> (${current}/${limit}) · Plan ${escapeHtml(planLabel)} · <span class="eamx-matches-panel__usage-cta">Sube de plan →</span>
+          </span>
+          <span class="eamx-matches-panel__usage-bar" aria-hidden="true">
+            <span class="eamx-matches-panel__usage-bar-fill" style="width: 100%"></span>
+          </span>
+        </button>
+      `;
+    }
+
+    const isLow = remaining <= Math.max(1, Math.floor(limit * 0.25));
+    const variantClass = isLow ? "eamx-matches-panel__usage--low" : "eamx-matches-panel__usage--ok";
+    const icon = isLow ? "⚡" : "📊";
+    return `
+      <div class="eamx-matches-panel__usage ${variantClass}" title="Tu cuota se reinicia el día 1">
+        <span class="eamx-matches-panel__usage-icon">${icon}</span>
+        <span class="eamx-matches-panel__usage-text">
+          Te quedan <strong>${remaining}</strong> de ${limit} este mes · Plan ${escapeHtml(planLabel)}
+        </span>
+        <span class="eamx-matches-panel__usage-bar" aria-hidden="true">
+          <span class="eamx-matches-panel__usage-bar-fill" style="width: ${pct}%"></span>
+        </span>
+      </div>
+    `;
   }
 
   // Build a single <li> for the matches list.

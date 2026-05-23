@@ -3131,6 +3131,116 @@
   color: #94a3b8;
 }
 
+/* Usage pill rendered above the stats strip in the best-matches panel.
+   Tells the user how many AI postulations they have left this month BEFORE
+   they decide whether to spend them on Auto-postular top 5. Four variants
+   keyed by remaining count: unlimited / ok / low / over.
+   When over, it's a real <button> with hover affordance and tells the
+   user "Sube de plan →" as the implicit CTA. */
+.eamx-matches-panel__usage {
+  margin: 0 22px 12px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font: 13px/1.4 inherit;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  position: relative;
+  overflow: hidden;
+  border: 1px solid transparent;
+  background: rgba(31, 159, 149, 0.08);
+  color: #f8fafc;
+}
+button.eamx-matches-panel__usage {
+  cursor: pointer;
+  appearance: none;
+  width: calc(100% - 44px);
+  text-align: left;
+  transition: transform 150ms ease, background 150ms ease, border-color 150ms ease;
+}
+button.eamx-matches-panel__usage:hover {
+  transform: translateY(-1px);
+}
+.eamx-matches-panel__usage-icon {
+  font-size: 18px;
+  flex: 0 0 auto;
+}
+.eamx-matches-panel__usage-text {
+  flex: 1 1 auto;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.eamx-matches-panel__usage-text strong {
+  font-weight: 700;
+  color: #f8fafc;
+}
+.eamx-matches-panel__usage-cta {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+.eamx-matches-panel__usage-bar {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 3px;
+  width: 100%;
+  background: rgba(255, 255, 255, 0.08);
+  display: block;
+}
+.eamx-matches-panel__usage-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 0;
+  transition: width 320ms ease;
+}
+
+/* Unlimited (Premium) — calm teal */
+.eamx-matches-panel__usage--unlimited {
+  background: rgba(31, 159, 149, 0.14);
+  border-color: rgba(31, 159, 149, 0.32);
+}
+
+/* Ok — neutral teal-tinted */
+.eamx-matches-panel__usage--ok {
+  background: rgba(15, 23, 42, 0.30);
+  border-color: rgba(148, 163, 184, 0.25);
+}
+.eamx-matches-panel__usage--ok .eamx-matches-panel__usage-bar-fill {
+  background: linear-gradient(90deg, #14b8a6 0%, #0d9488 100%);
+}
+
+/* Low (< 25% remaining) — amber warning */
+.eamx-matches-panel__usage--low {
+  background: rgba(180, 83, 9, 0.18);
+  border-color: rgba(251, 191, 36, 0.45);
+}
+.eamx-matches-panel__usage--low .eamx-matches-panel__usage-bar-fill {
+  background: linear-gradient(90deg, #fbbf24 0%, #f59e0b 100%);
+}
+
+/* Over the limit — red, clickable to billing */
+.eamx-matches-panel__usage--over {
+  background: rgba(127, 29, 29, 0.32);
+  border-color: rgba(239, 68, 68, 0.65);
+}
+.eamx-matches-panel__usage--over:hover {
+  background: rgba(127, 29, 29, 0.48);
+  border-color: rgba(239, 68, 68, 0.85);
+}
+.eamx-matches-panel__usage--over .eamx-matches-panel__usage-bar-fill {
+  background: linear-gradient(90deg, #f87171 0%, #dc2626 100%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button.eamx-matches-panel__usage:hover {
+    transform: none;
+  }
+  .eamx-matches-panel__usage-bar-fill {
+    transition: none;
+  }
+}
+
 /* Plan-limit modal — shown when the user clicks an AI-powered action
    (Postular, Bulk auto-postular, Generar CV personalizado, Genera carta)
    but they've already hit their monthly quota. Replaces the prior
