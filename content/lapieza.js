@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-22-quizbtn";
+  const EAMX_LAPIEZA_VERSION = "2026-05-22-bulkskip-quizclear";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -4316,10 +4316,38 @@
     if (!bulkBtn) return;
     const N = 5;
     const STAGGER_MS = 6000;
-    const topN = (matchesCurrentTopN || []).slice(0, N).filter((m) => m && m.jobLite && m.jobLite.url);
+
+    // Skip vacancies the user has already applied to. The "applied"
+    // queue is populated by:
+    //   - chain auto-tracker when the user clicks Finalizar
+    //   - manual "✓ Ya apliqué" link in the matches panel
+    //   - past chains that successfully finalized
+    // User explicit ask: "si ya esta marcado como que se postulo que
+    // no se marque para autopostular no?" — don't waste a quota unit
+    // re-applying to a vacancy that's already been submitted.
+    let appliedIds = new Set();
+    try {
+      await ensureDiscoveryDeps();
+      if (queueModule && typeof queueModule.appliedIdsForSource === "function") {
+        appliedIds = await queueModule.appliedIdsForSource(SOURCE);
+      }
+    } catch (_) { /* ignore — fall back to no filtering */ }
+
+    const candidates = (matchesCurrentTopN || [])
+      .filter((m) => m && m.jobLite && m.jobLite.url)
+      .filter((m) => !appliedIds.has(String(m.jobLite.id)));
+    const skipped = (matchesCurrentTopN || []).length - candidates.length;
+    const topN = candidates.slice(0, N);
+
     if (!topN.length) {
-      toast("No hay vacantes para postular.", "info");
+      const msg = skipped > 0
+        ? `Todas las del top ya están postuladas (${skipped} vacantes). Espera el siguiente scan o amplía búsqueda.`
+        : "No hay vacantes para postular.";
+      toast(msg, "info", { durationMs: 5000 });
       return;
+    }
+    if (skipped > 0) {
+      toast(`Saltando ${skipped} ya postuladas, abriendo las siguientes ${topN.length}.`, "info", { durationMs: 4000 });
     }
 
     // Inline progress card inside the matches panel — user sees live
@@ -6210,11 +6238,22 @@
       try {
         res = await sendMsg(payload);
       } catch (err) {
+        // Clear the "IA contestando..." sticky before bailing — otherwise
+        // it lingers next to the error toast (user-confusing: the sticky
+        // implies we're still working when we've actually stopped).
+        clearQuizStickyToast();
         toast(humanizeError(err), "error");
-        break;
+        return;
       }
       if (!res || !res.ok) {
         // Stop on first error — avoid clicking wrong answers in a panic.
+        // Clear sticky BEFORE showing the error so they don't fight for
+        // attention. User reported case: hit PLAN_LIMIT_EXCEEDED and the
+        // sticky "IA contestando pregunta 1/?" stayed up while "Ver
+        // planes" toast also showed — looked like the loop was still
+        // running. Convert to return (not break) to skip the misleading
+        // "✓ Quiz completo" final summary at the bottom of this function.
+        clearQuizStickyToast();
         if (res && res.error === ERR.UNAUTHORIZED) {
           toast("Inicia sesión para continuar el quiz.", "error", {
             label: "Iniciar sesión",
@@ -6228,16 +6267,18 @@
         } else {
           toast((res && res.message) || "Auto-quiz: la IA no pudo responder.", "error");
         }
-        break;
+        return;
       }
 
       const answerKey = (res.answerKey || "").toUpperCase();
       const choice = state.options.find((o) => o.key === answerKey);
       if (!choice) {
         // Backend returned a key we don't have in the DOM. Shouldn't happen
-        // (handler validates) but defend anyway.
+        // (handler validates) but defend anyway. Clear sticky + return so
+        // the misleading final-summary toast doesn't fire.
+        clearQuizStickyToast();
         toast(`Auto-quiz: la IA respondió "${answerKey}" pero no está en pantalla.`, "error");
-        break;
+        return;
       }
 
       // Verify the option button is still in the DOM (LaPieza may have
@@ -6247,8 +6288,9 @@
         const fresh = detectQuizQuestion();
         const refreshed = fresh && fresh.options.find((o) => o.key === answerKey);
         if (!refreshed) {
+          clearQuizStickyToast();
           toast("Auto-quiz: el quiz cambió justo ahora. Revisa manualmente.", "info");
-          break;
+          return;
         }
         choice.button = refreshed.button;
       }
@@ -6304,8 +6346,9 @@
       // Wait for either the counter to advance or the container to vanish.
       const advanced = await waitForNextQuizQuestion(prevQuestion, prevCounter);
       if (!advanced) {
+        clearQuizStickyToast();
         toast("Auto-quiz: no detecté la siguiente pregunta. Revisa manualmente.", "info", { durationMs: 5000 });
-        break;
+        return;
       }
 
       // Inter-question pause — gives the SPA time to settle and the user
