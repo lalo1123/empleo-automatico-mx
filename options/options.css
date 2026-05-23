@@ -1610,6 +1610,51 @@ code {
   }
 }
 
+/* Usage manipulation buttons inside the admin card. Visually grouped
+   below the plan switcher with a separator + smaller hint label, so
+   the dev workflow reads top-down: pick plan → then force counter. */
+.admin-usage {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px dashed var(--c-border, #e2e8f0);
+}
+.admin-usage__hint {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: var(--c-ink-soft, #475569);
+}
+.admin-usage__buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.plan-btn--usage {
+  border-color: #cbd5e1;
+}
+.plan-btn--usage:hover:not(:disabled) {
+  border-color: #94a3b8;
+}
+.plan-btn--usage-max {
+  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+  border-color: #f59e0b;
+}
+.plan-btn--usage-max:hover:not(:disabled) {
+  background: linear-gradient(135deg, #fde68a 0%, #fcd34d 100%);
+  border-color: #d97706;
+}
+.plan-btn--usage-max .plan-btn__name {
+  color: #92400e;
+}
+.plan-btn--usage-max .plan-btn__limit {
+  color: #b45309;
+  font-weight: 500;
+}
+@media (max-width: 540px) {
+  .admin-usage__buttons {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* =============================================================================
  * Next steps card — shown after login to guide the user to OCC/Computrabajo/etc
  * ============================================================================= */

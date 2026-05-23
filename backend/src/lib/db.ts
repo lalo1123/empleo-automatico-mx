@@ -494,3 +494,32 @@ export function incrementDailyUsage(userId: string, date: string): number {
     .run(userId, date);
   return getDailyUsageCount(userId, date);
 }
+
+// Admin-only: force the monthly counter to an exact value. Used by the
+// admin UI in the extension to test PLAN_LIMIT_EXCEEDED flows without
+// having to actually exhaust the quota by sending real applications.
+// Called from /v1/admin/me/usage. Non-admins never reach this code path
+// (the route enforces the allowlist).
+export function setUsageCount(userId: string, yearMonth: string, count: number): number {
+  getDb()
+    .prepare(
+      `INSERT INTO usage_monthly (user_id, year_month, count)
+       VALUES (?, ?, ?)
+       ON CONFLICT(user_id, year_month)
+       DO UPDATE SET count = excluded.count`
+    )
+    .run(userId, yearMonth, count);
+  return getUsageCount(userId, yearMonth);
+}
+
+export function setDailyUsageCount(userId: string, date: string, count: number): number {
+  getDb()
+    .prepare(
+      `INSERT INTO usage_daily (user_id, date, count)
+       VALUES (?, ?, ?)
+       ON CONFLICT(user_id, date)
+       DO UPDATE SET count = excluded.count`
+    )
+    .run(userId, date, count);
+  return getDailyUsageCount(userId, date);
+}

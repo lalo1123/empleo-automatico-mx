@@ -65,6 +65,12 @@ const adminStatus = $("adminStatus");
 const adminPlanButtons = adminCard
   ? Array.from(adminCard.querySelectorAll("[data-admin-plan]"))
   : [];
+// Usage manipulation buttons — "zero" resets, "max" pushes the counter
+// past the plan limit so the next AI call throws PLAN_LIMIT_EXCEEDED.
+// Useful for testing the plan-limit modal without burning real cuota.
+const adminUsageButtons = adminCard
+  ? Array.from(adminCard.querySelectorAll("[data-admin-usage]"))
+  : [];
 
 // Spanish-MX label for toast on plan change.
 const PLAN_LABEL_SHORT = { free: "Gratis", pro: "Pro", premium: "Premium" };
@@ -346,6 +352,41 @@ for (const btn of adminPlanButtons) {
       setStatus(adminStatus, "err", e.message || "Error al cambiar el plan");
     } finally {
       for (const b of adminPlanButtons) b.disabled = false;
+    }
+  });
+}
+
+// Force usage counters (zero/max) \u2014 admin-only test helper. Same UX as
+// the plan switcher above: disable buttons while in flight, refresh
+// auth state on success so the usage block re-renders with the new
+// numbers immediately.
+for (const btn of adminUsageButtons) {
+  btn.addEventListener("click", async () => {
+    const action = btn.dataset.adminUsage;
+    if (action !== "zero" && action !== "max") return;
+
+    for (const b of adminUsageButtons) b.disabled = true;
+    setStatus(adminStatus, "", action === "zero" ? "Reiniciando cuota\u2026" : "Forzando cuota al m\u00e1ximo\u2026");
+
+    try {
+      const res = await sendMessage({ type: MESSAGE_TYPES.ADMIN_SET_USAGE, action });
+      if (!res?.ok) {
+        setStatus(adminStatus, "err", res?.message || "No se pudo cambiar la cuota");
+        return;
+      }
+      await refreshAuthState();
+      if (action === "zero") {
+        setStatus(adminStatus, "ok", "Cuota reiniciada a 0. Pruebas reanudadas.");
+      } else {
+        const c = res?.usage?.current;
+        const l = res?.usage?.limit;
+        const detail = (c != null && l != null && l !== -1) ? ` (${c}/${l})` : "";
+        setStatus(adminStatus, "ok", `Cuota al m\u00e1ximo${detail}. Pr\u00f3xima llamada IA disparar\u00e1 PLAN_LIMIT.`);
+      }
+    } catch (e) {
+      setStatus(adminStatus, "err", e.message || "Error al cambiar la cuota");
+    } finally {
+      for (const b of adminUsageButtons) b.disabled = false;
     }
   });
 }

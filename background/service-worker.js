@@ -774,6 +774,29 @@ async function handleAdminSetPlan(msg) {
   }
 }
 
+// Admin-only: force the caller's usage counters. Used by the options-
+// page admin panel to test PLAN_LIMIT_EXCEEDED flows ("max") or reset
+// after testing ("zero"). Backend gates via ADMIN_USER_EMAILS.
+async function handleAdminSetUsage(msg) {
+  const action = msg && msg.action;
+  if (action !== "zero" && action !== "max") {
+    return { ok: false, error: ERROR_CODES.INVALID_INPUT, message: "Acción inválida (zero|max)" };
+  }
+  try {
+    const data = await backend.setAdminUsage(action);
+    if (data && data.user) {
+      await auth.setUser(data.user);
+    }
+    return {
+      ok: true,
+      user: (data && data.user) || null,
+      usage: (data && data.usage) || null
+    };
+  } catch (e) {
+    return failFromError(e);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
@@ -821,6 +844,8 @@ onMessage(async (msg) => {
       return handleFocusTab(msg);
     case MESSAGE_TYPES.ADMIN_SET_PLAN:
       return handleAdminSetPlan(msg);
+    case MESSAGE_TYPES.ADMIN_SET_USAGE:
+      return handleAdminSetUsage(msg);
     case MESSAGE_TYPES.GENERATE_CV:
       return handleGenerateCv(msg);
     case MESSAGE_TYPES.GENERATE_CV_PDF:

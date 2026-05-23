@@ -193,6 +193,21 @@
             <span class="plan-btn__limit">Ilimitado</span>
           </button>
         </div>
+
+        <div class="admin-usage" role="group" aria-label="Forzar cuota">
+          <p class="admin-usage__hint">Forzar cuota para probar el modal de l&iacute;mite:</p>
+          <div class="admin-usage__buttons">
+            <button type="button" class="plan-btn plan-btn--usage" data-admin-usage="zero">
+              <span class="plan-btn__name">Cuota en cero</span>
+              <span class="plan-btn__limit">0 usos</span>
+            </button>
+            <button type="button" class="plan-btn plan-btn--usage plan-btn--usage-max" data-admin-usage="max">
+              <span class="plan-btn__name">Cuota al m&aacute;ximo</span>
+              <span class="plan-btn__limit">Dispara PLAN_LIMIT</span>
+            </button>
+          </div>
+        </div>
+
         <span id="adminStatus" class="status" role="status" aria-live="polite"></span>
       </section>
 
