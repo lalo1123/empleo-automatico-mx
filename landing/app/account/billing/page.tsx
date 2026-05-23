@@ -20,7 +20,7 @@ export const metadata: Metadata = pageMetadata({
 });
 
 interface PageProps {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; pack?: string }>;
 }
 
 async function checkoutAction(formData: FormData) {
@@ -66,7 +66,14 @@ export default async function BillingPage({ searchParams }: PageProps) {
   }
 
   const { user } = data;
-  const { error } = await searchParams;
+  const { error, pack } = await searchParams;
+  // ?pack=1 comes from the extension's plan-limit modal "Compra créditos
+  // extra" button. The pack SKU + checkout flow isn't built yet — for
+  // now we show an honest "coming soon" banner that points the user to
+  // the monthly tiers as the current path to more quota. When the pack
+  // backend lands (Conekta one-shot SKU + extra_credits column +
+  // webhook), this banner becomes the pack card itself.
+  const showPackBanner = pack === "1" || pack === "true";
 
   return (
     <>
@@ -96,6 +103,31 @@ export default async function BillingPage({ searchParams }: PageProps) {
           >
             No pudimos iniciar el checkout. Intenta de nuevo o escríbenos a
             hola@skybrandmx.com.
+          </div>
+        )}
+
+        {showPackBanner && (
+          <div
+            role="status"
+            className="mt-6 rounded-[14px] border border-amber-300 bg-gradient-to-br from-amber-50 to-yellow-50 px-5 py-4 text-sm text-amber-900 shadow-sm"
+          >
+            <div className="flex items-start gap-3">
+              <span aria-hidden className="text-2xl">🪙</span>
+              <div className="flex-1">
+                <p className="font-semibold">Paquetes de créditos extra — en lanzamiento</p>
+                <p className="mt-1 text-amber-800">
+                  Estamos terminando los paquetes de créditos one-shot (paga
+                  una vez, sin suscripción). Mientras tanto, te recomendamos
+                  subir a <strong>Pro</strong> o <strong>Premium</strong>:
+                  tienen mucha más cuota mensual y puedes cancelar cuando
+                  quieras.
+                </p>
+                <p className="mt-2 text-xs text-amber-700">
+                  ¿Quieres que te avisemos cuando estén disponibles? Escríbenos
+                  a <a href="mailto:hola@skybrandmx.com" className="underline font-semibold">hola@skybrandmx.com</a>.
+                </p>
+              </div>
+            </div>
           </div>
         )}
 

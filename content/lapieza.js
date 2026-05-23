@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-22-bulk-preflight";
+  const EAMX_LAPIEZA_VERSION = "2026-05-22-plan-modal";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -1642,6 +1642,121 @@
     });
   }
 
+  // Plan-limit modal — replaces the plain "Llegaste al límite" toast on
+  // user-initiated AI actions (Postular, Bulk auto-postular, Generar CV,
+  // Generar carta). Shows a visual usage bar, names the plan/feature
+  // that ran out, and offers TWO upgrade paths so the user isn't forced
+  // to commit to a higher tier just to send one more application:
+  //   1. "Sube de plan" → empleo.skybrandmx.com/account/billing
+  //   2. "Compra créditos extra" → /account/billing?pack=1 (the landing
+  //      page handles the pack SKU selection + checkout)
+  // Background flows (auto-quiz mid-run, idle prewarm) still use a
+  // toast — the modal would be too disruptive when the user didn't
+  // just click anything. Resolves with one of:
+  //   "upgrade" | "pack" | "close" | "esc"
+  // Idempotent: re-opening replaces any existing modal.
+  function showPlanLimitModal({ feature = "esta IA", usage = null, planName = "" } = {}) {
+    return new Promise((resolve) => {
+      // Tear down any prior plan-limit modal so re-fires don't stack.
+      try { document.querySelectorAll(".eamx-plan-limit").forEach((el) => el.remove()); } catch (_) {}
+
+      let settled = false;
+      const settle = (choice) => {
+        if (settled) return;
+        settled = true;
+        try { document.removeEventListener("keydown", onKey, true); } catch (_) {}
+        try { backdrop.remove(); } catch (_) {}
+        resolve(choice);
+      };
+
+      // Usage display: progress bar + count. Limit -1 = unlimited (shouldn't
+      // ever hit this modal, but defend). Unknown usage → hide the bar
+      // entirely rather than show "?/?" which is uglier than nothing.
+      let usageBlock = "";
+      if (usage && Number.isFinite(Number(usage.limit)) && Number(usage.limit) > 0) {
+        const limitNum = Number(usage.limit);
+        const currentNum = Math.max(0, Number(usage.current) || 0);
+        const pct = Math.min(100, Math.round((currentNum / limitNum) * 100));
+        usageBlock = `
+          <div class="eamx-plan-limit__usage">
+            <div class="eamx-plan-limit__usage-row">
+              <span class="eamx-plan-limit__usage-label">Tu uso este mes</span>
+              <span class="eamx-plan-limit__usage-value">${currentNum} / ${limitNum}</span>
+            </div>
+            <div class="eamx-plan-limit__bar">
+              <div class="eamx-plan-limit__bar-fill" style="width: ${pct}%"></div>
+            </div>
+            ${planName ? `<div class="eamx-plan-limit__plan-name">Plan actual: <strong>${escapeHtml(planName)}</strong></div>` : ""}
+          </div>
+        `;
+      }
+
+      const backdrop = document.createElement("div");
+      backdrop.className = "eamx-plan-limit";
+      backdrop.innerHTML = `
+        <div class="eamx-plan-limit__card" role="dialog" aria-modal="true" aria-labelledby="eamx-plan-limit-title">
+          <div class="eamx-plan-limit__icon" aria-hidden="true">⚡</div>
+          <h2 class="eamx-plan-limit__title" id="eamx-plan-limit-title">Se acabaron tus ${escapeHtml(feature)} del mes</h2>
+          <p class="eamx-plan-limit__sub">
+            Tu cuota mensual se reinicia el día 1. Mientras tanto, elige cómo quieres seguir:
+          </p>
+          ${usageBlock}
+          <div class="eamx-plan-limit__actions">
+            <button type="button" class="eamx-plan-limit__btn eamx-plan-limit__btn--primary" data-eamx-plan-limit="upgrade">
+              <span class="eamx-plan-limit__btn-icon" aria-hidden="true">🚀</span>
+              <span class="eamx-plan-limit__btn-body">
+                <span class="eamx-plan-limit__btn-title">Sube de plan</span>
+                <span class="eamx-plan-limit__btn-sub">Pro $299/mes · Premium $499/mes · cuota grande cada mes</span>
+              </span>
+            </button>
+            <button type="button" class="eamx-plan-limit__btn eamx-plan-limit__btn--pack" data-eamx-plan-limit="pack">
+              <span class="eamx-plan-limit__btn-icon" aria-hidden="true">🪙</span>
+              <span class="eamx-plan-limit__btn-body">
+                <span class="eamx-plan-limit__btn-title">Compra créditos extra</span>
+                <span class="eamx-plan-limit__btn-sub">Paga una vez, sin suscripción · ideal para terminar esta racha</span>
+              </span>
+            </button>
+          </div>
+          <p class="eamx-plan-limit__reset-hint">Sin riesgos: tu cuenta y CV se mantienen igual.</p>
+          <button type="button" class="eamx-plan-limit__close" data-eamx-plan-limit="close">Cerrar</button>
+        </div>
+      `;
+      document.documentElement.appendChild(backdrop);
+
+      backdrop.addEventListener("click", (ev) => {
+        const btn = ev.target.closest("[data-eamx-plan-limit]");
+        if (btn) {
+          const action = btn.getAttribute("data-eamx-plan-limit");
+          if (action === "upgrade") openBilling();
+          if (action === "pack") openBillingPack();
+          settle(action);
+          return;
+        }
+        // Click on the backdrop itself (outside the card) closes too.
+        if (ev.target === backdrop) settle("close");
+      });
+
+      const onKey = (ev) => {
+        if (ev.key === "Escape" || ev.key === "Esc") { ev.preventDefault(); settle("esc"); }
+      };
+      document.addEventListener("keydown", onKey, true);
+    });
+  }
+
+  // Open the billing page with the ?pack=1 query so the landing knows
+  // to highlight the credit-pack purchase flow vs the monthly tier
+  // upgrade flow. The landing implements the actual checkout — keeping
+  // the extension dumb about pricing/SKUs.
+  function openBillingPack() {
+    try {
+      const url = `${BILLING_URL}?pack=1`;
+      window.open(url, "_blank", "noopener");
+    } catch (_) {
+      // Fallback to plain billing if the new tab open fails.
+      try { openBilling(); } catch (_) {}
+    }
+  }
+
   async function tryUploadTailoredCv() {
     // Restore lastJob from chrome.storage.session if it's not in-memory.
     // The /apply/ tab can land here without lastJob populated when the
@@ -3150,11 +3265,12 @@
     const code = res?.error;
     const message = res?.message || "No se pudo generar la carta.";
     if (code === ERR.PLAN_LIMIT_EXCEEDED) {
-      toast("Se acabaron tus cartas IA del mes. Sube de plan para seguir.", "error", {
-        label: "Ver planes",
-        onClick: () => openBilling(),
-        durationMs: 10000
-      });
+      // Pretty modal instead of bare toast — user explicitly clicked
+      // ⚡ Postular, so a modal is appropriate (they're in the loop).
+      // Fire-and-forget: we don't await because the calling code
+      // doesn't need the user's modal choice to proceed (the chain
+      // already failed; the modal just gives upgrade paths).
+      showPlanLimitModal({ feature: "cartas IA" });
       return;
     }
     if (code === ERR.UNAUTHORIZED) {
@@ -4383,11 +4499,14 @@
         const current = Number(auth.usage.current) || 0;
         // -1 = unlimited (Premium). Skip the gate.
         if (limit !== -1 && Number.isFinite(limit) && current >= limit) {
-          toast(
-            `Se acabaron tus postulaciones del mes (${current}/${limit}). Sube de plan para auto-postular.`,
-            "error",
-            { label: "Ver planes", onClick: () => openBilling(), durationMs: 10000 }
-          );
+          // Pretty plan-limit modal instead of a plain toast — user
+          // explicitly asked for this UX: "que salga bonito que ya no
+          // tiene y estaria cool que puedas comprar creditos extra".
+          await showPlanLimitModal({
+            feature: "postulaciones IA",
+            usage: { current, limit },
+            planName: (auth.user && auth.user.plan) || ""
+          });
           return;
         }
         // Warn but don't block if remaining < requested N (e.g. user
@@ -4925,11 +5044,9 @@
     }
     if (code === ERR.PLAN_LIMIT_EXCEEDED) {
       setQuestionsState("error", { error: "Llegaste al límite de respuestas IA de tu plan este mes." });
-      toast("Se acabaron tus respuestas IA del mes. Sube de plan para seguir.", "error", {
-        label: "Ver planes",
-        onClick: () => openBilling(),
-        durationMs: 10000
-      });
+      // Pretty modal — user clicked "Generar respuestas" or hit the
+      // ✨ Respuesta con IA button, so they're actively in the loop.
+      showPlanLimitModal({ feature: "respuestas IA" });
       return;
     }
     // 422 PROFILE_TOO_THIN comes through as INVALID_INPUT — branch on the
@@ -5032,13 +5149,10 @@
         const code = res?.error;
         if (code === ERR.PLAN_LIMIT_EXCEEDED) {
           setCvState("error", { error: "Llegaste al límite de CVs personalizados de tu plan este mes." });
-          // Mirror the cover-letter UX: also fire a toast with a CTA.
-          // Long duration so the user has time to see it + click "Ver planes".
-          toast("Se acabaron tus CVs personalizados del mes. Sube de plan para seguir.", "error", {
-            label: "Ver planes",
-            onClick: () => openBilling(),
-            durationMs: 10000
-          });
+          // Pretty modal — user clicked "Generar CV personalizado" so
+          // they're actively in the loop. Modal explains usage + offers
+          // upgrade and credit-pack paths.
+          showPlanLimitModal({ feature: "CVs personalizados" });
           return;
         }
         if (code === ERR.UNAUTHORIZED) {
@@ -5360,11 +5474,9 @@
     const code = res?.error;
     const message = res?.message || "No se pudo generar el borrador.";
     if (code === ERR.PLAN_LIMIT_EXCEEDED) {
-      toast("Se acabaron tus cartas IA del mes. Sube de plan para seguir.", "error", {
-        label: "Ver planes",
-        onClick: () => openBilling(),
-        durationMs: 10000
-      });
+      // Pretty modal — generic backend-failure path also used by the
+      // panel "Generar carta" button which is a user-initiated click.
+      showPlanLimitModal({ feature: "cartas IA" });
       return;
     }
     if (code === ERR.UNAUTHORIZED) {

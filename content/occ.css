@@ -3130,3 +3130,199 @@
   line-height: 1.45;
   color: #94a3b8;
 }
+
+/* Plan-limit modal — shown when the user clicks an AI-powered action
+   (Postular, Bulk auto-postular, Generar CV personalizado, Genera carta)
+   but they've already hit their monthly quota. Replaces the prior
+   plain toast: gives the user a clear visualization of usage, the
+   upgrade CTA, and an explicit option to buy a one-off credit pack
+   without committing to a higher plan tier. */
+.eamx-plan-limit {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483700;
+  background: rgba(15, 23, 42, 0.62);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  animation: eamxPlanLimitFadeIn 180ms ease-out;
+}
+@keyframes eamxPlanLimitFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.eamx-plan-limit__card {
+  background: #ffffff;
+  border-radius: 16px;
+  box-shadow: 0 28px 70px -16px rgba(15, 23, 42, 0.5);
+  padding: 30px 28px 22px;
+  max-width: 480px;
+  width: 100%;
+  color: #0f1d2c;
+  font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-align: center;
+  position: relative;
+  animation: eamxPlanLimitPop 220ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes eamxPlanLimitPop {
+  from { transform: scale(0.92); opacity: 0; }
+  to   { transform: scale(1); opacity: 1; }
+}
+.eamx-plan-limit__icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32px;
+  margin-bottom: 16px;
+  box-shadow: 0 8px 20px -6px rgba(180, 83, 9, 0.25);
+}
+.eamx-plan-limit__title {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: 0 0 6px;
+}
+.eamx-plan-limit__sub {
+  margin: 0 0 18px;
+  color: #475569;
+  font-size: 14px;
+  line-height: 1.55;
+}
+.eamx-plan-limit__usage {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin: 0 0 20px;
+  text-align: left;
+}
+.eamx-plan-limit__usage-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 8px;
+}
+.eamx-plan-limit__usage-label {
+  font-size: 12.5px;
+  color: #64748b;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.eamx-plan-limit__usage-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: #b91c1c;
+}
+.eamx-plan-limit__bar {
+  height: 8px;
+  border-radius: 999px;
+  background: #fee2e2;
+  overflow: hidden;
+}
+.eamx-plan-limit__bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #f87171 0%, #dc2626 100%);
+  border-radius: 999px;
+  transition: width 320ms ease;
+}
+.eamx-plan-limit__plan-name {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: #64748b;
+}
+.eamx-plan-limit__plan-name strong {
+  color: #0f1d2c;
+}
+.eamx-plan-limit__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.eamx-plan-limit__btn {
+  padding: 13px 18px;
+  border-radius: 11px;
+  font: 600 14px inherit;
+  cursor: pointer;
+  border: 1.5px solid #cbd5e1;
+  background: #ffffff;
+  color: #0f1d2c;
+  transition: all 150ms ease;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+.eamx-plan-limit__btn:hover {
+  background: #f8fafc;
+  border-color: #94a3b8;
+  transform: translateY(-1px);
+}
+.eamx-plan-limit__btn-icon {
+  font-size: 22px;
+  flex: 0 0 auto;
+}
+.eamx-plan-limit__btn-body {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.eamx-plan-limit__btn-title {
+  font-size: 14px;
+  font-weight: 700;
+}
+.eamx-plan-limit__btn-sub {
+  font-size: 12px;
+  color: #64748b;
+  font-weight: 400;
+}
+.eamx-plan-limit__btn--primary {
+  background: linear-gradient(135deg, #1f9f95 0%, #105971 100%);
+  color: #ffffff;
+  border-color: transparent;
+  box-shadow: 0 8px 20px -8px rgba(16, 89, 113, 0.55);
+}
+.eamx-plan-limit__btn--primary .eamx-plan-limit__btn-sub {
+  color: rgba(255, 255, 255, 0.85);
+}
+.eamx-plan-limit__btn--primary:hover {
+  background: linear-gradient(135deg, #137e7a 0%, #0a3a4d 100%);
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+.eamx-plan-limit__btn--pack {
+  border-color: #fbbf24;
+  background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+}
+.eamx-plan-limit__btn--pack:hover {
+  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+  border-color: #f59e0b;
+}
+.eamx-plan-limit__close {
+  background: none;
+  border: 0;
+  color: #94a3b8;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 6px 10px;
+  border-radius: 6px;
+  transition: all 120ms ease;
+}
+.eamx-plan-limit__close:hover {
+  color: #475569;
+  background: #f1f5f9;
+}
+.eamx-plan-limit__reset-hint {
+  margin: 4px 0 12px;
+  font-size: 11.5px;
+  color: #94a3b8;
+}
