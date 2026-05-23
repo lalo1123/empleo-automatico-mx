@@ -3132,103 +3132,177 @@
 }
 
 /* Usage pill rendered above the stats strip in the best-matches panel.
-   Tells the user how many AI postulations they have left this month BEFORE
-   they decide whether to spend them on Auto-postular top 5. Four variants
-   keyed by remaining count: unlimited / ok / low / over.
-   When over, it's a real <button> with hover affordance and tells the
-   user "Sube de plan →" as the implicit CTA. */
+   Card layout with SVG icon + body containing: header row (label +
+   count), progress track, and meta line (plan + reset hint). No emoji
+   anywhere — emoji renders inconsistently across platforms (Windows
+   adds an ugly color background on monochrome emojis).
+
+   Four variants keyed by remaining count: unlimited / ok / low / over.
+   Over is a real <button> with hover affordance + Sube de plan → CTA. */
 .eamx-matches-panel__usage {
   margin: 0 22px 12px;
-  padding: 10px 14px;
-  border-radius: 10px;
+  padding: 14px 16px;
+  border-radius: 14px;
   font: 13px/1.4 inherit;
   display: flex;
-  align-items: center;
-  gap: 10px;
+  align-items: flex-start;
+  gap: 14px;
   position: relative;
   overflow: hidden;
   border: 1px solid transparent;
-  background: rgba(31, 159, 149, 0.08);
+  background: linear-gradient(135deg, rgba(31, 159, 149, 0.10) 0%, rgba(15, 23, 42, 0.20) 100%);
   color: #f8fafc;
+  box-shadow: 0 2px 8px -4px rgba(0, 0, 0, 0.4);
 }
 button.eamx-matches-panel__usage {
   cursor: pointer;
   appearance: none;
   width: calc(100% - 44px);
   text-align: left;
-  transition: transform 150ms ease, background 150ms ease, border-color 150ms ease;
+  font-family: inherit;
+  transition: transform 150ms ease, box-shadow 150ms ease, border-color 150ms ease;
 }
 button.eamx-matches-panel__usage:hover {
   transform: translateY(-1px);
+  box-shadow: 0 6px 16px -6px rgba(0, 0, 0, 0.5);
 }
-.eamx-matches-panel__usage-icon {
-  font-size: 18px;
+
+/* Circular icon container — gives the SVG a defined home with subtle
+   tint so it doesn't float orphaned in the corner. */
+.eamx-matches-panel__usage-icon-wrap {
   flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.08);
 }
-.eamx-matches-panel__usage-text {
+.eamx-matches-panel__usage-icon-wrap svg {
+  width: 18px;
+  height: 18px;
+}
+
+.eamx-matches-panel__usage-body {
   flex: 1 1 auto;
-  font-size: 12.5px;
-  line-height: 1.45;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
-.eamx-matches-panel__usage-text strong {
+.eamx-matches-panel__usage-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.eamx-matches-panel__usage-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(248, 250, 252, 0.65);
+}
+.eamx-matches-panel__usage-count {
+  font-size: 18px;
   font-weight: 700;
+  letter-spacing: -0.01em;
   color: #f8fafc;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.eamx-matches-panel__usage-count strong {
+  font-weight: 700;
+}
+.eamx-matches-panel__usage-count-sep,
+.eamx-matches-panel__usage-count-total {
+  color: rgba(248, 250, 252, 0.45);
+  font-weight: 500;
+}
+
+.eamx-matches-panel__usage-track {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.eamx-matches-panel__usage-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 320ms ease;
+}
+
+.eamx-matches-panel__usage-meta {
+  font-size: 11.5px;
+  color: rgba(248, 250, 252, 0.55);
 }
 .eamx-matches-panel__usage-cta {
+  color: #fca5a5;
+  font-weight: 600;
   text-decoration: underline;
   text-decoration-thickness: 1px;
   text-underline-offset: 2px;
 }
-.eamx-matches-panel__usage-bar {
-  position: absolute;
-  left: 0;
-  bottom: 0;
-  height: 3px;
-  width: 100%;
-  background: rgba(255, 255, 255, 0.08);
-  display: block;
-}
-.eamx-matches-panel__usage-bar-fill {
-  display: block;
-  height: 100%;
-  border-radius: 0;
-  transition: width 320ms ease;
-}
 
-/* Unlimited (Premium) — calm teal */
+/* --- Unlimited (Premium) ----------------------------------------- */
 .eamx-matches-panel__usage--unlimited {
-  background: rgba(31, 159, 149, 0.14);
-  border-color: rgba(31, 159, 149, 0.32);
+  background: linear-gradient(135deg, rgba(20, 184, 166, 0.18) 0%, rgba(16, 89, 113, 0.22) 100%);
+  border-color: rgba(45, 212, 191, 0.40);
+}
+.eamx-matches-panel__usage--unlimited .eamx-matches-panel__usage-icon-wrap {
+  background: rgba(45, 212, 191, 0.20);
+  color: #5eead4;
+}
+.eamx-matches-panel__usage--unlimited .eamx-matches-panel__usage-count {
+  color: #5eead4;
 }
 
-/* Ok — neutral teal-tinted */
+/* --- Ok (plenty remaining) --------------------------------------- */
 .eamx-matches-panel__usage--ok {
-  background: rgba(15, 23, 42, 0.30);
-  border-color: rgba(148, 163, 184, 0.25);
+  background: linear-gradient(135deg, rgba(31, 159, 149, 0.12) 0%, rgba(15, 23, 42, 0.35) 100%);
+  border-color: rgba(45, 212, 191, 0.25);
 }
-.eamx-matches-panel__usage--ok .eamx-matches-panel__usage-bar-fill {
-  background: linear-gradient(90deg, #14b8a6 0%, #0d9488 100%);
+.eamx-matches-panel__usage--ok .eamx-matches-panel__usage-icon-wrap {
+  background: rgba(45, 212, 191, 0.15);
+  color: #5eead4;
+}
+.eamx-matches-panel__usage--ok .eamx-matches-panel__usage-fill {
+  background: linear-gradient(90deg, #2dd4bf 0%, #0d9488 100%);
 }
 
-/* Low (< 25% remaining) — amber warning */
+/* --- Low (<= 25% remaining) ------------------------------------- */
 .eamx-matches-panel__usage--low {
-  background: rgba(180, 83, 9, 0.18);
+  background: linear-gradient(135deg, rgba(180, 83, 9, 0.22) 0%, rgba(15, 23, 42, 0.35) 100%);
   border-color: rgba(251, 191, 36, 0.45);
 }
-.eamx-matches-panel__usage--low .eamx-matches-panel__usage-bar-fill {
+.eamx-matches-panel__usage--low .eamx-matches-panel__usage-icon-wrap {
+  background: rgba(251, 191, 36, 0.20);
+  color: #fcd34d;
+}
+.eamx-matches-panel__usage--low .eamx-matches-panel__usage-count {
+  color: #fcd34d;
+}
+.eamx-matches-panel__usage--low .eamx-matches-panel__usage-fill {
   background: linear-gradient(90deg, #fbbf24 0%, #f59e0b 100%);
 }
 
-/* Over the limit — red, clickable to billing */
+/* --- Over (no quota left, clickable) ----------------------------- */
 .eamx-matches-panel__usage--over {
-  background: rgba(127, 29, 29, 0.32);
-  border-color: rgba(239, 68, 68, 0.65);
+  background: linear-gradient(135deg, rgba(127, 29, 29, 0.40) 0%, rgba(15, 23, 42, 0.45) 100%);
+  border-color: rgba(239, 68, 68, 0.55);
 }
 .eamx-matches-panel__usage--over:hover {
-  background: rgba(127, 29, 29, 0.48);
   border-color: rgba(239, 68, 68, 0.85);
 }
-.eamx-matches-panel__usage--over .eamx-matches-panel__usage-bar-fill {
+.eamx-matches-panel__usage--over .eamx-matches-panel__usage-icon-wrap {
+  background: rgba(239, 68, 68, 0.22);
+  color: #fca5a5;
+}
+.eamx-matches-panel__usage--over .eamx-matches-panel__usage-count {
+  color: #fca5a5;
+}
+.eamx-matches-panel__usage--over .eamx-matches-panel__usage-fill {
   background: linear-gradient(90deg, #f87171 0%, #dc2626 100%);
 }
 
@@ -3236,7 +3310,7 @@ button.eamx-matches-panel__usage:hover {
   button.eamx-matches-panel__usage:hover {
     transform: none;
   }
-  .eamx-matches-panel__usage-bar-fill {
+  .eamx-matches-panel__usage-fill {
     transition: none;
   }
 }
