@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-22-bulkskip-quizclear";
+  const EAMX_LAPIEZA_VERSION = "2026-05-22-planlimit-clear";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -1688,9 +1688,19 @@
       const res = await sendMsg({ type: MSG.GENERATE_CV_PDF, job: lastJob });
       if (!res || !res.ok) {
         if (res && res.error === ERR.PLAN_LIMIT_EXCEEDED) {
-          toast("Llegaste al límite de tu plan. Sigo con tu CV PRINCIPAL.", "info");
+          // Surface a clickable upgrade CTA — easy to miss if it's just info.
+          // Long duration because the user needs to read it before deciding.
+          toast("CV personalizado: límite del mes alcanzado. Sigo con tu CV PRINCIPAL.", "info", {
+            label: "Ver planes",
+            onClick: () => openBilling(),
+            durationMs: 10000
+          });
         } else if (res && res.error === ERR.UNAUTHORIZED) {
-          toast("Sesión expirada. Sigo con tu CV PRINCIPAL.", "info");
+          toast("Sesión expirada. Sigo con tu CV PRINCIPAL.", "info", {
+            label: "Inicia sesión",
+            onClick: () => openOptionsPage(),
+            durationMs: 8000
+          });
         } else {
           toast("No pude generar el CV personalizado. Sigo con tu PRINCIPAL.", "info");
         }
@@ -3133,9 +3143,10 @@
     const code = res?.error;
     const message = res?.message || "No se pudo generar la carta.";
     if (code === ERR.PLAN_LIMIT_EXCEEDED) {
-      toast("Llegaste al límite de tu plan.", "error", {
+      toast("Se acabaron tus cartas IA del mes. Sube de plan para seguir.", "error", {
         label: "Ver planes",
-        onClick: () => openBilling()
+        onClick: () => openBilling(),
+        durationMs: 10000
       });
       return;
     }
@@ -4859,10 +4870,11 @@
       return;
     }
     if (code === ERR.PLAN_LIMIT_EXCEEDED) {
-      setQuestionsState("error", { error: "Llegaste al límite de tu plan." });
-      toast("Llegaste al límite.", "error", {
+      setQuestionsState("error", { error: "Llegaste al límite de respuestas IA de tu plan este mes." });
+      toast("Se acabaron tus respuestas IA del mes. Sube de plan para seguir.", "error", {
         label: "Ver planes",
-        onClick: () => openBilling()
+        onClick: () => openBilling(),
+        durationMs: 10000
       });
       return;
     }
@@ -4965,11 +4977,13 @@
       if (!res || !res.ok) {
         const code = res?.error;
         if (code === ERR.PLAN_LIMIT_EXCEEDED) {
-          setCvState("error", { error: "Llegaste al límite de tu plan. Sube de plan para seguir generando." });
+          setCvState("error", { error: "Llegaste al límite de CVs personalizados de tu plan este mes." });
           // Mirror the cover-letter UX: also fire a toast with a CTA.
-          toast("Llegaste al límite de tu plan.", "error", {
+          // Long duration so the user has time to see it + click "Ver planes".
+          toast("Se acabaron tus CVs personalizados del mes. Sube de plan para seguir.", "error", {
             label: "Ver planes",
-            onClick: () => openBilling()
+            onClick: () => openBilling(),
+            durationMs: 10000
           });
           return;
         }
@@ -5292,9 +5306,10 @@
     const code = res?.error;
     const message = res?.message || "No se pudo generar el borrador.";
     if (code === ERR.PLAN_LIMIT_EXCEEDED) {
-      toast("Llegaste al límite de tu plan.", "error", {
+      toast("Se acabaron tus cartas IA del mes. Sube de plan para seguir.", "error", {
         label: "Ver planes",
-        onClick: () => openBilling()
+        onClick: () => openBilling(),
+        durationMs: 10000
       });
       return;
     }
@@ -6260,9 +6275,10 @@
             onClick: () => openOptionsPage()
           });
         } else if (res && res.error === ERR.PLAN_LIMIT_EXCEEDED) {
-          toast("Llegaste al límite de tu plan.", "error", {
+          toast("Se acabaron tus respuestas IA del mes. El quiz se detuvo — sube de plan para seguir.", "error", {
             label: "Ver planes",
-            onClick: () => openBilling()
+            onClick: () => openBilling(),
+            durationMs: 10000
           });
         } else {
           toast((res && res.message) || "Auto-quiz: la IA no pudo responder.", "error");
