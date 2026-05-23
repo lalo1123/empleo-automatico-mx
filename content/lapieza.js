@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-22-planlimit-clear";
+  const EAMX_LAPIEZA_VERSION = "2026-05-22-bulk-preflight";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -42,7 +42,13 @@
     GENERATE_CV_PDF: "GENERATE_CV_PDF",
     OPEN_GENERATED_CV: "OPEN_GENERATED_CV",
     ANSWER_QUESTIONS: "ANSWER_QUESTIONS",
-    ANSWER_QUIZ: "ANSWER_QUIZ"
+    ANSWER_QUIZ: "ANSWER_QUIZ",
+    // Pre-flight check used by the matches-panel bulk auto-postular flow
+    // to refuse opening 5 background tabs when the user already hit their
+    // monthly plan limit. Without this the chain fires N times, all fail
+    // with PLAN_LIMIT_EXCEEDED, and the user is left staring at a
+    // progress card stuck on "running" forever.
+    GET_AUTH_STATUS: "GET_AUTH_STATUS"
   };
   const ERR = { UNAUTHORIZED: "UNAUTHORIZED", PLAN_LIMIT_EXCEEDED: "PLAN_LIMIT_EXCEEDED", INVALID_INPUT: "INVALID_INPUT", SERVER_ERROR: "SERVER_ERROR" };
   // Modo Auto storage keys — must mirror lib/schemas.js STORAGE_KEYS exactly.
@@ -120,7 +126,8 @@
         GENERATE_CV: mod.MESSAGE_TYPES.GENERATE_CV,
         OPEN_GENERATED_CV: mod.MESSAGE_TYPES.OPEN_GENERATED_CV,
         ANSWER_QUESTIONS: mod.MESSAGE_TYPES.ANSWER_QUESTIONS,
-        ANSWER_QUIZ: mod.MESSAGE_TYPES.ANSWER_QUIZ || "ANSWER_QUIZ"
+        ANSWER_QUIZ: mod.MESSAGE_TYPES.ANSWER_QUIZ || "ANSWER_QUIZ",
+        GET_AUTH_STATUS: mod.MESSAGE_TYPES.GET_AUTH_STATUS || "GET_AUTH_STATUS"
       });
       if (mod && mod.ERROR_CODES) Object.assign(ERR, {
         UNAUTHORIZED: mod.ERROR_CODES.UNAUTHORIZED,
@@ -4360,6 +4367,53 @@
     if (skipped > 0) {
       toast(`Saltando ${skipped} ya postuladas, abriendo las siguientes ${topN.length}.`, "info", { durationMs: 4000 });
     }
+
+    // Pre-flight: refuse to open N background tabs if the user already
+    // exhausted their monthly quota. Without this check, each tab would
+    // fire the chain, hit PLAN_LIMIT_EXCEEDED on the first AI call, and
+    // leave the user with a progress card stuck on "running" (the child
+    // tabs don't notify the parent) — exactly the bug user reported:
+    // "salio medio bug si no tienes ya creditos lo mismo cuando le dio
+    // en autopostulacion". GET_AUTH_STATUS returns { usage:{ current,
+    // limit } } where limit === -1 means "ilimitado" (Premium).
+    try {
+      const auth = await sendMsg({ type: MSG.GET_AUTH_STATUS });
+      if (auth && auth.ok && auth.loggedIn && auth.usage) {
+        const limit = Number(auth.usage.limit);
+        const current = Number(auth.usage.current) || 0;
+        // -1 = unlimited (Premium). Skip the gate.
+        if (limit !== -1 && Number.isFinite(limit) && current >= limit) {
+          toast(
+            `Se acabaron tus postulaciones del mes (${current}/${limit}). Sube de plan para auto-postular.`,
+            "error",
+            { label: "Ver planes", onClick: () => openBilling(), durationMs: 10000 }
+          );
+          return;
+        }
+        // Warn but don't block if remaining < requested N (e.g. user
+        // has 2 left and we're about to fire 5 chains — they should
+        // know only the first 2 will succeed before tabs get opened).
+        if (limit !== -1 && Number.isFinite(limit)) {
+          const remaining = limit - current;
+          if (remaining < topN.length) {
+            toast(
+              `Te quedan ${remaining}/${limit} este mes — solo las primeras ${remaining} podrán generar carta/CV.`,
+              "info",
+              { durationMs: 8000 }
+            );
+          }
+        }
+      } else if (auth && auth.ok && !auth.loggedIn) {
+        toast("Inicia sesión para auto-postular.", "error", {
+          label: "Iniciar sesión",
+          onClick: () => openOptionsPage(),
+          durationMs: 8000
+        });
+        return;
+      }
+      // If auth ping itself failed (network, stale), proceed anyway —
+      // each tab will surface its own error if it really hits the limit.
+    } catch (_) { /* network blip — proceed */ }
 
     // Inline progress card inside the matches panel — user sees live
     // status of each vacancy in the bulk run without leaving this tab.
