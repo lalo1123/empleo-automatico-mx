@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-24-auto-finalize";
+  const EAMX_LAPIEZA_VERSION = "2026-05-24-bulk-skip-cv";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -1191,8 +1191,8 @@
   // text (e.g. error path: "Sin cuota del plan").
   async function reportBulkStatus(step, opts = {}) {
     try {
-      const jobId = (lastJob && lastJob.id)
-        || (location.pathname.match(/\/apply\/([^/?#]+)/i) || [])[1];
+      let jobId = (lastJob && lastJob.id) || null;
+      if (!jobId) { try { jobId = idFromUrl(location.href); } catch (_) {} }
       if (!jobId) return;
       if (!chrome?.storage?.session) return;
       const payload = { step, at: Date.now() };
@@ -1212,27 +1212,43 @@
   // when this tab was opened from the bulk auto-postular flow. The
   // chain reads it at startup to decide whether to auto-click Finalizar
   // (bulk = yes, with countdown) or stay HITL (individual ⚡ Postular).
+  //
+  // Uses idFromUrl (NOT a local regex) so the id extraction is exactly
+  // the same as the one used to SET the flag from m.jobLite.id in
+  // onMatchesBulkApplyTop. Prior version used a different regex,
+  // causing mismatched keys on UUIDs that didn't fit idFromUrl's
+  // hex-prefix shape — user saw "✓ Listo — dale Finalizar" (HITL) on
+  // rows that should have auto-finalized.
   async function readBulkModeFlag() {
     try {
-      const jobId = (lastJob && lastJob.id)
-        || (location.pathname.match(/\/apply\/([^/?#]+)/i) || [])[1];
-      if (!jobId || !chrome?.storage?.session) return false;
+      let jobId = (lastJob && lastJob.id) || null;
+      if (!jobId) {
+        try { jobId = idFromUrl(location.href); } catch (_) {}
+      }
+      console.log("[EmpleoAutomatico bulk] readBulkModeFlag: jobId=", jobId);
+      if (!jobId || !chrome?.storage?.session) {
+        console.log("[EmpleoAutomatico bulk] no jobId or no storage.session");
+        return false;
+      }
       const key = `eamx:bulk-mode:${jobId}`;
       const flag = await new Promise((resolve) => {
         try {
           chrome.storage.session.get([key], (r) => resolve(r ? r[key] : null));
         } catch (_) { resolve(null); }
       });
+      console.log("[EmpleoAutomatico bulk] flag for key", key, "=", flag);
       if (!flag) return false;
-      // Stale-guard: 15 min ceiling. A chain that took 15+ min is
-      // pathological — don't auto-click into something the user has
-      // long since forgotten about.
       if (Date.now() - (flag.setAt || 0) > 15 * 60_000) {
         try { chrome.storage.session.remove([key]); } catch (_) {}
+        console.log("[EmpleoAutomatico bulk] flag is stale, removed");
         return false;
       }
+      console.log("[EmpleoAutomatico bulk] BULK MODE ACTIVE for", jobId);
       return true;
-    } catch (_) { return false; }
+    } catch (e) {
+      console.warn("[EmpleoAutomatico bulk] readBulkModeFlag threw", e);
+      return false;
+    }
   }
 
   // Clear the bulk-mode flag for this tab. Called after auto-finalize
@@ -1240,8 +1256,8 @@
   // doesn't accidentally inherit the auto-finalize behavior.
   function clearBulkModeFlag() {
     try {
-      const jobId = (lastJob && lastJob.id)
-        || (location.pathname.match(/\/apply\/([^/?#]+)/i) || [])[1];
+      let jobId = (lastJob && lastJob.id) || null;
+      if (!jobId) { try { jobId = idFromUrl(location.href); } catch (_) {} }
       if (!jobId || !chrome?.storage?.session) return;
       chrome.storage.session.remove([`eamx:bulk-mode:${jobId}`]);
     } catch (_) {}
@@ -1413,10 +1429,18 @@
       const onCvStepEarly = isOnLaPiezaCvStep();
       console.log("[EmpleoAutomatico] chain iter:", i, "onCvStep:", onCvStepEarly);
       if (onCvStepEarly) {
-        console.log("[EmpleoAutomatico] chain iter:", i, "→ CV step branch");
+        console.log("[EmpleoAutomatico] chain iter:", i, "→ CV step branch (bulk=", isBulkMode, ")");
         reportBulkStatus("cv");
         let choice = "principal";
-        try { choice = await askCvChoice({ timeoutMs: 8000 }); } catch (_) {}
+        // Bulk mode: SKIP the CV-choice modal entirely. The user already
+        // committed to "Auto-postular top N" — popping a modal on every
+        // background tab they can't even see (and that times out after
+        // 8s, blocking the chain) is exactly the "stuck en cv y ya no
+        // avanzo ni naa" bug they reported. Default to PRINCIPAL so we
+        // don't surprise them with a personalized-CV charge per slot.
+        if (!isBulkMode) {
+          try { choice = await askCvChoice({ timeoutMs: 8000 }); } catch (_) {}
+        }
         if (quickApplyAborted) break;
         if (!isApplyPage()) break;
         if (choice === "personalize") {
@@ -1425,7 +1449,8 @@
           }
           if (quickApplyAborted) break;
           if (!isApplyPage()) break;
-        } else {
+        } else if (!isBulkMode) {
+          // Silent in bulk mode (would be confusing in a background tab).
           toast("Listo, sigo con tu CV PRINCIPAL.", "info", { durationMs: 2500 });
         }
         const continueBtnCv = findApplyFlowContinueBtn();
