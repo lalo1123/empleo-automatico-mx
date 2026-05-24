@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-24-bulk-skip-cv";
+  const EAMX_LAPIEZA_VERSION = "2026-05-24-wider-cap-40";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -4081,6 +4081,31 @@
     return null;
   }
 
+  // Read the total page count from MUI's pagination. The user reported
+  // analyzing only 180 vacantes (~14 pages) when the listing had 36
+  // pages. With the new dynamic cap, the wider-search loop stops when
+  // it actually runs out of pages rather than at an arbitrary 14.
+  // Returns null when we can't find a meaningful number — caller falls
+  // back to a hard cap.
+  function detectTotalPaginationPages() {
+    try {
+      // MUI Pagination renders each page as a <button aria-label="Go to page N">.
+      // The total is the max N across those buttons.
+      const buttons = document.querySelectorAll('.MuiPagination-ul button[aria-label*="page" i]');
+      let max = 0;
+      buttons.forEach((b) => {
+        const txt = (b.textContent || "").trim();
+        const n = Number(txt);
+        if (Number.isFinite(n) && n > max) max = n;
+      });
+      if (max > 0) return max;
+      // Fallback: parse "x de Y" or "x of Y" strings the site sometimes shows.
+      const summary = document.body.innerText.match(/(?:de|of)\s+(\d{2,4})\s+(?:p[áa]ginas?|pages?)/i);
+      if (summary && Number(summary[1]) > 0) return Number(summary[1]);
+    } catch (_) {}
+    return null;
+  }
+
   /**
    * Wider-search loop — paginate through LaPieza's listing by clicking the
    * MUI "Next page" button programmatically, polling for the new cards to
@@ -4156,14 +4181,23 @@
       if (wideText) wideText.textContent = txt;
       if (btn) btn.textContent = txt;
     };
-    // 14 covers the typical full LaPieza listing (we saw 14 pages live).
-    // Each page is ~12 cards = ~168 vacantes total. The cumulative pool
-    // map dedupes by id so re-visiting a page (e.g. when the loop bails
-    // and restarts) doesn't double-count.
-    const MAX_PAGES = 14;
+    // Hard cap of 40 covers virtually any LaPieza listing (user
+    // reported a 36-page listing where the old cap of 14 missed half
+    // the vacantes). We also try to detect the actual page count from
+    // MUI's paginator and use the min — so a 5-page search doesn't
+    // burn time clicking Next 40 times for nothing.
+    //
+    // Time budget at 40 pages: ~40 × (4s poll + 0.4s pause) ≈ 3 min
+    // worst case. Acceptable for a one-time wider search.
+    const HARD_CAP = 40;
+    const detected = detectTotalPaginationPages();
+    const MAX_PAGES = detected ? Math.min(detected, HARD_CAP) : HARD_CAP;
+    console.log("[EmpleoAutomatico] wider-search MAX_PAGES =", MAX_PAGES, "(detected:", detected, ")");
     const PER_PAGE_TIMEOUT_MS = 4000;
     const POLL_INTERVAL_MS = 300;
-    const INTER_PAGE_DELAY_MS = 700;
+    // Reduced from 700ms — at the higher cap the cumulative wait
+    // matters more. 400ms is still well within human-paced.
+    const INTER_PAGE_DELAY_MS = 400;
     // Cumulative pool, keyed by jobLite.id. Survives page-change
     // unmounting because we extract jobLites BEFORE clicking next.
     const pool = new Map();
