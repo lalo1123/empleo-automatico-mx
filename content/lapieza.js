@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-24-progress-status";
+  const EAMX_LAPIEZA_VERSION = "2026-05-24-auto-finalize";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -1208,10 +1208,122 @@
     } catch (_) { /* swallow — telemetry-style, never block the chain */ }
   }
 
+  // Read the eamx:bulk-mode:<jobId> flag. Set by onMatchesBulkApplyTop
+  // when this tab was opened from the bulk auto-postular flow. The
+  // chain reads it at startup to decide whether to auto-click Finalizar
+  // (bulk = yes, with countdown) or stay HITL (individual ⚡ Postular).
+  async function readBulkModeFlag() {
+    try {
+      const jobId = (lastJob && lastJob.id)
+        || (location.pathname.match(/\/apply\/([^/?#]+)/i) || [])[1];
+      if (!jobId || !chrome?.storage?.session) return false;
+      const key = `eamx:bulk-mode:${jobId}`;
+      const flag = await new Promise((resolve) => {
+        try {
+          chrome.storage.session.get([key], (r) => resolve(r ? r[key] : null));
+        } catch (_) { resolve(null); }
+      });
+      if (!flag) return false;
+      // Stale-guard: 15 min ceiling. A chain that took 15+ min is
+      // pathological — don't auto-click into something the user has
+      // long since forgotten about.
+      if (Date.now() - (flag.setAt || 0) > 15 * 60_000) {
+        try { chrome.storage.session.remove([key]); } catch (_) {}
+        return false;
+      }
+      return true;
+    } catch (_) { return false; }
+  }
+
+  // Clear the bulk-mode flag for this tab. Called after auto-finalize
+  // (or after the chain aborts) so re-opening the same vacancy later
+  // doesn't accidentally inherit the auto-finalize behavior.
+  function clearBulkModeFlag() {
+    try {
+      const jobId = (lastJob && lastJob.id)
+        || (location.pathname.match(/\/apply\/([^/?#]+)/i) || [])[1];
+      if (!jobId || !chrome?.storage?.session) return;
+      chrome.storage.session.remove([`eamx:bulk-mode:${jobId}`]);
+    } catch (_) {}
+  }
+
+  // Handle the "chain is ready, Finalize is the next button" branch.
+  // Two code paths reach this state (one when no fillable fields are
+  // detected up front, another after Express fill finishes) so the
+  // logic is extracted to avoid drift.
+  //
+  // bulkMode=true → runs a 5s countdown (cancelable with Esc) then
+  //                 programmaticClicks Finalizar. attachFinalize
+  //                 ApplyTracker fires "submitted" via its click
+  //                 listener so the parent panel marks the row done.
+  // bulkMode=false → stays HITL: highlights the button, attaches the
+  //                  tracker, shows "✓ Listo. Dale Finalizar".
+  async function handleReadyToFinalize(finalizeBtn, bulkMode) {
+    if (!finalizeBtn) return;
+    try { highlightExpressSubmitButton(); } catch (_) {}
+    attachFinalizeApplyTracker(finalizeBtn);
+    reportBulkStatus("ready");
+
+    if (!bulkMode) {
+      // HITL: the user clicks Finalizar themselves.
+      toast("✓ Listo. Revisa todo y dale Finalizar.", "success", { durationMs: 6000 });
+      return;
+    }
+
+    // BULK: countdown + auto-click. The grace period lets the user
+    // hit Esc if they want to review before submitting. Status step
+    // = "finalizing" so the row shows a spinning dot, NOT the green
+    // ready check (which would falsely suggest the submit happened).
+    toast("⚡ Auto-finalizando en 5s… (Esc cancela)", "info", { durationMs: 4500 });
+    for (let i = 5; i > 0; i--) {
+      if (quickApplyAborted) {
+        reportBulkStatus("ready");
+        toast("Auto-finalize cancelado. Dale Finalizar tú.", "info", { durationMs: 4000 });
+        clearBulkModeFlag();
+        return;
+      }
+      reportBulkStatus("finalizing", { label: `Auto-finalizando en ${i}s…` });
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    if (quickApplyAborted) {
+      clearBulkModeFlag();
+      return;
+    }
+
+    // Re-find the button — DOM might have changed during the
+    // countdown. If it vanished, bail gracefully.
+    const stillThere = findApplyFlowFinalizeBtn() || finalizeBtn;
+    if (!stillThere || !document.body.contains(stillThere)) {
+      reportBulkStatus("error", { label: "Botón Finalizar desapareció" });
+      clearBulkModeFlag();
+      return;
+    }
+
+    // Clear the flag BEFORE clicking so the click handler in
+    // attachFinalizeApplyTracker doesn't accidentally re-read a stale
+    // bulk flag if the page re-mounts our content script.
+    clearBulkModeFlag();
+    try {
+      programmaticClick(stillThere);
+      // reportBulkStatus("submitted") fires from the tracker's
+      // capture-phase click listener (attached in
+      // attachFinalizeApplyTracker). No need to duplicate it here.
+    } catch (e) {
+      console.warn("[EmpleoAutomatico] auto-finalize click failed", e);
+      reportBulkStatus("error", { label: "No pude dar click a Finalizar" });
+    }
+  }
+
   async function chainApplyStepsToFinalizeInner() {
     console.log("[EmpleoAutomatico] chain inner: starting", { isApplyPage: isApplyPage(), url: location.href.split("?")[0] });
     quickApplyAborted = false;
     reportBulkStatus("starting");
+
+    // Detect bulk mode early. If true, the "ready" step at the end of
+    // the chain runs a 5s countdown then auto-clicks Finalizar. ESC
+    // (via quickApplyAborted) cancels the countdown.
+    const isBulkMode = await readBulkModeFlag();
+    console.log("[EmpleoAutomatico] chain inner: bulk mode =", isBulkMode);
 
     // PRE-FLIGHT: refuse to start the chain at all if the user has zero
     // remaining quota. Without this gate the chain would show
@@ -1365,12 +1477,10 @@
       });
 
       // Final step (no fillable fields, no CV step pending) → STOP.
-      // Attach one-shot click listener for "applied" tracking on submit.
+      // Delegate to handleReadyToFinalize so bulk mode can auto-click
+      // (with countdown) and HITL mode shows the friendly toast.
       if (finalizeBtn && !hasFillable && !onCvStep) {
-        try { highlightExpressSubmitButton(); } catch (_) {}
-        attachFinalizeApplyTracker(finalizeBtn);
-        reportBulkStatus("ready");
-        toast("✓ Listo. Revisa todo y dale Finalizar.", "success", { durationMs: 6000 });
+        await handleReadyToFinalize(finalizeBtn, isBulkMode);
         break;
       }
 
@@ -1408,10 +1518,7 @@
       // instead of looping forever waiting for a Continuar that won't
       // come.
       if (finalizeBtn && !findApplyFlowContinueBtn()) {
-        try { highlightExpressSubmitButton(); } catch (_) {}
-        attachFinalizeApplyTracker(finalizeBtn);
-        reportBulkStatus("ready");
-        toast("✓ Listo. Revisa todo y dale Finalizar.", "success", { durationMs: 6000 });
+        await handleReadyToFinalize(finalizeBtn, isBulkMode);
         break;
       }
 
@@ -5112,14 +5219,22 @@
       const url = m.jobLite.url;
       // Mark this slot as "abriendo" in the progress card.
       updateBulkProgressItem(progressHost, jobId, "opening", "Abriendo pestaña…");
-      // Set the quickapply flag for this vacancy id so when the new
-      // tab's content script reads it, the chain fires automatically.
+      // Set TWO session flags for this vacancy:
+      //   - eamx:quickapply:<id> → triggers the chain on tab load
+      //   - eamx:bulk-mode:<id>  → tells the chain to auto-click
+      //     Finalizar at the end (user explicit ask: "y que si se de
+      //     finalizar si es auto postular literal"). The chain reads
+      //     this at startup and clears it when done. Without this
+      //     flag the chain stays HITL (stops at ✓ Listo).
       if (jobId && chrome?.storage?.session) {
         try {
           await new Promise((resolve) => {
             try {
               chrome.storage.session.set(
-                { [`eamx:quickapply:${jobId}`]: { setAt: Date.now() } },
+                {
+                  [`eamx:quickapply:${jobId}`]: { setAt: Date.now() },
+                  [`eamx:bulk-mode:${jobId}`]: { setAt: Date.now() }
+                },
                 () => resolve()
               );
             } catch (_) { resolve(); }
@@ -5223,6 +5338,11 @@
     cover: "Generando carta con IA…",
     questions: "Respondiendo preguntas…",
     quiz: "Resolviendo quiz…",
+    // "finalizing" is the countdown state in bulk mode — visually
+    // running (spinning dot), not ready-green, because the submit
+    // hasn't happened yet. The label is overridden each second with
+    // "Auto-finalizando en Ns…".
+    finalizing: "Enviando postulación…",
     ready: "✓ Listo — dale Finalizar",
     submitted: "✓ Postulación enviada",
     error: "Algo falló — revisa la pestaña",
@@ -5261,10 +5381,15 @@
         const next = changes[key].newValue;
         if (!next || typeof next !== "object") return;
         // Map step → human label. If the child writes an explicit
-        // label (custom messages), use that instead.
+        // label (custom messages, like the auto-finalize countdown),
+        // use that instead of the canned text.
         const text = next.label || bulkStatusLabel(next.step, "Procesando…");
-        // Promote step to the visual variant. ready → success, error
-        // → error, everything else → running (spinner dot).
+        // Promote step to the visual variant.
+        //   ready     → "ready" (green check, idle)
+        //   submitted → "done"  (green check, finished)
+        //   error/plan_limit → "error" (red)
+        //   anything else (cv/cover/quiz/finalizing/…) → "running"
+        //                      (spinning teal dot)
         let variant = "running";
         if (next.step === "ready") variant = "ready";
         else if (next.step === "submitted") variant = "done";
