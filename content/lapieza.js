@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-24-bulk-selector-filters";
+  const EAMX_LAPIEZA_VERSION = "2026-05-24-progress-status";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -1179,9 +1179,39 @@
     }
   }
 
+  // Report this tab's current chain step to the parent matches panel.
+  // The parent listens on chrome.storage.session.onChanged for keys
+  // prefixed with "eamx:bulk-status:" and patches the corresponding
+  // row. Best-effort — if storage isn't available we just skip
+  // (chain still runs).
+  //
+  // step values match BULK_STATUS_LABELS keys: "starting" | "cv" |
+  // "cover" | "questions" | "quiz" | "ready" | "submitted" | "error"
+  // | "plan_limit". Pass an explicit `label` to override the canned
+  // text (e.g. error path: "Sin cuota del plan").
+  async function reportBulkStatus(step, opts = {}) {
+    try {
+      const jobId = (lastJob && lastJob.id)
+        || (location.pathname.match(/\/apply\/([^/?#]+)/i) || [])[1];
+      if (!jobId) return;
+      if (!chrome?.storage?.session) return;
+      const payload = { step, at: Date.now() };
+      if (opts.label) payload.label = opts.label;
+      await new Promise((resolve) => {
+        try {
+          chrome.storage.session.set(
+            { [`eamx:bulk-status:${jobId}`]: payload },
+            () => resolve()
+          );
+        } catch (_) { resolve(); }
+      });
+    } catch (_) { /* swallow — telemetry-style, never block the chain */ }
+  }
+
   async function chainApplyStepsToFinalizeInner() {
     console.log("[EmpleoAutomatico] chain inner: starting", { isApplyPage: isApplyPage(), url: location.href.split("?")[0] });
     quickApplyAborted = false;
+    reportBulkStatus("starting");
 
     // PRE-FLIGHT: refuse to start the chain at all if the user has zero
     // remaining quota. Without this gate the chain would show
@@ -1204,6 +1234,7 @@
           // aborted (via the same flag the Esc handler sets) lets any
           // downstream observer ticks bail out gracefully.
           quickApplyAborted = true;
+          reportBulkStatus("plan_limit");
           await showPlanLimitModal({
             feature: "postulaciones IA",
             usage: { current, limit },
@@ -1271,6 +1302,7 @@
       console.log("[EmpleoAutomatico] chain iter:", i, "onCvStep:", onCvStepEarly);
       if (onCvStepEarly) {
         console.log("[EmpleoAutomatico] chain iter:", i, "→ CV step branch");
+        reportBulkStatus("cv");
         let choice = "principal";
         try { choice = await askCvChoice({ timeoutMs: 8000 }); } catch (_) {}
         if (quickApplyAborted) break;
@@ -1296,6 +1328,7 @@
       const isQuizStep = looksLikeQuizStep();
       console.log("[EmpleoAutomatico] chain iter:", i, "quizStep:", isQuizStep);
       if (isQuizStep) {
+        reportBulkStatus("quiz");
         const startedAt = Date.now();
         while (looksLikeQuizStep() && Date.now() - startedAt < 90_000) {
           if (quickApplyAborted) break;
@@ -1336,6 +1369,7 @@
       if (finalizeBtn && !hasFillable && !onCvStep) {
         try { highlightExpressSubmitButton(); } catch (_) {}
         attachFinalizeApplyTracker(finalizeBtn);
+        reportBulkStatus("ready");
         toast("✓ Listo. Revisa todo y dale Finalizar.", "success", { durationMs: 6000 });
         break;
       }
@@ -1345,6 +1379,11 @@
       // and that branch `continue`d. The redundant branch was removed
       // when we moved CV detection ahead of the quiz-check choke point.
       if (hasFillable) {
+        // Report what we're about to do — prefer "cover" if a cover
+        // textarea is visible, fall back to "questions" otherwise.
+        // Both can be true (open-ended Q&A often coexists with the
+        // cover field); we surface whichever felt more user-facing.
+        reportBulkStatus(hasCover ? "cover" : "questions");
         // Run Express fill on this step. singleStep:true so
         // onFabClickExpressApply doesn't recurse back into
         // chainApplyStepsToFinalize. forceOverwrite:true → since the
@@ -1371,6 +1410,7 @@
       if (finalizeBtn && !findApplyFlowContinueBtn()) {
         try { highlightExpressSubmitButton(); } catch (_) {}
         attachFinalizeApplyTracker(finalizeBtn);
+        reportBulkStatus("ready");
         toast("✓ Listo. Revisa todo y dale Finalizar.", "success", { durationMs: 6000 });
         break;
       }
@@ -1475,6 +1515,10 @@
     if (!btn || btn.dataset.eamxFinalizeTracked === "true") return;
     btn.dataset.eamxFinalizeTracked = "true";
     const handler = async () => {
+      // Tell the parent matches panel this row is done — so the row
+      // shows "✓ Postulación enviada" with a green check instead of
+      // staying stuck on "✓ Listo — dale Finalizar".
+      try { reportBulkStatus("submitted"); } catch (_) {}
       try {
         if (!queueModule || typeof queueModule.upsertApplied !== "function") return;
         const job = lastJob || {};
@@ -5092,7 +5136,7 @@
         if (res && res.ok && res.tabId != null) {
           openedTabId = res.tabId;
           opened++;
-          updateBulkProgressItem(progressHost, jobId, "running", "Cadena corriendo en background", openedTabId);
+          updateBulkProgressItem(progressHost, jobId, "running", "Postulando…", openedTabId);
         } else {
           console.warn("[EmpleoAutomatico] bulk open failed (msg)", res);
           updateBulkProgressItem(progressHost, jobId, "error", (res && res.message) || "No se pudo abrir");
@@ -5128,18 +5172,24 @@
     host.setAttribute("data-eamx-bulk-progress", "");
     host.innerHTML = `
       <div class="eamx-bulk-progress__head">
-        <span class="eamx-bulk-progress__title">⚡ Auto-postulación en curso (${topN.length})</span>
-        <span class="eamx-bulk-progress__hint">Cada vacante en su propia pestaña — verifica cada una y dale Finalizar</span>
+        <span class="eamx-bulk-progress__title">⚡ Postulando ${topN.length} vacantes</span>
+        <span class="eamx-bulk-progress__hint">Cada una abre en su pestaña — dale "Ver" para revisar y Finalizar</span>
       </div>
       <ul class="eamx-bulk-progress__list">
         ${topN.map((m, i) => `
-          <li class="eamx-bulk-progress__item" data-bulk-item="${escapeHtml(m.jobLite.id)}">
-            <span class="eamx-bulk-progress__num">${i + 1}</span>
-            <div class="eamx-bulk-progress__body">
-              <div class="eamx-bulk-progress__job">${escapeHtml(m.jobLite.title || "(sin título)")}</div>
-              <div class="eamx-bulk-progress__company">${escapeHtml(m.jobLite.company || "")}</div>
+          <li class="eamx-bulk-progress__item eamx-bulk-progress__item--waiting" data-bulk-item="${escapeHtml(m.jobLite.id)}">
+            <div class="eamx-bulk-progress__row">
+              <span class="eamx-bulk-progress__num">${i + 1}</span>
+              <div class="eamx-bulk-progress__body">
+                <div class="eamx-bulk-progress__job" title="${escapeHtml(m.jobLite.title || "")}">${escapeHtml(m.jobLite.title || "(sin título)")}</div>
+                <div class="eamx-bulk-progress__company">${escapeHtml(m.jobLite.company || "")}</div>
+              </div>
+              <div class="eamx-bulk-progress__action" data-bulk-action></div>
             </div>
-            <span class="eamx-bulk-progress__status" data-bulk-status>⏸ En espera</span>
+            <div class="eamx-bulk-progress__status" data-bulk-status>
+              <span class="eamx-bulk-progress__status-dot" aria-hidden="true"></span>
+              <span class="eamx-bulk-progress__status-text">En espera</span>
+            </div>
           </li>
         `).join("")}
       </ul>
@@ -5152,35 +5202,130 @@
     } else if (matchesPanelEl) {
       matchesPanelEl.appendChild(host);
     }
+    // Wire the cross-tab status listener so child apply tabs can report
+    // their per-step progress (chain reaches CV step, generating carta,
+    // etc.). The listener stays attached for the panel's lifetime; it's
+    // cleaned up when the panel is removed.
+    attachBulkProgressStatusListener(host);
     return host;
   }
 
+  // Human-readable labels for the chain steps. Keeps the user out of
+  // tech-speak ("Cadena corriendo en background" was confusing — see
+  // user feedback "nada tecnico"). New child tabs report their current
+  // step by writing to chrome.storage.session and the parent panel
+  // looks the label up here.
+  const BULK_STATUS_LABELS = {
+    opening: "Abriendo pestaña…",
+    loading: "Cargando vacante…",
+    starting: "Preparando postulación…",
+    cv: "Personalizando tu CV…",
+    cover: "Generando carta con IA…",
+    questions: "Respondiendo preguntas…",
+    quiz: "Resolviendo quiz…",
+    ready: "✓ Listo — dale Finalizar",
+    submitted: "✓ Postulación enviada",
+    error: "Algo falló — revisa la pestaña",
+    plan_limit: "Sin cuota del plan",
+    waiting: "En espera"
+  };
+
+  function bulkStatusLabel(stepKey, fallback) {
+    if (stepKey && BULK_STATUS_LABELS[stepKey]) return BULK_STATUS_LABELS[stepKey];
+    return fallback || "Procesando…";
+  }
+
+  // Listen for status updates posted by child apply tabs. Each chain
+  // step writes { step, label?, at } to chrome.storage.session under
+  // key "eamx:bulk-status:<jobId>". We patch the matching row in the
+  // progress card. Idempotent — adding the same listener twice is
+  // harmless because we de-dupe via a host-scoped flag.
+  let bulkProgressStorageListener = null;
+  function attachBulkProgressStatusListener(host) {
+    if (!host) return;
+    if (host.dataset.statusListenerAttached === "1") return;
+    host.dataset.statusListenerAttached = "1";
+
+    // Detach any previous listener (panel re-renders) before adding a
+    // fresh one so we don't pile up duplicates leaking memory.
+    if (bulkProgressStorageListener) {
+      try { chrome.storage.onChanged.removeListener(bulkProgressStorageListener); } catch (_) {}
+      bulkProgressStorageListener = null;
+    }
+
+    bulkProgressStorageListener = (changes, area) => {
+      if (area !== "session") return;
+      Object.keys(changes).forEach((key) => {
+        if (!key.startsWith("eamx:bulk-status:")) return;
+        const jobId = key.slice("eamx:bulk-status:".length);
+        const next = changes[key].newValue;
+        if (!next || typeof next !== "object") return;
+        // Map step → human label. If the child writes an explicit
+        // label (custom messages), use that instead.
+        const text = next.label || bulkStatusLabel(next.step, "Procesando…");
+        // Promote step to the visual variant. ready → success, error
+        // → error, everything else → running (spinner dot).
+        let variant = "running";
+        if (next.step === "ready") variant = "ready";
+        else if (next.step === "submitted") variant = "done";
+        else if (next.step === "error" || next.step === "plan_limit") variant = "error";
+        updateBulkProgressItem(host, jobId, variant, text, next.tabId);
+      });
+    };
+    try { chrome.storage.onChanged.addListener(bulkProgressStorageListener); } catch (_) {}
+  }
+
   // Patch a single row in the bulk progress card.
-  // status: "opening" | "running" | "error"
-  // tabId (optional): when provided, replaces the status text with a
-  // "Ver pestaña X" button that focuses the background tab so the user
-  // can review/Finalize without hunting through their tab bar.
+  // status: "opening" | "running" | "ready" | "done" | "error" | "waiting"
+  // tabId (optional): when provided, the "Ver pestaña →" jump button is
+  // injected/kept in the action slot. The status text lives on its own
+  // line below the title/company so it has full width — fixes the bug
+  // where "Cadena corriendo en background" + "Ver pestaña" both fought
+  // for the same narrow column and the button got clipped.
   function updateBulkProgressItem(host, jobId, status, text, tabId) {
     if (!host || !jobId) return;
     let row;
     try { row = host.querySelector(`[data-bulk-item="${CSS.escape(jobId)}"]`); } catch (_) {}
     if (!row) return;
+
     const statusEl = row.querySelector("[data-bulk-status]");
-    if (!statusEl) return;
-    const icon = status === "running" ? "🔄" : status === "error" ? "✗" : "⏳";
-    if (status === "running" && Number.isFinite(tabId)) {
-      // Replace static text with a clickable button — user jumps to the
-      // tab when ready to Finalize.
+    if (statusEl) {
+      const dotClass = status === "ready" || status === "done" ? "eamx-bulk-progress__status-dot--ok"
+                     : status === "error" ? "eamx-bulk-progress__status-dot--err"
+                     : status === "running" || status === "opening" ? "eamx-bulk-progress__status-dot--spin"
+                     : "";
       statusEl.innerHTML = `
-        <span class="eamx-bulk-progress__status-text">${icon} ${escapeHtml(text)}</span>
-        <button type="button" class="eamx-bulk-progress__jump" data-action="focus-tab" data-tab-id="${tabId}">Ver pestaña →</button>
+        <span class="eamx-bulk-progress__status-dot ${dotClass}" aria-hidden="true"></span>
+        <span class="eamx-bulk-progress__status-text">${escapeHtml(text || "")}</span>
       `;
-    } else {
-      statusEl.textContent = `${icon} ${text}`;
     }
+
+    // "Ver pestaña →" button — only when we have a tabId AND the row is
+    // still in-flight (not error). We persist the button if it was
+    // already set on a prior update with a tabId, so the user can keep
+    // jumping back even after the row reaches "ready".
+    const actionEl = row.querySelector("[data-bulk-action]");
+    if (actionEl) {
+      const existingTabId = Number(actionEl.getAttribute("data-tab-id"));
+      const effectiveTabId = Number.isFinite(tabId) ? tabId : (Number.isFinite(existingTabId) ? existingTabId : null);
+      if (effectiveTabId != null && status !== "error" && status !== "done") {
+        actionEl.setAttribute("data-tab-id", String(effectiveTabId));
+        actionEl.innerHTML = `<button type="button" class="eamx-bulk-progress__jump" data-action="focus-tab" data-tab-id="${effectiveTabId}">Ver →</button>`;
+      } else if (status === "done") {
+        actionEl.innerHTML = `<span class="eamx-bulk-progress__done">✓</span>`;
+      } else if (status === "error") {
+        actionEl.innerHTML = effectiveTabId != null
+          ? `<button type="button" class="eamx-bulk-progress__jump eamx-bulk-progress__jump--err" data-action="focus-tab" data-tab-id="${effectiveTabId}">Revisar →</button>`
+          : `<span class="eamx-bulk-progress__err">✗</span>`;
+      }
+    }
+
     row.classList.remove(
+      "eamx-bulk-progress__item--waiting",
       "eamx-bulk-progress__item--opening",
       "eamx-bulk-progress__item--running",
+      "eamx-bulk-progress__item--ready",
+      "eamx-bulk-progress__item--done",
       "eamx-bulk-progress__item--error"
     );
     row.classList.add(`eamx-bulk-progress__item--${status}`);
