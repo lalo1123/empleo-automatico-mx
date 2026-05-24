@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-23-usage-modern";
+  const EAMX_LAPIEZA_VERSION = "2026-05-24-bulk-selector-filters";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -3659,6 +3659,15 @@
       onMatchesBulkApplyTop(action);
       return;
     }
+    if (what === "bulk-select-n") {
+      // User picked a different N from the chip row. Highlight the
+      // new chip, un-highlight siblings, update both <span data-bulk-
+      // count> placeholders in the action buttons, and persist the
+      // choice per-plan so reopening the panel remembers it.
+      ev.preventDefault();
+      onMatchesBulkSelectN(action);
+      return;
+    }
     if (what === "focus-tab") {
       // "Ver pestaña" inside the bulk-progress card — message the
       // background to bring that background tab to focus.
@@ -3740,7 +3749,7 @@
       onMatchesWiderSearch(action);
       return;
     }
-    if (what === "open-preferences") {
+    if (what === "open-preferences" || what === "filters-open-options") {
       // Click on the Filtros stat → jump to the Options page with the
       // preferences card focused. We pass #preferences so options.js can
       // scrollIntoView the right card.
@@ -3751,6 +3760,42 @@
       } catch (_) {
         try { chrome.runtime.openOptionsPage(); } catch (_) { openOptionsPage(); }
       }
+      return;
+    }
+    if (what === "toggle-filters") {
+      ev.preventDefault();
+      const drawer = matchesPanelEl?.querySelector("[data-eamx-filters]");
+      if (drawer) {
+        const isOpen = !drawer.hasAttribute("hidden");
+        if (isOpen) drawer.setAttribute("hidden", "");
+        else drawer.removeAttribute("hidden");
+      }
+      return;
+    }
+    if (what === "filter-modality") {
+      ev.preventDefault();
+      // Update the chip group visual state. The actual save happens on
+      // "Aplicar filtros" — keeps the UI responsive without writing to
+      // storage on every chip click.
+      const drawer = action.closest("[data-eamx-filters]");
+      if (drawer) {
+        const chips = drawer.querySelectorAll("[data-action='filter-modality']");
+        chips.forEach((c) => {
+          const isActive = c === action;
+          c.classList.toggle("eamx-filters__chip--active", isActive);
+          c.setAttribute("aria-pressed", isActive ? "true" : "false");
+        });
+      }
+      return;
+    }
+    if (what === "filters-apply") {
+      ev.preventDefault();
+      onMatchesFiltersApply();
+      return;
+    }
+    if (what === "filters-clear") {
+      ev.preventDefault();
+      onMatchesFiltersClear();
       return;
     }
     if (what === "open-billing") {
@@ -4243,11 +4288,12 @@
           <span class="eamx-matches-panel__stat-label">Vistas</span>
           <span class="eamx-matches-panel__stat-value">${cards.length}</span>
         </div>
-        <button type="button" class="eamx-matches-panel__stat eamx-matches-panel__stat--clickable" data-action="open-preferences" title="${escapeHtml(filtersTitle)}">
+        <button type="button" class="eamx-matches-panel__stat eamx-matches-panel__stat--clickable" data-action="toggle-filters" title="Click para abrir filtros (ciudad, modalidad, salario)">
           <span class="eamx-matches-panel__stat-label">Filtros</span>
           <span class="eamx-matches-panel__stat-value">${filtersValue}</span>
         </button>
       </div>
+      ${renderFiltersDrawer(prefsForUi)}
     `;
     // Top-1 banner — calls out the single best match in this page so the
     // user knows where to spend a quota slot if they only have time for
@@ -4287,10 +4333,20 @@
     // Best-effort; if the auth ping fails we just skip the pill rather
     // than blocking the whole panel render.
     let usagePill = "";
+    let userPlan = "free";
+    let userRemaining = null; // null = unknown; finite number = remaining cuota
     try {
       const auth = await sendMsg({ type: MSG.GET_AUTH_STATUS });
       if (auth && auth.ok && auth.loggedIn && auth.usage) {
         usagePill = renderUsagePill(auth.usage, auth.user);
+        userPlan = (auth.user && auth.user.plan) || "free";
+        const limit = Number(auth.usage.limit);
+        const current = Number(auth.usage.current) || 0;
+        if (limit === -1) {
+          userRemaining = Infinity;
+        } else if (Number.isFinite(limit)) {
+          userRemaining = Math.max(0, limit - current);
+        }
       }
     } catch (_) { /* offline or network blip — skip pill */ }
 
@@ -4299,6 +4355,28 @@
       ? `<p class="eamx-matches-panel__hint">Scroll para más vacantes.</p>`
       : "";
     host.innerHTML = `${usagePill}${stats}${top1Banner}${lowFitNote}<ol class="eamx-matches-list">${list}</ol>${footer}`;
+
+    // Regenerate the bulk section with plan-aware chips. The static
+    // markup baked into the panel root only knows "top 5"; here we
+    // know the plan + remaining cuota so we can offer (1, 3, 5) for
+    // Free, (3, 5, 10) for Pro, (5, 10, 15, 25) for Premium — capped
+    // at the user's actual remaining cuota so they can't pick "10"
+    // when they only have 4 left.
+    const bulkEl = matchesPanelEl?.querySelector("[data-eamx-matches-bulk]");
+    if (bulkEl) {
+      // Load the user's last-used N from local storage (per-plan keyed
+      // so switching Free→Pro doesn't carry over an inflated default).
+      let savedN = null;
+      try {
+        const stored = await new Promise((resolve) => {
+          try {
+            chrome.storage.local.get([`eamx:bulk-n:${userPlan}`], (r) => resolve(r || {}));
+          } catch (_) { resolve({}); }
+        });
+        savedN = Number(stored[`eamx:bulk-n:${userPlan}`]) || null;
+      } catch (_) {}
+      bulkEl.innerHTML = renderBulkSection({ plan: userPlan, remaining: userRemaining, savedN });
+    }
 
     // Resolve initial marked state for each row asynchronously. We render
     // optimistic "⭐ Marcar" first, then upgrade to "✓ Marcada" once the
@@ -4353,6 +4431,155 @@
   //   - Plenty                             → neutral teal
   // The pill is a real <button> when in the at-limit state so the user
   // can immediately upgrade; in the other states it's a static <div>.
+  // Plan-aware bulk action section. Renders a row of "N" chips so the
+  // user can pick how many vacancies to auto-postular in one go, then
+  // the two action buttons (Auto-postular / Solo marcar). Caps the
+  // available chips at the user's remaining monthly cuota so they
+  // can't pick more than they have credit for. The last-used N is
+  // persisted to chrome.storage.local keyed per-plan.
+  function renderBulkSection({ plan = "free", remaining = null, savedN = null } = {}) {
+    // Per-plan chip options. Tuned so the user always sees a small,
+    // a medium, and a "max for this plan" choice — and so Free never
+    // sees an unattainable "10" chip.
+    const PLAN_CHIPS = {
+      free: [1, 2, 3],
+      pro: [3, 5, 10],
+      premium: [5, 10, 15, 25]
+    };
+    let chips = PLAN_CHIPS[plan] || PLAN_CHIPS.free;
+    // Cap by remaining cuota so the user can't pick "10" when only 4
+    // are left. Infinity (Premium ilimitado) means no cap.
+    if (remaining != null && Number.isFinite(remaining)) {
+      chips = chips.filter((n) => n <= remaining);
+      // Always offer at least one chip so the buttons aren't lonely;
+      // if remaining=0 the bulk-apply pre-flight already shows the
+      // plan-limit modal so the user can't actually fire.
+      if (chips.length === 0 && remaining > 0) chips = [Math.min(remaining, 3)];
+      if (chips.length === 0) chips = [chips[0] ?? 3];
+    }
+    // Pick the initial active N: savedN if it's still in the chip set,
+    // else the middle option, else the first.
+    const defaultIdx = Math.min(1, chips.length - 1);
+    const activeN = (savedN && chips.includes(savedN)) ? savedN : chips[defaultIdx];
+
+    const chipBtns = chips.map((n) => `
+      <button type="button"
+        class="eamx-bulk__chip ${n === activeN ? 'eamx-bulk__chip--active' : ''}"
+        data-action="bulk-select-n"
+        data-bulk-n="${n}"
+        aria-pressed="${n === activeN ? 'true' : 'false'}">${n}</button>
+    `).join("");
+
+    // The plan label shown next to the chips. Helps the user
+    // understand WHY Free only shows 1/2/3 — "Plan Free permite hasta 3
+    // postulaciones IA al mes".
+    const planNoun = plan === "free" ? "Plan Free" : plan === "pro" ? "Plan Pro" : "Plan Premium";
+
+    return `
+      <div class="eamx-bulk__selector" role="group" aria-label="Cantidad a postular">
+        <span class="eamx-bulk__selector-label">Cantidad</span>
+        <div class="eamx-bulk__chips">${chipBtns}</div>
+        <span class="eamx-bulk__selector-plan">${escapeHtml(planNoun)}</span>
+      </div>
+      <button type="button" class="eamx-matches-panel__bulk-btn eamx-matches-panel__bulk-btn--primary" data-action="bulk-apply-top">
+        <span class="eamx-bulk-btn__icon" aria-hidden="true">⚡</span>
+        <span class="eamx-bulk-btn__label">Auto-postular top <span data-bulk-count>${activeN}</span></span>
+        <span class="eamx-bulk-btn__hint">(sin sacarte de aquí)</span>
+      </button>
+      <button type="button" class="eamx-matches-panel__bulk-btn" data-action="mark-top-5">
+        <span class="eamx-bulk-btn__icon" aria-hidden="true">⭐</span>
+        <span class="eamx-bulk-btn__label">Solo marcar top <span data-bulk-count>${activeN}</span> en mi cola</span>
+      </button>
+      <p class="eamx-matches-panel__bulk-hint"><strong>⚡ Auto-postular</strong> abre cada vacante en una pestaña EN SEGUNDO PLANO y corre la cadena (carta + CV + Q&A + quiz). Te quedas aquí viendo el progreso; haces clic en "Ver pestaña" cuando quieras revisar y Finalizar. <strong>⭐ Marcar</strong> solo guarda para postular después.</p>
+    `;
+  }
+
+  // In-panel filters drawer. Edits the same preference object that
+  // Options writes to (chrome.storage.local["eamx:preferences"]), so
+  // saving here also affects the score weighting. Hidden by default;
+  // toggled open by clicking the Filtros stat. We render it pre-
+  // populated with the current effective prefs so the user sees what
+  // they have. The storage.onChanged listener auto-re-renders the
+  // whole panel on save, which is exactly the UX we want here.
+  function renderFiltersDrawer(prefs) {
+    const safe = prefs || {};
+    const modality = safe.modality || "any";
+    const city = safe.city || "";
+    const salaryMin = Number.isFinite(safe.salaryMin) ? safe.salaryMin : "";
+    const salaryMax = Number.isFinite(safe.salaryMax) ? safe.salaryMax : "";
+
+    const modalityChip = (val, label) => `
+      <button type="button"
+        class="eamx-filters__chip ${modality === val ? 'eamx-filters__chip--active' : ''}"
+        data-action="filter-modality" data-modality="${val}"
+        aria-pressed="${modality === val ? 'true' : 'false'}">${label}</button>
+    `;
+
+    return `
+      <div class="eamx-filters" data-eamx-filters hidden>
+        <div class="eamx-filters__group">
+          <label class="eamx-filters__label">Modalidad</label>
+          <div class="eamx-filters__chips">
+            ${modalityChip("any", "Cualquiera")}
+            ${modalityChip("remote", "Remoto")}
+            ${modalityChip("hybrid", "Híbrido")}
+            ${modalityChip("onsite", "Presencial")}
+          </div>
+        </div>
+
+        <div class="eamx-filters__group">
+          <label class="eamx-filters__label" for="eamx-filters-city">Ciudad</label>
+          <input
+            type="text"
+            id="eamx-filters-city"
+            class="eamx-filters__input"
+            data-filter-field="city"
+            placeholder="Ej. CDMX, Monterrey, Guadalajara…"
+            value="${escapeHtml(city)}"
+            autocomplete="off"
+          >
+        </div>
+
+        <div class="eamx-filters__group">
+          <label class="eamx-filters__label">Salario mensual (MXN)</label>
+          <div class="eamx-filters__salary">
+            <div class="eamx-filters__salary-field">
+              <span class="eamx-filters__salary-prefix">$</span>
+              <input
+                type="number"
+                class="eamx-filters__input eamx-filters__input--salary"
+                data-filter-field="salaryMin"
+                placeholder="Mín"
+                min="0"
+                step="1000"
+                value="${salaryMin}"
+              >
+            </div>
+            <span class="eamx-filters__salary-sep">—</span>
+            <div class="eamx-filters__salary-field">
+              <span class="eamx-filters__salary-prefix">$</span>
+              <input
+                type="number"
+                class="eamx-filters__input eamx-filters__input--salary"
+                data-filter-field="salaryMax"
+                placeholder="Máx"
+                min="0"
+                step="1000"
+                value="${salaryMax}"
+              >
+            </div>
+          </div>
+        </div>
+
+        <div class="eamx-filters__actions">
+          <button type="button" class="eamx-filters__btn eamx-filters__btn--ghost" data-action="filters-clear">Limpiar</button>
+          <button type="button" class="eamx-filters__btn eamx-filters__btn--primary" data-action="filters-apply">Aplicar filtros</button>
+        </div>
+        <p class="eamx-filters__hint">Los filtros también afectan el ranking de los matches. Para más opciones <a href="#" data-action="filters-open-options">edita en Opciones →</a></p>
+      </div>
+    `;
+  }
+
   function renderUsagePill(usage, user) {
     const limit = Number(usage.limit);
     const current = Math.max(0, Number(usage.current) || 0);
@@ -4615,9 +4842,130 @@
   // Each tab uses the existing quickapply session flag (set per
   // jobId, consumed by maybeAutoPrewarmFromQuickApply) — same path as
   // a single ⚡ Postular click.
+  // Reads the currently-active N from the chip row in the bulk section.
+  // Falls back to 5 if no chip is active (defensive — the renderer
+  // always marks one chip as --active so this should be unreachable).
+  function readSelectedBulkN() {
+    try {
+      const activeChip = matchesPanelEl?.querySelector(".eamx-bulk__chip--active");
+      if (activeChip) {
+        const n = Number(activeChip.getAttribute("data-bulk-n"));
+        if (Number.isFinite(n) && n > 0) return n;
+      }
+    } catch (_) {}
+    return 5;
+  }
+
+  // Chip click handler. Updates aria-pressed, --active class, the
+  // <span data-bulk-count> placeholders in the action buttons, and
+  // persists the choice keyed per-plan.
+  async function onMatchesBulkSelectN(chipBtn) {
+    if (!chipBtn) return;
+    const n = Number(chipBtn.getAttribute("data-bulk-n"));
+    if (!Number.isFinite(n) || n <= 0) return;
+
+    // Update chip group visual state.
+    try {
+      const allChips = matchesPanelEl?.querySelectorAll(".eamx-bulk__chip") || [];
+      allChips.forEach((c) => {
+        const isActive = c === chipBtn;
+        c.classList.toggle("eamx-bulk__chip--active", isActive);
+        c.setAttribute("aria-pressed", isActive ? "true" : "false");
+      });
+      // Patch all data-bulk-count placeholders (one in each button).
+      const counters = matchesPanelEl?.querySelectorAll("[data-bulk-count]") || [];
+      counters.forEach((el) => { el.textContent = String(n); });
+    } catch (_) {}
+
+    // Persist per-plan so reopening remembers it. We need the plan to
+    // key; re-ping auth status to be sure (cheap and cached).
+    try {
+      const auth = await sendMsg({ type: MSG.GET_AUTH_STATUS });
+      const plan = (auth && auth.user && auth.user.plan) || "free";
+      chrome.storage.local.set({ [`eamx:bulk-n:${plan}`]: n });
+    } catch (_) { /* persistence is best-effort */ }
+  }
+
+  // Apply the values currently typed into the filters drawer. Reads
+  // the modality chip + city + salary inputs, builds a preferences
+  // object, writes to chrome.storage.local. The existing storage
+  // .onChanged listener picks it up and re-renders the whole panel —
+  // so we don't need to manually call renderMatchesPanelContent here.
+  async function onMatchesFiltersApply() {
+    const drawer = matchesPanelEl?.querySelector("[data-eamx-filters]");
+    if (!drawer) return;
+    // Modality from the active chip.
+    const activeChip = drawer.querySelector(".eamx-filters__chip--active");
+    const modality = activeChip ? activeChip.getAttribute("data-modality") : "any";
+    // City + salary from inputs.
+    const cityInput = drawer.querySelector('[data-filter-field="city"]');
+    const minInput = drawer.querySelector('[data-filter-field="salaryMin"]');
+    const maxInput = drawer.querySelector('[data-filter-field="salaryMax"]');
+    const city = cityInput ? cityInput.value.trim() : "";
+    const salaryMin = minInput && minInput.value !== "" ? Number(minInput.value) : null;
+    const salaryMax = maxInput && maxInput.value !== "" ? Number(maxInput.value) : null;
+
+    // Build the preferences object. Mirror the shape used by Options:
+    // null/undefined for unset fields, "any" for modality default.
+    // Preserve any existing fields we don't surface (forward-compat).
+    const prev = (cachedPreferences && typeof cachedPreferences === "object") ? cachedPreferences : {};
+    const next = {
+      ...prev,
+      modality: modality || "any",
+      city: city || null,
+      salaryMin: Number.isFinite(salaryMin) ? salaryMin : null,
+      salaryMax: Number.isFinite(salaryMax) ? salaryMax : null,
+      updatedAt: new Date().toISOString()
+    };
+
+    try {
+      await new Promise((resolve, reject) => {
+        try {
+          chrome.storage.local.set({ [PREFERENCES_STORAGE_KEY]: next }, () => {
+            const err = chrome.runtime.lastError;
+            if (err) reject(err); else resolve();
+          });
+        } catch (e) { reject(e); }
+      });
+      toast("Filtros aplicados — re-ordenando matches.", "success", { durationMs: 2500 });
+    } catch (e) {
+      console.warn("[EmpleoAutomatico] filters-apply failed", e);
+      toast("No se pudieron guardar los filtros.", "error");
+    }
+  }
+
+  // Reset all panel filters back to "any" / blank / null. Writes the
+  // cleared preference object and lets the storage listener re-render.
+  async function onMatchesFiltersClear() {
+    const cleared = {
+      modality: "any",
+      city: null,
+      salaryMin: null,
+      salaryMax: null,
+      updatedAt: new Date().toISOString()
+    };
+    try {
+      await new Promise((resolve, reject) => {
+        try {
+          chrome.storage.local.set({ [PREFERENCES_STORAGE_KEY]: cleared }, () => {
+            const err = chrome.runtime.lastError;
+            if (err) reject(err); else resolve();
+          });
+        } catch (e) { reject(e); }
+      });
+      toast("Filtros limpiados.", "info", { durationMs: 2500 });
+    } catch (e) {
+      console.warn("[EmpleoAutomatico] filters-clear failed", e);
+      toast("No se pudieron limpiar los filtros.", "error");
+    }
+  }
+
   async function onMatchesBulkApplyTop(bulkBtn) {
     if (!bulkBtn) return;
-    const N = 5;
+    // Honor the user's chip selection instead of hardcoding 5. Falls
+    // back to 5 if no chip is active (shouldn't happen — renderer
+    // always marks one --active).
+    const N = readSelectedBulkN();
     const STAGGER_MS = 6000;
 
     // Skip vacancies the user has already applied to. The "applied"
@@ -4846,7 +5194,11 @@
       toast("No se pudo abrir la cola.", "error");
       return;
     }
-    const top5 = matchesCurrentTopN.slice(0, 5);
+    // Honor the chip-selected N (same selector as bulk-apply-top) —
+    // the function is still called onMatchesMarkTop5 for back-compat
+    // but the "5" is now whatever the user picked.
+    const N = readSelectedBulkN();
+    const top5 = matchesCurrentTopN.slice(0, N);
     if (!top5.length) {
       toast("No hay vacantes para marcar.", "info");
       return;

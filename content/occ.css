@@ -3131,6 +3131,252 @@
   color: #94a3b8;
 }
 
+/* Chip selector — "Cantidad: [1] [2] [3]" row above the bulk buttons.
+   Plan-aware: Free shows 1/2/3, Pro 3/5/10, Premium 5/10/15/25. */
+.eamx-bulk__selector {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 6px 0 12px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+.eamx-bulk__selector-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(226, 232, 240, 0.55);
+  flex: 0 0 auto;
+}
+.eamx-bulk__chips {
+  display: flex;
+  gap: 4px;
+  flex: 1 1 auto;
+}
+.eamx-bulk__chip {
+  flex: 1 1 auto;
+  min-width: 32px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(226, 232, 240, 0.65);
+  font: 600 13px/1 inherit;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease, color 150ms ease, transform 120ms ease;
+}
+.eamx-bulk__chip:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(45, 212, 191, 0.30);
+  color: #e2e8f0;
+}
+.eamx-bulk__chip--active {
+  background: linear-gradient(135deg, rgba(45, 212, 191, 0.20) 0%, rgba(20, 184, 166, 0.30) 100%);
+  border-color: rgba(45, 212, 191, 0.55);
+  color: #5eead4;
+  box-shadow: 0 0 0 1px rgba(45, 212, 191, 0.10), inset 0 0 12px rgba(45, 212, 191, 0.10);
+}
+.eamx-bulk__chip:active { transform: scale(0.96); }
+.eamx-bulk__selector-plan {
+  font-size: 10.5px;
+  font-weight: 500;
+  color: rgba(226, 232, 240, 0.40);
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* Bulk button internal layout — icon + label + sub-hint stacked on
+   the right of the icon. Replaces the old single-line markup. */
+.eamx-bulk-btn__icon {
+  font-size: 16px;
+  margin-right: 6px;
+  flex: 0 0 auto;
+}
+.eamx-bulk-btn__label {
+  font-weight: inherit;
+}
+.eamx-bulk-btn__hint {
+  font-size: 11px;
+  font-weight: 500;
+  margin-left: 8px;
+  opacity: 0.7;
+}
+
+@media (max-width: 380px) {
+  .eamx-bulk__selector { flex-wrap: wrap; }
+  .eamx-bulk__selector-plan { width: 100%; text-align: right; }
+}
+
+/* In-panel filters drawer — opens when the user clicks the Filtros
+   stat. Modifies the same preferences object as the Options page so
+   saving here also affects the score weighting. Hidden by default,
+   slides open with display:block (no animation needed since the panel
+   itself is already visible). */
+.eamx-filters {
+  margin: 8px 22px 14px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  animation: eamxFiltersIn 200ms ease-out;
+}
+.eamx-filters[hidden] { display: none; }
+@keyframes eamxFiltersIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.eamx-filters__group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.eamx-filters__label {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(226, 232, 240, 0.55);
+}
+.eamx-filters__chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.eamx-filters__chip {
+  appearance: none;
+  flex: 1 1 0;
+  min-width: 64px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(226, 232, 240, 0.65);
+  font: 600 12px/1 inherit;
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+.eamx-filters__chip:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(45, 212, 191, 0.30);
+  color: #e2e8f0;
+}
+.eamx-filters__chip--active {
+  background: linear-gradient(135deg, rgba(45, 212, 191, 0.20) 0%, rgba(20, 184, 166, 0.30) 100%);
+  border-color: rgba(45, 212, 191, 0.55);
+  color: #5eead4;
+  box-shadow: inset 0 0 12px rgba(45, 212, 191, 0.10);
+}
+.eamx-filters__input {
+  appearance: none;
+  padding: 9px 12px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(255, 255, 255, 0.04);
+  color: #e2e8f0;
+  font: 500 13px/1.2 inherit;
+  transition: border-color 150ms ease, background 150ms ease;
+  width: 100%;
+  box-sizing: border-box;
+}
+.eamx-filters__input::placeholder {
+  color: rgba(226, 232, 240, 0.32);
+}
+.eamx-filters__input:focus {
+  outline: none;
+  border-color: rgba(45, 212, 191, 0.55);
+  background: rgba(255, 255, 255, 0.06);
+}
+.eamx-filters__input--salary {
+  padding-left: 24px;
+  font-variant-numeric: tabular-nums;
+}
+.eamx-filters__salary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.eamx-filters__salary-field {
+  position: relative;
+  flex: 1 1 0;
+}
+.eamx-filters__salary-prefix {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: rgba(226, 232, 240, 0.42);
+  font: 600 13px inherit;
+  pointer-events: none;
+}
+.eamx-filters__salary-sep {
+  color: rgba(226, 232, 240, 0.32);
+  font-size: 14px;
+}
+.eamx-filters__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.eamx-filters__btn {
+  appearance: none;
+  flex: 1 1 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  font: 600 13px/1 inherit;
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease, transform 120ms ease;
+}
+.eamx-filters__btn--ghost {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.10);
+  color: rgba(226, 232, 240, 0.70);
+}
+.eamx-filters__btn--ghost:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #e2e8f0;
+}
+.eamx-filters__btn--primary {
+  background: linear-gradient(135deg, #137e7a 0%, #105971 100%);
+  border-color: rgba(45, 212, 191, 0.45);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(15, 29, 44, 0.4);
+}
+.eamx-filters__btn--primary:hover {
+  background: linear-gradient(135deg, #149d97 0%, #136a83 100%);
+  transform: translateY(-1px);
+}
+.eamx-filters__btn:active { transform: scale(0.98); }
+.eamx-filters__hint {
+  margin: 0;
+  font-size: 11.5px;
+  color: rgba(226, 232, 240, 0.45);
+  line-height: 1.45;
+}
+.eamx-filters__hint a {
+  color: #5eead4;
+  text-decoration: none;
+  font-weight: 600;
+}
+.eamx-filters__hint a:hover {
+  text-decoration: underline;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .eamx-filters { animation: none; }
+  .eamx-filters__btn:hover { transform: none; }
+}
+
 /* Modern Linear/Vercel-style usage card. No icons (boxy), no emoji
    (Windows color bg). Hierarchy from typography only: hero number
    + eyebrow label + plan badge + 4px progress track. */
