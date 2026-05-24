@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-24-wider-cap-40";
+  const EAMX_LAPIEZA_VERSION = "2026-05-24-scan-loader";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -3724,7 +3724,33 @@
         <span class="eamx-matches-panel__widening-text" data-eamx-widening-text>🔍 Buscando más vacantes…</span>
       </div>
       <div class="eamx-matches-panel__content" data-eamx-matches-content>
-        <div class="eamx-matches-panel__loading">Analizando vacantes…</div>
+        <div class="eamx-scan-loader" data-eamx-scan-loader>
+          <div class="eamx-scan-loader__spinner" aria-hidden="true">
+            <svg viewBox="0 0 50 50" class="eamx-scan-loader__svg">
+              <circle cx="25" cy="25" r="20" fill="none" stroke-width="4" />
+            </svg>
+          </div>
+          <div class="eamx-scan-loader__title">Analizando todas las vacantes</div>
+          <div class="eamx-scan-loader__sub" data-eamx-scan-sub>Buscando en cada página para no perderme las mejores…</div>
+          <div class="eamx-scan-loader__bar" aria-hidden="true">
+            <div class="eamx-scan-loader__bar-fill" data-eamx-scan-bar style="width: 4%"></div>
+          </div>
+          <div class="eamx-scan-loader__stats">
+            <div class="eamx-scan-loader__stat">
+              <span class="eamx-scan-loader__stat-label">Página</span>
+              <span class="eamx-scan-loader__stat-value" data-eamx-scan-page>1 / ?</span>
+            </div>
+            <div class="eamx-scan-loader__stat">
+              <span class="eamx-scan-loader__stat-label">Encontradas</span>
+              <span class="eamx-scan-loader__stat-value" data-eamx-scan-count>0</span>
+            </div>
+            <div class="eamx-scan-loader__stat">
+              <span class="eamx-scan-loader__stat-label">Mejor match</span>
+              <span class="eamx-scan-loader__stat-value" data-eamx-scan-best>—</span>
+            </div>
+          </div>
+          <div class="eamx-scan-loader__hint">Tarda ~1-2 min. No cierres la pestaña.</div>
+        </div>
       </div>
       <div class="eamx-matches-panel__bulk" data-eamx-matches-bulk hidden>
         <button type="button" class="eamx-matches-panel__bulk-btn eamx-matches-panel__bulk-btn--primary" data-action="bulk-apply-top">⚡ Auto-postular top 5 (sin sacarte de aquí)</button>
@@ -4181,6 +4207,43 @@
       if (wideText) wideText.textContent = txt;
       if (btn) btn.textContent = txt;
     };
+    // Update the prominent scan loader card (the hero "Analizando todas
+    // las vacantes" block). The strip is fine for "almost done" status
+    // but a user opening the panel for the first time needs a clear,
+    // visible signal that work is happening — not just a tiny dot.
+    //
+    // User feedback: "que este un cargando o un preload para que sepa
+    // porque solo carga y ya".
+    const updateScanLoader = ({ page, total, count, bestScore, doneLabel } = {}) => {
+      const pageEl = matchesPanelEl?.querySelector("[data-eamx-scan-page]");
+      const countEl = matchesPanelEl?.querySelector("[data-eamx-scan-count]");
+      const bestEl = matchesPanelEl?.querySelector("[data-eamx-scan-best]");
+      const barEl = matchesPanelEl?.querySelector("[data-eamx-scan-bar]");
+      const subEl = matchesPanelEl?.querySelector("[data-eamx-scan-sub]");
+      if (pageEl && page != null) pageEl.textContent = `${page} / ${total ?? "?"}`;
+      if (countEl && count != null) countEl.textContent = String(count);
+      if (bestEl && bestScore != null) {
+        bestEl.textContent = bestScore > 0 ? `${bestScore}%` : "—";
+      }
+      if (barEl && page != null && total) {
+        const pct = Math.min(100, Math.max(4, Math.round((page / total) * 100)));
+        barEl.style.width = `${pct}%`;
+      }
+      if (subEl && doneLabel) subEl.textContent = doneLabel;
+    };
+    // Highest-scoring entry seen so far across the cumulative pool —
+    // surfaced live in the loader as "Mejor match" so the user has a
+    // signal that the wait is producing value.
+    const peekBestScore = (poolMap) => {
+      let best = 0;
+      try {
+        for (const entry of poolMap.values()) {
+          const s = Number(entry.score) || 0;
+          if (s > best) best = s;
+        }
+      } catch (_) {}
+      return best;
+    };
     // Hard cap of 40 covers virtually any LaPieza listing (user
     // reported a 36-page listing where the old cap of 14 missed half
     // the vacantes). We also try to detect the actual page count from
@@ -4207,9 +4270,12 @@
     }
     let stallStreak = 0;
     let lastFirstAnchorHref = "";
+    // Initial loader state (page 1 already snapshotted into the pool).
+    updateScanLoader({ page: 1, total: MAX_PAGES, count: pool.size, bestScore: peekBestScore(pool) });
     try {
       for (let page = 1; page <= MAX_PAGES; page++) {
         setProgress(`🔍 Página ${page}/${MAX_PAGES} · ${pool.size} vacantes`);
+        updateScanLoader({ page, total: MAX_PAGES, count: pool.size, bestScore: peekBestScore(pool) });
         const nextBtn = findLaPiezaNextPageButton();
         if (!nextBtn) break; // single-page result, stop early
         // Capture the first anchor's href BEFORE click so we can confirm
@@ -4258,10 +4324,27 @@
         } else {
           stallStreak = 0;
         }
+        // Update the visible loader card live so the user sees the
+        // count climbing + the best-match score appearing.
+        updateScanLoader({
+          page: page + 1, // we just finished `page`, about to start the next
+          total: MAX_PAGES,
+          count: pool.size,
+          bestScore: peekBestScore(pool)
+        });
         // Human-paced pause between pages so we don't hammer LaPieza's
         // search backend.
         await new Promise((r) => setTimeout(r, INTER_PAGE_DELAY_MS));
       }
+      // Final touch: fill the bar to 100% before render so the
+      // transition from "scanning" → "results" feels resolved.
+      updateScanLoader({
+        page: MAX_PAGES,
+        total: MAX_PAGES,
+        count: pool.size,
+        bestScore: peekBestScore(pool),
+        doneLabel: "✓ Listo — preparando ranking…"
+      });
       // Activate the pool for the panel render. renderMatchesPanelContent
       // checks widerSearchPool first and uses it instead of live cards.
       widerSearchPool = pool;
