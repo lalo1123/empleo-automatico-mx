@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-24-card-status-detect";
+  const EAMX_LAPIEZA_VERSION = "2026-05-24-scan-race-fix";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -4358,6 +4358,20 @@
   // re-entrancy (e.g. user closes + reopens panel mid-flight) doesn't
   // start a second loop. Cleared in the finally block.
   let widerSearchInProgress = false;
+  // "Scheduled" flag: set the moment a scan is queued via setTimeout
+  // (200ms defer to let the panel slide-in settle), cleared when the
+  // scan actually starts. Closes a race where a re-render landing in
+  // the 200ms gap saw inProgress=false and would have fallen through
+  // to the empty state, overwriting the loader. User-reported as
+  // "Página 1/37 · 12 vacantes" + "No detecté vacantes" at the same
+  // time — that gap is exactly the 200ms window.
+  let widerSearchScheduled = false;
+  // Retry counter for the "cards not painted yet, retry shortly"
+  // branch in the scan gate. Bounded so we never recurse forever if
+  // LaPieza genuinely has no vacancies to paint. 6 retries × 800ms
+  // = ~5s of grace before falling through to the empty state.
+  let panelEmptyRetries = 0;
+  const PANEL_EMPTY_MAX_RETRIES = 6;
 
   /**
    * Run the wider-search loop. Called either:
@@ -4630,30 +4644,63 @@
     if (cards.length > 100) cards = cards.slice(0, 100);
 
     // SCAN-IN-PROGRESS GATE: keep the hero loader visible while the
-    // wider-search is gathering pages. This must come BEFORE the
-    // empty-state check because during a scan LaPieza unmounts cards
-    // between pagination ticks — a render mid-tick sees cards.length
-    // === 0 and would otherwise paint the "No detecté vacantes" empty
-    // state OVER the loader (user-reported "disque no hay pero so
-    // se esta buscando").
+    // wider-search is gathering pages OR is about to. Comes BEFORE
+    // the empty-state check because during a scan LaPieza unmounts
+    // cards between pagination ticks; a render mid-tick sees
+    // cards.length === 0 and would otherwise paint "No detecté
+    // vacantes" over the loader.
     //
-    // Three firing modes:
-    //   A) Scan already running (widerSearchInProgress) → loader
-    //      stays, no re-fire, no innerHTML write.
-    //   B) Not running, no pool yet, but cards >= 5 → fire scan +
-    //      keep loader.
-    //   C) Pool exists → fall through to normal render (skip gate).
+    // Four firing modes:
+    //   A) Scan running (widerSearchInProgress)            → loader stays
+    //   B) Scan scheduled but not started yet (200ms gap)  → loader stays
+    //   C) Can start scan (no pool, >=5 cards, !scheduled) → schedule + loader stays
+    //   D) Listing-y path but cards not painted yet        → retry shortly
+    //
+    // The "scheduled but not started" case (B) closes a tight race:
+    // we defer the scan by 200ms; a re-render landing in that gap
+    // would otherwise see inProgress=false, fall through, and overwrite
+    // the loader. User-reported as "Página 1/37 · 12 vacantes" co-
+    // existing with "No detecté vacantes" — that's exactly this race.
     const scanRunning = !widerSearchPool && widerSearchInProgress;
-    const canStartScan = !widerSearchPool && !widerSearchInProgress && cards.length >= 5 && cards.length < 100;
-    if (scanRunning || canStartScan) {
+    const scanScheduled = !widerSearchPool && widerSearchScheduled;
+    const canStartScan = !widerSearchPool && !widerSearchInProgress && !widerSearchScheduled
+                       && cards.length >= 5 && cards.length < 100;
+    // Listing-page heuristic: if we're on a path that should have
+    // vacancies but cards aren't visible yet, keep the loader and
+    // retry on the next tick instead of bailing to the empty state.
+    const onListingPath = /^\/(?:vacantes|vacancies|jobs|empleos|comunidad)/i.test(location.pathname);
+    const canStartScanLater = !widerSearchPool && !widerSearchInProgress && !widerSearchScheduled
+                            && cards.length === 0 && onListingPath
+                            && panelEmptyRetries < PANEL_EMPTY_MAX_RETRIES;
+
+    if (scanRunning || scanScheduled || canStartScan || canStartScanLater) {
       if (bulk) bulk.hidden = true;
+      // Reset retry counter when we actually have cards or a scan
+      // running — only the empty-listing retry loop should count.
+      if (scanRunning || scanScheduled || canStartScan) panelEmptyRetries = 0;
       if (canStartScan) {
-        // Defer slightly so the panel slide-in animation can settle
-        // before the loader starts mutating the page (paginating).
-        setTimeout(() => onMatchesWiderSearch(null), 200);
+        // Set scheduled BEFORE the setTimeout so re-renders during the
+        // 200ms defer can see the flag.
+        widerSearchScheduled = true;
+        setTimeout(() => {
+          // Clear scheduled the moment the scan actually starts.
+          widerSearchScheduled = false;
+          try { onMatchesWiderSearch(null); } catch (_) {}
+        }, 200);
+      } else if (canStartScanLater) {
+        // Cards not painted yet — retry shortly. Bounded by
+        // PANEL_EMPTY_MAX_RETRIES so we don't loop forever if
+        // LaPieza genuinely has no vacancies.
+        panelEmptyRetries++;
+        setTimeout(() => {
+          try { renderMatchesPanelContent(); } catch (_) {}
+        }, 800);
       }
       return;
     }
+    // Reset counter once we cleared the gate (about to render real
+    // content or genuine empty state).
+    panelEmptyRetries = 0;
 
     // Empty state #2 — no cards at all (and no scan running). Two flavors:
     //  a) We're already on a listing route (/vacantes, /comunidad/jobs,
