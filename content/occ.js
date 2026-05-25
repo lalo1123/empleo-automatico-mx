@@ -2997,7 +2997,7 @@
         <div class="eamx-matches-empty">
           <div class="eamx-matches-empty__icon" aria-hidden="true">🔍</div>
           <h3>No detecté vacantes</h3>
-          <p>No detecté vacantes en esta página. Si crees que es un bug, dame screenshot.</p>
+          <p>No encontramos vacantes en esta vista. Refresca la página o navega al listado de OCC para volver a intentar.</p>
           <button type="button" class="eamx-matches-empty__cta" data-action="rescan">Volver a escanear</button>
         </div>
       `;

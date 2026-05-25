@@ -1690,7 +1690,7 @@
       const onListingAlready = LISTING_PATH_RX.some((rx) => rx.test(location.pathname || ""));
       const headline = onListingAlready ? "No detecté vacantes" : "Estás en una página sin vacantes";
       const body = onListingAlready
-        ? "No encontré cards de vacantes aquí. Si crees que es un bug, dame screenshot."
+        ? "No encontramos vacantes en esta vista. Refresca la página o ajusta tus filtros para volver a intentar."
         : "Para ver tus mejores matches, abre el listado de Computrabajo. Te llevo:";
       const ctaText = onListingAlready ? "Volver a escanear" : "Ir a Vacantes →";
       const ctaAction = onListingAlready ? "rescan" : "go-vacantes";

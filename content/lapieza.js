@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-24-detect-terminal";
+  const EAMX_LAPIEZA_VERSION = "2026-05-24-public-copy";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -4614,7 +4614,7 @@
       const onListingAlready = /^\/(?:vacantes|vacancies|jobs|empleos|comunidad)/i.test(location.pathname);
       const headline = onListingAlready ? "No detecté vacantes" : "Estás en una página sin vacantes";
       const body = onListingAlready
-        ? "No encontré cards de vacantes aquí. Si crees que es un bug, dame screenshot."
+        ? "No encontramos vacantes en esta vista. Refresca la página o ajusta tus filtros para volver a intentar."
         : "Para ver tus mejores matches, abre el listado de LaPieza. Te llevo:";
       const ctaText = onListingAlready ? "Volver a escanear" : "Ir a Vacantes →";
       const ctaAction = onListingAlready ? "rescan" : "go-vacantes";
