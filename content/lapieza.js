@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-24-scan-over-empty";
+  const EAMX_LAPIEZA_VERSION = "2026-05-24-card-status-detect";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -4338,7 +4338,18 @@
           level = matchScoreModule.levelForScore(score);
         }
       } catch (_) { /* leave defaults */ }
-      out.push({ jobLite, score, reasons, level });
+      // Inspect the card for "already-applied" / "closed" markers so
+      // the panel can filter them OUT of the bulk top-N and BEFORE
+      // wasting a quota slot on a tab whose chain would just bail.
+      const cardStatus = detectCardStatus(card);
+      out.push({
+        jobLite,
+        score,
+        reasons,
+        level,
+        appliedFromCard: cardStatus.applied,
+        closedFromCard: cardStatus.closed
+      });
     }
     return out;
   }
@@ -4711,7 +4722,16 @@
             level = matchScoreModule.levelForScore(score);
           }
         } catch (_) { /* keep entry defaults */ }
-        return { jobLite: entry.jobLite, anchor: null, card: null, score, reasons, level };
+        return {
+          jobLite: entry.jobLite,
+          anchor: null,
+          card: null,
+          score,
+          reasons,
+          level,
+          appliedFromCard: !!entry.appliedFromCard,
+          closedFromCard: !!entry.closedFromCard
+        };
       });
     } else {
       scored = cards.map(({ anchor, card }) => {
@@ -4727,8 +4747,53 @@
             level = matchScoreModule.levelForScore(score);
           }
         } catch (_) { /* keep defaults */ }
-        return { jobLite, anchor, card, score, reasons, level };
+        const cardStatus = detectCardStatus(card);
+        return {
+          jobLite,
+          anchor,
+          card,
+          score,
+          reasons,
+          level,
+          appliedFromCard: cardStatus.applied,
+          closedFromCard: cardStatus.closed
+        };
       });
+    }
+
+    // AUTO-DETECTED STATUS HANDLING
+    // - Closed vacancies: drop from the scored set entirely. They can
+    //   never be applied to so they don't deserve a slot in the top-25.
+    // - Applied vacancies (detected from listing card markers but not
+    //   yet in our queue): silently upsert them so future runs filter
+    //   them at the bulk-candidate step. We KEEP them in the visible
+    //   list — they'll render with the "✓ Ya postulada" badge that the
+    //   per-card renderer already produces from queueModule lookups.
+    const closedDropped = scored.filter((m) => m.closedFromCard).length;
+    scored = scored.filter((m) => !m.closedFromCard);
+
+    const autoMarkApplied = scored.filter((m) => m.appliedFromCard && m.jobLite && m.jobLite.id);
+    if (autoMarkApplied.length && queueModule && typeof queueModule.upsertApplied === "function") {
+      // Fire-and-forget — we don't need to block render on a queue
+      // write. The next panel render (queue.onChanged listener) will
+      // surface the new "applied" badges.
+      Promise.all(autoMarkApplied.map((m) =>
+        queueModule.upsertApplied({
+          id: m.jobLite.id,
+          source: SOURCE,
+          url: m.jobLite.url || "",
+          title: m.jobLite.title || "",
+          company: m.jobLite.company || "",
+          location: m.jobLite.location || "",
+          savedAt: Date.now(),
+          matchScore: Number(m.score) || 0,
+          reasons: ["Detectada como ya postulada desde el listado"]
+        }).catch(() => {})
+      )).catch(() => {});
+    }
+
+    if (closedDropped > 0 || autoMarkApplied.length > 0) {
+      console.log("[EmpleoAutomatico] panel render: dropped", closedDropped, "closed,", autoMarkApplied.length, "auto-marked applied");
     }
 
     // Sort by score desc, then take 25. We doubled the cap from the
@@ -5475,7 +5540,19 @@
 
     const candidates = (matchesCurrentTopN || [])
       .filter((m) => m && m.jobLite && m.jobLite.url)
-      .filter((m) => !appliedIds.has(String(m.jobLite.id)));
+      // Persisted-queue filter
+      .filter((m) => !appliedIds.has(String(m.jobLite.id)))
+      // In-memory flag filter: the auto-marker from
+      // renderMatchesPanelContent upserts to queueModule
+      // fire-and-forget; if the user clicks Auto-postular before that
+      // write lands, the persisted set might not include these IDs
+      // yet. Filtering on the flag avoids re-applying to a vacancy
+      // detected this same session.
+      .filter((m) => !m.appliedFromCard)
+      // Closed-from-listing flag: should never reach here because
+      // scored already drops them, but defend in case some path
+      // bypasses that (e.g. manual injection into matchesCurrentTopN).
+      .filter((m) => !m.closedFromCard);
     const skipped = (matchesCurrentTopN || []).length - candidates.length;
     const topN = candidates.slice(0, N);
 
@@ -7907,6 +7984,90 @@
 
   // Build a jobLite from a card. This is intentionally cheap: we only need
   // enough to score against, not the full JobPosting shape.
+  // Detect whether this listing card is already-applied or
+  // closed/expired without entering /apply/. User explicit ask:
+  // "que detecte automáticamente las postulaciones hechas o los
+  // trabajos que estén marcados como cerrados". Lets the matches
+  // panel filter these out of the ranking + bulk top-N BEFORE
+  // wasting a quota slot on a tab that will just bail in the
+  // chain's terminal-state detector.
+  //
+  // Detection strategy — both text scan AND attribute scan inside
+  // the card, because LaPieza's marker can be a small chip, a
+  // ribbon overlay, or just a textual hint. Tolerant of both
+  // languages.
+  //
+  // Returns { applied: boolean, closed: boolean }.
+  function detectCardStatus(card) {
+    const status = { applied: false, closed: false };
+    if (!card) return status;
+    try {
+      // Get the full text of the card once; cheaper than walking
+      // children for each regex.
+      const allText = (card.innerText || card.textContent || "").trim();
+      if (!allText) return status;
+
+      // Applied markers — short phrases that should NEVER appear in
+      // the job description naturally. We bound length so a job
+      // titled "Lead Postulaciones" doesn't false-positive.
+      const APPLIED_RX = [
+        /\bya\s+(?:te\s+)?(?:postulaste|aplicaste)\b/i,
+        /\bya\s+postulado\b/i,
+        /\bpostulaci[oó]n\s+enviada\b/i,
+        /\baplicaci[oó]n\s+enviada\b/i,
+        /\bapplied\b\s+(?:on|·|\d{1,2})/i, // "Applied on Jun 1" / "Applied · 2 days"
+        /\bya\s+aplicaste\s+(?:a|para)\s+esta\b/i
+      ];
+      // Closed/expired markers
+      const CLOSED_RX = [
+        /\bvacante\s+(?:cerrada|expirada|no\s+disponible|no\s+activa)\b/i,
+        /\boferta\s+(?:cerrada|expirada)\b/i,
+        /\bya\s+no\s+recibe\s+postulaciones\b/i,
+        /\b(?:position|job|posting)\s+(?:closed|expired)\b/i,
+        /\bno\s+longer\s+(?:available|accepting)\b/i
+      ];
+
+      // Trim to first 600 chars — card text is usually short, but
+      // sometimes LaPieza embeds long descriptions. Plenty for our
+      // markers, fast to scan.
+      const snippet = allText.slice(0, 600);
+      for (const rx of APPLIED_RX) {
+        if (rx.test(snippet)) { status.applied = true; break; }
+      }
+      for (const rx of CLOSED_RX) {
+        if (rx.test(snippet)) { status.closed = true; break; }
+      }
+
+      // Attribute scan — LaPieza sometimes marks cards via class
+      // names or data-* attrs. Walk the card and its top children
+      // (one level deep is plenty — these markers live on the card
+      // root or a direct ribbon child).
+      const attrCheck = (el) => {
+        try {
+          const cls = (el.className || "").toString().toLowerCase();
+          if (cls) {
+            if (/\b(?:applied|postulada?|aplicada?)\b/.test(cls) && !/un.?applied|sin.?postular/.test(cls)) {
+              status.applied = true;
+            }
+            if (/\b(?:closed|expired|cerrada?|expirada?|inactive)\b/.test(cls)) {
+              status.closed = true;
+            }
+          }
+          if (el.dataset) {
+            if (el.dataset.applied === "true" || el.dataset.postulada === "true") status.applied = true;
+            if (el.dataset.closed === "true" || el.dataset.expired === "true") status.closed = true;
+          }
+        } catch (_) {}
+      };
+      attrCheck(card);
+      try {
+        const kids = card.children || [];
+        for (let i = 0; i < kids.length && i < 12; i++) attrCheck(kids[i]);
+      } catch (_) {}
+    } catch (_) { /* swallow — best effort */ }
+    return status;
+  }
+
   function extractJobLiteFromCard(card, anchor) {
     const titleEl = card.querySelector("h1, h2, h3, h4, [class*='title' i] strong, [class*='title' i]");
     let title = "";
