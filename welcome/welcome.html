@@ -48,13 +48,34 @@
       <!-- ============ Hero ============================ -->
       <section class="hero">
         <h1 class="hero__title">
-          Bienvenido. Vamos a postular tu primera vacante
-          <span class="hero__accent"> en 2 minutos.</span>
+          Postula a 10 vacantes en
+          <span class="hero__accent"> el tiempo que te tomaría 1.</span>
         </h1>
         <p class="hero__sub">
-          Necesitas hacer 2 cosas y ya. Después solo navegas en tu portal favorito
-          y nosotros llenamos todo por ti.
+          Carta personalizada con IA, respuestas inteligentes, CV adaptado por vacante.
+          Tú revisas y das Finalizar. Listo en 2 minutos.
         </p>
+      </section>
+
+      <!-- ============ Cómo funciona ============================ -->
+      <section class="how-it-works" aria-label="Cómo funciona">
+        <div class="how-it-works__item">
+          <div class="how-it-works__icon">🎯</div>
+          <div class="how-it-works__title">Detecta matches</div>
+          <div class="how-it-works__sub">Escanea el listado y rankea por afinidad con tu CV</div>
+        </div>
+        <div class="how-it-works__arrow" aria-hidden="true">→</div>
+        <div class="how-it-works__item">
+          <div class="how-it-works__icon">✨</div>
+          <div class="how-it-works__title">Llena por ti</div>
+          <div class="how-it-works__sub">Carta + Q&A + CV personalizado, todo con IA</div>
+        </div>
+        <div class="how-it-works__arrow" aria-hidden="true">→</div>
+        <div class="how-it-works__item">
+          <div class="how-it-works__icon">✓</div>
+          <div class="how-it-works__title">Tú finalizas</div>
+          <div class="how-it-works__sub">Revisas todo y das clic. Nunca enviamos sin ti.</div>
+        </div>
       </section>
 
       <!-- ============ Step indicator ============================ -->
@@ -165,15 +186,21 @@
       <section class="card is-locked" id="card-done" data-card="done">
         <h2 class="card__title">3. ¡Listo! Ahora a postular</h2>
         <p class="card__sub">
-          Abre cualquiera de estos portales. Cuando veas una vacante que te guste,
-          dale clic al botón <strong>⚡ Postular</strong> y nosotros hacemos todo.
+          Te recomendamos empezar con LaPieza — es donde nuestro auto-postular
+          está más afinado. Después de tu primera vacante, abre cualquier portal.
         </p>
 
+        <!-- Primary CTA — big button to open LaPieza right away.
+             The user gets immediate gratification: install → setup →
+             one click → see the FAB working. -->
+        <a class="btn btn--primary btn--big btn--hero"
+           href="https://lapieza.io/vacantes" target="_blank" rel="noopener">
+          <span aria-hidden="true">⚡</span> Abrir LaPieza y postular ahora
+        </a>
+
+        <div class="portals-divider"><span>O elige otro portal</span></div>
+
         <div class="portals">
-          <a class="portal" href="https://lapieza.io/vacantes" target="_blank" rel="noopener">
-            <span class="portal__name">LaPieza</span>
-            <span class="portal__hint">Mejores matches + ⚡ Postular</span>
-          </a>
           <a class="portal" href="https://www.occ.com.mx/empleos" target="_blank" rel="noopener">
             <span class="portal__name">OCC</span>
             <span class="portal__hint">El más grande de México</span>
@@ -185,6 +212,10 @@
           <a class="portal" href="https://mx.indeed.com/jobs" target="_blank" rel="noopener">
             <span class="portal__name">Indeed</span>
             <span class="portal__hint">Multinacionales</span>
+          </a>
+          <a class="portal" href="https://www.bumeran.com.mx/empleos.html" target="_blank" rel="noopener">
+            <span class="portal__name">Bumeran</span>
+            <span class="portal__hint">LATAM</span>
           </a>
         </div>
 

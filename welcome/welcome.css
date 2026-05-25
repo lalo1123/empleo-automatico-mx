@@ -128,6 +128,65 @@ html, body {
 }
 
 /* =============================================================================
+ * How-it-works — three visual cards explaining the flow
+ * Lives between the hero and the step indicator. Helps the user see
+ * the value BEFORE doing the 3-step setup.
+ * ============================================================================= */
+.how-it-works {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  margin: 0 0 32px;
+  flex-wrap: wrap;
+}
+.how-it-works__item {
+  flex: 1 1 0;
+  min-width: 180px;
+  padding: 18px 16px;
+  background: linear-gradient(135deg,
+    rgba(45, 212, 191, 0.05) 0%,
+    rgba(99, 102, 241, 0.05) 100%),
+    var(--c-surface, #fff);
+  border: 1px solid var(--c-border, #e2e8f0);
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: transform 200ms ease, box-shadow 200ms ease, border-color 200ms ease;
+}
+.how-it-works__item:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 32px -16px rgba(15, 23, 42, 0.20);
+  border-color: var(--c-brand-300, #5eead4);
+}
+.how-it-works__icon {
+  font-size: 28px;
+  line-height: 1;
+  margin-bottom: 4px;
+}
+.how-it-works__title {
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--c-ink, #0f1d2c);
+}
+.how-it-works__sub {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--c-ink-soft, #475569);
+}
+.how-it-works__arrow {
+  display: flex;
+  align-items: center;
+  color: var(--c-ink-muted, #94a3b8);
+  font-size: 24px;
+  font-weight: 300;
+}
+@media (max-width: 640px) {
+  .how-it-works__arrow { display: none; }
+  .how-it-works__item { min-width: 100%; }
+}
+
+/* =============================================================================
  * Step indicator (horizontal pill row)
  * ============================================================================= */
 .steps {
@@ -529,4 +588,54 @@ html, body {
   .step { flex: none; }
   .card { padding: 20px; }
   .brand__skip { display: none; }
+}
+
+/* =============================================================================
+ * Step 3 — primary "Open LaPieza" hero CTA + divider before portals
+ * Makes the recommended first action unmissable.
+ * ============================================================================= */
+.btn--hero {
+  width: 100%;
+  padding: 16px 20px;
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 18px;
+  box-shadow:
+    0 12px 28px -12px rgba(16, 89, 113, 0.45),
+    0 0 0 1px rgba(45, 212, 191, 0.18);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: linear-gradient(135deg, #1f9f95 0%, #105971 100%);
+  transition: transform 200ms ease, box-shadow 200ms ease, background 200ms ease;
+}
+.btn--hero:hover {
+  background: linear-gradient(135deg, #137e7a 0%, #0a3a4d 100%);
+  transform: translateY(-2px);
+  box-shadow:
+    0 18px 38px -12px rgba(16, 89, 113, 0.55),
+    0 0 0 1px rgba(45, 212, 191, 0.28);
+}
+.btn--hero:active { transform: scale(0.99); }
+
+.portals-divider {
+  display: flex;
+  align-items: center;
+  margin: 6px 0 14px;
+  color: var(--c-ink-muted, #94a3b8);
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.portals-divider::before,
+.portals-divider::after {
+  content: "";
+  flex: 1 1 0;
+  height: 1px;
+  background: var(--c-border, #e2e8f0);
+}
+.portals-divider span {
+  padding: 0 12px;
 }
