@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-24-public-copy";
+  const EAMX_LAPIEZA_VERSION = "2026-05-24-loader-sticky";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -4631,27 +4631,32 @@
       return;
     }
 
-    // FIRST-OPEN GATE: when the panel is opening for the first time
-    // this session, we have current-page cards but no widerSearchPool
-    // yet, and there's a paginator with more pages to scan, KEEP the
-    // hero loader visible and trigger wider-search BEFORE rendering
-    // any matches. Otherwise the user sees page-1 matches flash up
-    // for a few seconds followed by an opaque shuffle, with only a
-    // tiny progress strip hinting that more work is happening
-    // (user feedback: "algo como cargando no se, mucho mejor en
-    // grande antes de ver las opciones no?").
+    // SCAN-IN-PROGRESS GATE: while the wider-search loop is gathering
+    // the cumulative pool (or we haven't started one yet for a listing
+    // with 5+ visible cards), KEEP the hero loader visible instead of
+    // flashing page-1 matches followed by an opaque shuffle.
     //
-    // When wider-search completes it re-calls renderMatchesPanelContent
-    // (this function) with widerSearchPool set, which falls through
-    // this branch and renders the full ranked list.
-    if (!widerSearchPool && !widerSearchInProgress && cards.length >= 5 && cards.length < 100) {
-      // Loader is already in the host innerHTML from the panel init;
-      // we just need to NOT overwrite it. Hide the bulk row until
-      // results are ready so the page chrome stays clean.
+    // Two firing modes:
+    //   - First open this session (!pool, !inProgress) → trigger the
+    //     wider-search AND show the loader.
+    //   - Re-open during an in-flight wider-search (!pool, inProgress)
+    //     → DON'T re-fire (would duplicate), but STILL show the
+    //     loader. Fixes user-reported bug "NO SALIO EL DE CARGANDO
+    //     TODAS LAS VACANTES" — closing + reopening the panel mid-
+    //     scan made the matches render immediately because the gate
+    //     bailed on widerSearchInProgress=true.
+    //
+    // When the loop completes it re-calls renderMatchesPanelContent
+    // with widerSearchPool set, the gate falls through, and the
+    // ranked list renders.
+    if (!widerSearchPool && cards.length >= 5 && cards.length < 100) {
       if (bulk) bulk.hidden = true;
-      // Defer slightly so the panel slide-in animation can settle
-      // before the loader starts mutating the page (paginating).
-      setTimeout(() => onMatchesWiderSearch(null), 200);
+      // Only start a new wider-search if one isn't already running.
+      if (!widerSearchInProgress) {
+        // Defer slightly so the panel slide-in animation can settle
+        // before the loader starts mutating the page (paginating).
+        setTimeout(() => onMatchesWiderSearch(null), 200);
+      }
       return;
     }
 
