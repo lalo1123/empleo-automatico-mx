@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-24-loader-first";
+  const EAMX_LAPIEZA_VERSION = "2026-05-24-detect-terminal";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -1341,6 +1341,86 @@
     const isBulkMode = await readBulkModeFlag();
     console.log("[EmpleoAutomatico] chain inner: bulk mode =", isBulkMode);
 
+    // TERMINAL-STATE DETECTORS: before doing any work, check if this
+    // vacancy is "already applied" or "closed" — both states mean the
+    // chain can't progress and the parent panel needs a clear signal
+    // (NOT just "Postulando…" forever). Wait briefly for LaPieza to
+    // hydrate (banner sometimes paints 200-400ms after route change)
+    // then sample.
+    await new Promise((r) => setTimeout(r, 600));
+    if (detectAlreadyAppliedState()) {
+      console.log("[EmpleoAutomatico] chain inner: ALREADY APPLIED — bailing");
+      reportBulkStatus("already_applied");
+      quickApplyAborted = true;
+      // Persist the applied-state to our local queue so future bulks
+      // skip this vacancy at the filter step. Best-effort.
+      try {
+        const id = idFromUrl(location.href);
+        if (id && queueModule && queueModule.upsertApplied) {
+          await queueModule.upsertApplied({
+            id,
+            source: SOURCE,
+            url: location.href,
+            title: (lastJob && lastJob.title) || "",
+            company: (lastJob && lastJob.company) || "",
+            location: (lastJob && lastJob.location) || "",
+            savedAt: Date.now(),
+            matchScore: 0,
+            reasons: ["Detectada como ya postulada al abrir la vacante"]
+          });
+        }
+      } catch (_) {}
+      clearBulkModeFlag();
+      return;
+    }
+    if (detectVacancyClosedState()) {
+      console.log("[EmpleoAutomatico] chain inner: VACANCY CLOSED — bailing");
+      reportBulkStatus("closed");
+      quickApplyAborted = true;
+      clearBulkModeFlag();
+      return;
+    }
+
+    // NO-FORM TIMEOUT: poll up to 30s for any actionable apply-form
+    // element (CV step, cover field, Q&A textarea, quiz button, or
+    // Finalizar button). If nothing shows up the page is stuck and
+    // we report a friendly error rather than spinning the loop on
+    // empty DOM forever. Live bug: tabs reaching /apply/<uuid> for
+    // a vacancy whose page failed to render the form sat on
+    // "Postulando…" indefinitely (user couldn't tell why).
+    {
+      const NO_FORM_TIMEOUT_MS = 30_000;
+      const POLL_MS = 1000;
+      const startedAt = Date.now();
+      let foundForm = false;
+      while (Date.now() - startedAt < NO_FORM_TIMEOUT_MS) {
+        if (quickApplyAborted) break;
+        if (applyPageHasAnyFormElement()) { foundForm = true; break; }
+        // Mid-poll, re-check the terminal-state detectors in case the
+        // closed/applied banner painted later than the 600ms warmup.
+        if (detectAlreadyAppliedState()) {
+          reportBulkStatus("already_applied");
+          quickApplyAborted = true;
+          clearBulkModeFlag();
+          return;
+        }
+        if (detectVacancyClosedState()) {
+          reportBulkStatus("closed");
+          quickApplyAborted = true;
+          clearBulkModeFlag();
+          return;
+        }
+        await new Promise((r) => setTimeout(r, POLL_MS));
+      }
+      if (!foundForm && !quickApplyAborted) {
+        console.log("[EmpleoAutomatico] chain inner: NO FORM after 30s — bailing");
+        reportBulkStatus("no_form");
+        quickApplyAborted = true;
+        clearBulkModeFlag();
+        return;
+      }
+    }
+
     // PRE-FLIGHT: refuse to start the chain at all if the user has zero
     // remaining quota. Without this gate the chain would show
     // askCvChoice (asking "use principal or personalize?"), the user
@@ -2329,6 +2409,84 @@
       if (!rx.test(t)) return false;
       try { return isVisible(el) && !el.disabled; } catch (_) { return false; }
     }) || null;
+  }
+
+  // Detect the "you've already applied to this vacancy" state. LaPieza
+  // shows variants like "Ya te postulaste", "Ya aplicaste", "Ya
+  // postulado a esta vacante", typically as a banner near the form or
+  // replacing the form entirely. Returns true if any visible element
+  // (outside our own UI) contains a matching phrase.
+  //
+  // We're tolerant: any one of the regexes hitting is enough. Live
+  // bug: user reported a chain row stayed on "Generando carta con
+  // IA…" even though they'd already applied — the chain has no way to
+  // know unless we explicitly look.
+  function detectAlreadyAppliedState() {
+    const RX = [
+      /\bya\s+(?:te\s+)?(?:postulaste|aplicaste|postulado)\b/i,
+      /\bpostulaci[oó]n\s+enviada\b/i,
+      /\bya\s+postulado\s+(?:a|para)\s+esta\b/i,
+      /\byou\s+(?:have\s+)?already\s+applied\b/i,
+      /\bapplied\s+on\b/i
+    ];
+    try {
+      // Scan visible elements only — meta tags / hidden divs don't count.
+      const candidates = document.querySelectorAll("p, span, div, h1, h2, h3, h4, strong");
+      for (const el of candidates) {
+        try {
+          if (el.closest(".eamx-fab, .eamx-panel, .eamx-overlay, .eamx-matches-panel, .eamx-toast, .eamx-bulk-progress, [data-eamx]")) continue;
+          if (!isVisible(el)) continue;
+          const t = (el.textContent || "").trim();
+          if (!t || t.length > 200) continue; // skip giant blobs
+          if (RX.some((rx) => rx.test(t))) return true;
+        } catch (_) { /* skip */ }
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  // Detect the "this vacancy is closed / no longer available" state.
+  // LaPieza variants: "Vacante cerrada", "no longer available",
+  // "vacante no disponible", "expirada", "ya no recibe postulaciones".
+  function detectVacancyClosedState() {
+    const RX = [
+      /\bvacante\s+(?:cerrada|expirada|no\s+disponible|no\s+activa)\b/i,
+      /\bno\s+(?:est[áa]\s+)?(?:disponible|activa)\b/i,
+      /\bya\s+no\s+recibe\s+postulaciones\b/i,
+      /\bno\s+longer\s+(?:available|accepting)\b/i,
+      /\b(?:position|job)\s+(?:closed|expired)\b/i,
+      /\boferta\s+(?:cerrada|expirada)\b/i
+    ];
+    try {
+      const candidates = document.querySelectorAll("p, span, div, h1, h2, h3, h4, strong");
+      for (const el of candidates) {
+        try {
+          if (el.closest(".eamx-fab, .eamx-panel, .eamx-overlay, .eamx-matches-panel, .eamx-toast, .eamx-bulk-progress, [data-eamx]")) continue;
+          if (!isVisible(el)) continue;
+          const t = (el.textContent || "").trim();
+          if (!t || t.length > 200) continue;
+          if (RX.some((rx) => rx.test(t))) return true;
+        } catch (_) {}
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  // Detect whether the apply page has SOMETHING actionable for the
+  // chain (CV step, cover field, Q&A textareas, quiz buttons, finalize
+  // button). If NONE are present after waiting, the chain is stuck —
+  // probably a page-load failure or a layout the chain doesn't know
+  // how to handle. Used as a 30s-timeout fallback in the chain.
+  function applyPageHasAnyFormElement() {
+    try {
+      if (isOnLaPiezaCvStep()) return true;
+      if (findApplyFlowFinalizeBtn()) return true;
+      if (findApplyFlowContinueBtn && findApplyFlowContinueBtn()) return true;
+      try { if (findExpressCoverLetterField()) return true; } catch (_) {}
+      try { if ((scanQuestionFields() || []).length > 0) return true; } catch (_) {}
+      if (looksLikeQuizStep()) return true;
+    } catch (_) {}
+    return false;
   }
 
   // LaPieza's primary apply CTA on /vacante/<slug>. Text variants seen
@@ -5496,6 +5654,14 @@
     finalizing: "Enviando postulación…",
     ready: "✓ Listo — dale Finalizar",
     submitted: "✓ Postulación enviada",
+    // Terminal states that aren't errors per se, but the chain can't
+    // proceed and the user should know WHY (not just "Postulando…"
+    // forever). User reported: "el de generando ya habia postulado
+    // porque no salio QUE YA ACABO" + "los otros ya habia postulado
+    // o estaba cerrado y se quedo ahi".
+    already_applied: "✓ Ya postulaste antes — saltada",
+    closed: "Vacante no disponible (cerrada)",
+    no_form: "Sin formulario — revisa la pestaña",
     error: "Algo falló — revisa la pestaña",
     plan_limit: "Sin cuota del plan",
     waiting: "En espera"
@@ -5536,15 +5702,17 @@
         // use that instead of the canned text.
         const text = next.label || bulkStatusLabel(next.step, "Procesando…");
         // Promote step to the visual variant.
-        //   ready     → "ready" (green check, idle)
-        //   submitted → "done"  (green check, finished)
-        //   error/plan_limit → "error" (red)
+        //   ready            → "ready" (green check, idle)
+        //   submitted        → "done"  (green check, finished)
+        //   already_applied  → "done"  (already done, treat as success)
+        //   error / plan_limit / closed / no_form → "error" (red)
         //   anything else (cv/cover/quiz/finalizing/…) → "running"
         //                      (spinning teal dot)
         let variant = "running";
         if (next.step === "ready") variant = "ready";
-        else if (next.step === "submitted") variant = "done";
-        else if (next.step === "error" || next.step === "plan_limit") variant = "error";
+        else if (next.step === "submitted" || next.step === "already_applied") variant = "done";
+        else if (next.step === "error" || next.step === "plan_limit"
+              || next.step === "closed" || next.step === "no_form") variant = "error";
         updateBulkProgressItem(host, jobId, variant, text, next.tabId);
       });
     };
