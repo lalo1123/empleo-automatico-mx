@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-24-scan-race-fix";
+  const EAMX_LAPIEZA_VERSION = "2026-05-24-loader-colors";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -3889,10 +3889,19 @@
       </div>
       <div class="eamx-matches-panel__content" data-eamx-matches-content>
         <div class="eamx-scan-loader" data-eamx-scan-loader>
+          <div class="eamx-scan-loader__halo" aria-hidden="true"></div>
           <div class="eamx-scan-loader__spinner" aria-hidden="true">
             <svg viewBox="0 0 50 50" class="eamx-scan-loader__svg">
-              <circle cx="25" cy="25" r="20" fill="none" stroke-width="4" />
+              <defs>
+                <linearGradient id="eamxSpinGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stop-color="#5eead4"/>
+                  <stop offset="50%" stop-color="#22d3ee"/>
+                  <stop offset="100%" stop-color="#a78bfa"/>
+                </linearGradient>
+              </defs>
+              <circle cx="25" cy="25" r="20" fill="none" stroke-width="4" stroke="url(#eamxSpinGrad)" />
             </svg>
+            <span class="eamx-scan-loader__pulse" aria-hidden="true"></span>
           </div>
           <div class="eamx-scan-loader__title">Analizando todas las vacantes</div>
           <div class="eamx-scan-loader__sub" data-eamx-scan-sub>Buscando en cada página para no perderme las mejores…</div>
@@ -3900,15 +3909,18 @@
             <div class="eamx-scan-loader__bar-fill" data-eamx-scan-bar style="width: 4%"></div>
           </div>
           <div class="eamx-scan-loader__stats">
-            <div class="eamx-scan-loader__stat">
+            <div class="eamx-scan-loader__stat eamx-scan-loader__stat--page">
+              <span class="eamx-scan-loader__stat-icon" aria-hidden="true">📄</span>
               <span class="eamx-scan-loader__stat-label">Página</span>
               <span class="eamx-scan-loader__stat-value" data-eamx-scan-page>1 / ?</span>
             </div>
-            <div class="eamx-scan-loader__stat">
+            <div class="eamx-scan-loader__stat eamx-scan-loader__stat--found">
+              <span class="eamx-scan-loader__stat-icon" aria-hidden="true">✨</span>
               <span class="eamx-scan-loader__stat-label">Encontradas</span>
               <span class="eamx-scan-loader__stat-value" data-eamx-scan-count>0</span>
             </div>
-            <div class="eamx-scan-loader__stat">
+            <div class="eamx-scan-loader__stat eamx-scan-loader__stat--best">
+              <span class="eamx-scan-loader__stat-icon" aria-hidden="true">🏆</span>
               <span class="eamx-scan-loader__stat-label">Mejor match</span>
               <span class="eamx-scan-loader__stat-value" data-eamx-scan-best>—</span>
             </div>
