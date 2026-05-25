@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-24-loader-sticky";
+  const EAMX_LAPIEZA_VERSION = "2026-05-24-audit-fixes";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -1335,6 +1335,20 @@
     quickApplyAborted = false;
     reportBulkStatus("starting");
 
+    // Install the Esc kill switch FIRST so the user can cancel during
+    // any pre-flight (auth check, terminal-state detectors, 30s no-form
+    // poll). Previously the handler was installed after these blocking
+    // checks, leaving a ~30+ s window where Esc did nothing.
+    quickApplyEscHandler = (ev) => {
+      if (ev.key === "Escape" || ev.key === "Esc") {
+        quickApplyAborted = true;
+        try { document.removeEventListener("keydown", quickApplyEscHandler, true); } catch (_) {}
+        quickApplyEscHandler = null;
+        toast("Cadena cancelada. Continúa manual.", "info");
+      }
+    };
+    try { document.addEventListener("keydown", quickApplyEscHandler, true); } catch (_) {}
+
     // Detect bulk mode early. If true, the "ready" step at the end of
     // the chain runs a 5s countdown then auto-clicks Finalizar. ESC
     // (via quickApplyAborted) cancels the countdown.
@@ -1453,16 +1467,8 @@
       }
     } catch (_) { /* network blip — proceed; mid-chain failures handle the limit too */ }
 
-    quickApplyEscHandler = (ev) => {
-      if (ev.key === "Escape" || ev.key === "Esc") {
-        quickApplyAborted = true;
-        try { document.removeEventListener("keydown", quickApplyEscHandler, true); } catch (_) {}
-        quickApplyEscHandler = null;
-        toast("Cadena cancelada. Continúa manual.", "info");
-      }
-    };
-    try { document.addEventListener("keydown", quickApplyEscHandler, true); } catch (_) {}
-
+    // Esc handler already installed at the top of this function so it's
+    // active during the pre-flight + terminal-state detectors above.
     toast("⚡ Cadena: te llevo paso a paso… (Esc cancela)", "info", { durationMs: 4500 });
     console.log("[EmpleoAutomatico] chain inner: toast fired, entering loop");
 
@@ -4516,6 +4522,15 @@
       console.warn("[EmpleoAutomatico] wider search failed", err);
       setProgress("No se pudo ampliar la búsqueda");
       setTimeout(() => { if (wideStrip) wideStrip.hidden = true; }, 4000);
+      // Recovery: surface whatever we accumulated so far (even partial
+      // pool) so the loader doesn't stay frozen until the next storage
+      // change. Without this the user sees the spinning hero forever
+      // when an early-iteration error trips the catch.
+      try {
+        if (pool && pool.size > 0) widerSearchPool = pool;
+        widerSearchInProgress = false; // clear early so the gate falls through
+        await renderMatchesPanelContent();
+      } catch (_) { /* even render failed — nothing more we can do gracefully */ }
     } finally {
       widerSearchInProgress = false;
       if (btn) {
@@ -5431,7 +5446,14 @@
     // back to 5 if no chip is active (shouldn't happen — renderer
     // always marks one --active).
     const N = readSelectedBulkN();
-    const STAGGER_MS = 6000;
+    // Dynamic stagger: 6s is fine for N=3-5, but at N=10+ the user
+    // waits a full minute before the last tab even opens. Scale down
+    // when N is bigger so the bulk run feels responsive while keeping
+    // per-tab pacing healthy for LaPieza's backend.
+    //   N ≤ 5  → 6s (original pacing)
+    //   N = 6-10 → 4s
+    //   N > 10 → 3s (Premium territory)
+    const STAGGER_MS = N <= 5 ? 6000 : N <= 10 ? 4000 : 3000;
 
     // Skip vacancies the user has already applied to. The "applied"
     // queue is populated by:
