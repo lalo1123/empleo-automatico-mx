@@ -24,10 +24,30 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-24-closed-badge-detect";
+  const EAMX_LAPIEZA_VERSION = "2026-05-25-context-banner";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
+
+  // Proactive health check — Chrome can auto-update the extension or
+  // the user can reload it via chrome://extensions WHILE this content
+  // script is still loaded in a tab. After that point chrome.runtime
+  // disconnects and every sendMessage call fails. We poll every 15s
+  // for chrome.runtime.id; the moment it goes away we surface the
+  // recovery banner so the user knows to refresh THIS page.
+  //
+  // Cheap: just a property access; no allocation.
+  try {
+    setInterval(() => {
+      try {
+        if (!chrome?.runtime?.id) {
+          maybeShowContextLostBanner();
+        }
+      } catch (_) {
+        maybeShowContextLostBanner();
+      }
+    }, 15000);
+  } catch (_) { /* setInterval shouldn't throw, but defend anyway */ }
 
   const SOURCE = "lapieza";
   const MSG = {
@@ -6850,14 +6870,82 @@
 
   function sendMsg(msg) {
     return new Promise((resolve, reject) => {
+      // Fast-fail when the runtime is gone (Chrome updated/reloaded
+      // the extension after this content script loaded). Without this
+      // check the sendMessage call throws synchronously and the
+      // catch wraps it as a generic error.
+      if (!chrome?.runtime?.id) {
+        try { maybeShowContextLostBanner(); } catch (_) {}
+        return reject(new Error("Extension context invalidated"));
+      }
       try {
         chrome.runtime.sendMessage(msg, (response) => {
           const err = chrome.runtime.lastError;
-          if (err) return reject(new Error(err.message || "runtime error"));
+          if (err) {
+            // If the error indicates the extension context is gone,
+            // surface the recovery banner. The user otherwise gets a
+            // toast that disappears in a few seconds with no clear
+            // remediation.
+            const m = err.message || "";
+            if (/context\s+invalidated|extension\s+context|disconnected\s+port/i.test(m)) {
+              try { maybeShowContextLostBanner(); } catch (_) {}
+            }
+            return reject(new Error(m || "runtime error"));
+          }
           resolve(response);
         });
-      } catch (err) { reject(err); }
+      } catch (err) {
+        // Synchronous throws also indicate a dead context most of the
+        // time ("chrome.runtime is undefined" / "Extension context
+        // invalidated").
+        const m = (err && err.message) || String(err);
+        if (/context\s+invalidated|chrome\.runtime|extension\s+context/i.test(m)) {
+          try { maybeShowContextLostBanner(); } catch (_) {}
+        }
+        reject(err);
+      }
     });
+  }
+
+  // Persistent top-of-page banner shown when the extension context is
+  // gone — Chrome auto-updated or the user reloaded the extension in
+  // chrome://extensions while this tab was open. Without a fresh page
+  // load NOTHING in the extension can work (sendMessage throws, the
+  // FAB can't reach the SW, etc.). User reported: a vacancy listing
+  // where the matches panel never opened — DevTools confirmed it was
+  // exactly this state.
+  //
+  // Idempotent: only one banner ever in the DOM. Click "Recargar
+  // ahora" calls location.reload().
+  let extensionContextLostBannerShown = false;
+  function maybeShowContextLostBanner() {
+    if (extensionContextLostBannerShown) return;
+    if (document.querySelector("[data-eamx-context-lost]")) {
+      extensionContextLostBannerShown = true;
+      return;
+    }
+    extensionContextLostBannerShown = true;
+    try {
+      const banner = document.createElement("div");
+      banner.setAttribute("data-eamx-context-lost", "");
+      banner.className = "eamx-context-lost";
+      banner.innerHTML = `
+        <div class="eamx-context-lost__inner">
+          <span class="eamx-context-lost__icon" aria-hidden="true">⚠</span>
+          <div class="eamx-context-lost__body">
+            <div class="eamx-context-lost__title">La extensión se actualizó</div>
+            <div class="eamx-context-lost__sub">Recarga esta página para volver a usar Empleo Automático.</div>
+          </div>
+          <button type="button" class="eamx-context-lost__btn" data-eamx-context-reload>Recargar ahora</button>
+        </div>
+      `;
+      banner.addEventListener("click", (ev) => {
+        if (ev.target && (ev.target).closest("[data-eamx-context-reload]")) {
+          try { location.reload(); } catch (_) {}
+        }
+      });
+      document.documentElement.appendChild(banner);
+    } catch (_) { /* if even DOM access fails the page is doomed anyway */ }
   }
 
   function humanizeError(err) {
