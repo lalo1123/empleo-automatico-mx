@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-25-context-banner";
+  const EAMX_LAPIEZA_VERSION = "2026-05-25-onboarding";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -941,6 +941,14 @@
     document.body.appendChild(fabEl);
     paintFabLabel();
 
+    // Show the "first-time FAB" tooltip if this is the user's first
+    // mount in any supported portal this install. The tooltip is a
+    // small bubble pointing at the FAB that explains what the button
+    // does — onboarding friction reducer per user feedback ("para
+    // usuario pues esta medio complicado extension no?"). One-shot
+    // via chrome.storage.local["eamx:fab-tooltip-seen"].
+    try { maybeShowFabFirstUseTooltip(); } catch (_) {}
+
     // Side effect: when mounting on a vacancy page, eagerly extract & cache
     // the job so it survives the navigation to /apply/<uuid>. We run after
     // a short delay to let the page settle (LaPieza renders JSON-LD late
@@ -957,6 +965,62 @@
         } catch (_) { /* ignore */ }
       }, 1500);
     }
+  }
+
+  // First-time tooltip pointing at the FAB. One-shot: persists a
+  // flag to chrome.storage.local so subsequent mounts don't show it.
+  // The tooltip self-dismisses after 8s OR when the user clicks the
+  // FAB / clicks anywhere on the bubble.
+  function maybeShowFabFirstUseTooltip() {
+    if (!fabEl) return;
+    const KEY = "eamx:fab-tooltip-seen";
+    try {
+      chrome.storage.local.get([KEY], (r) => {
+        try {
+          if (r && r[KEY]) return; // already shown before
+          showFabFirstUseTooltip();
+          // Persist immediately so concurrent mounts (multiple
+          // SPA route changes in the first 8s) don't all show it.
+          try { chrome.storage.local.set({ [KEY]: { setAt: Date.now() } }); } catch (_) {}
+        } catch (_) {}
+      });
+    } catch (_) { /* storage not available — silently skip */ }
+  }
+
+  function showFabFirstUseTooltip() {
+    // Avoid duplicate: if a tooltip is already mounted, no-op.
+    try { document.querySelectorAll(".eamx-fab-tip").forEach((el) => el.remove()); } catch (_) {}
+    const tip = document.createElement("div");
+    tip.className = "eamx-fab-tip";
+    tip.innerHTML = `
+      <div class="eamx-fab-tip__head">
+        <span class="eamx-fab-tip__title">✨ Tu botón de auto-postular</span>
+        <button type="button" class="eamx-fab-tip__close" aria-label="Cerrar" data-eamx-fab-tip-close>✕</button>
+      </div>
+      <div class="eamx-fab-tip__body">
+        Dale click aquí cuando estés en una vacante para que la IA llene la postulación por ti.
+      </div>
+      <div class="eamx-fab-tip__arrow" aria-hidden="true"></div>
+    `;
+    document.body.appendChild(tip);
+    // Auto-dismiss after 10s.
+    const autoDismiss = setTimeout(() => {
+      try { tip.classList.add("eamx-fab-tip--leaving"); } catch (_) {}
+      setTimeout(() => { try { tip.remove(); } catch (_) {} }, 220);
+    }, 10000);
+    // Click the bubble (anywhere) or its close button to dismiss early.
+    tip.addEventListener("click", () => {
+      clearTimeout(autoDismiss);
+      try { tip.classList.add("eamx-fab-tip--leaving"); } catch (_) {}
+      setTimeout(() => { try { tip.remove(); } catch (_) {} }, 220);
+    });
+    // Also dismiss when the user actually clicks the FAB.
+    const onFabClickOnce = () => {
+      clearTimeout(autoDismiss);
+      try { tip.remove(); } catch (_) {}
+      try { fabEl.removeEventListener("click", onFabClickOnce); } catch (_) {}
+    };
+    try { fabEl.addEventListener("click", onFabClickOnce); } catch (_) {}
   }
 
   // Repaint the FAB icon, label, and aria-label so they reflect the current

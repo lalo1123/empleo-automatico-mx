@@ -4307,3 +4307,90 @@ button.eamx-matches-panel__usage:hover {
   .eamx-context-lost__inner { flex-wrap: wrap; gap: 8px; padding: 10px 14px; }
   .eamx-context-lost__btn { width: 100%; }
 }
+
+/* First-time FAB tooltip — small bubble pointing at the floating
+   action button so the user knows what to click after install.
+   Self-dismisses in 10s or on click. One-shot per install. */
+.eamx-fab-tip {
+  position: fixed;
+  right: 24px;
+  bottom: 96px;
+  z-index: 2147483600;
+  width: 280px;
+  max-width: calc(100vw - 32px);
+  padding: 14px 14px 14px 14px;
+  background: linear-gradient(135deg, #137e7a 0%, #105971 100%);
+  color: #f0fdfa;
+  font: 13px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  border-radius: 12px;
+  box-shadow:
+    0 16px 40px -12px rgba(15, 29, 44, 0.55),
+    0 0 0 1px rgba(45, 212, 191, 0.35) inset;
+  cursor: pointer;
+  animation: eamxFabTipIn 280ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.eamx-fab-tip--leaving {
+  animation: eamxFabTipOut 200ms ease-in forwards;
+  pointer-events: none;
+}
+@keyframes eamxFabTipIn {
+  from { opacity: 0; transform: translateY(8px) scale(0.95); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes eamxFabTipOut {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to   { opacity: 0; transform: translateY(4px) scale(0.97); }
+}
+.eamx-fab-tip__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.eamx-fab-tip__title {
+  font: 700 13.5px/1.2 inherit;
+  letter-spacing: -0.01em;
+  color: #f0fdfa;
+}
+.eamx-fab-tip__close {
+  appearance: none;
+  background: rgba(255, 255, 255, 0.10);
+  border: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  font: 600 12px/1 inherit;
+  color: rgba(240, 253, 250, 0.75);
+  cursor: pointer;
+  transition: background 120ms ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.eamx-fab-tip__close:hover {
+  background: rgba(255, 255, 255, 0.22);
+  color: #f0fdfa;
+}
+.eamx-fab-tip__body {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: rgba(240, 253, 250, 0.92);
+}
+/* Tail arrow pointing toward the FAB (bottom-right of viewport). */
+.eamx-fab-tip__arrow {
+  position: absolute;
+  right: 22px;
+  bottom: -7px;
+  width: 14px;
+  height: 14px;
+  background: linear-gradient(135deg, #137e7a 0%, #105971 100%);
+  transform: rotate(45deg);
+  border-bottom-right-radius: 3px;
+  box-shadow: 0 1px 0 0 rgba(45, 212, 191, 0.35) inset;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .eamx-fab-tip { animation: none; }
+  .eamx-fab-tip--leaving { animation: none; opacity: 0; }
+}
