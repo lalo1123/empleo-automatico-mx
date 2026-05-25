@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-24-audit-fixes";
+  const EAMX_LAPIEZA_VERSION = "2026-05-24-scan-over-empty";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -4618,7 +4618,33 @@
     }
     if (cards.length > 100) cards = cards.slice(0, 100);
 
-    // Empty state #2 — no cards at all. Two flavors:
+    // SCAN-IN-PROGRESS GATE: keep the hero loader visible while the
+    // wider-search is gathering pages. This must come BEFORE the
+    // empty-state check because during a scan LaPieza unmounts cards
+    // between pagination ticks — a render mid-tick sees cards.length
+    // === 0 and would otherwise paint the "No detecté vacantes" empty
+    // state OVER the loader (user-reported "disque no hay pero so
+    // se esta buscando").
+    //
+    // Three firing modes:
+    //   A) Scan already running (widerSearchInProgress) → loader
+    //      stays, no re-fire, no innerHTML write.
+    //   B) Not running, no pool yet, but cards >= 5 → fire scan +
+    //      keep loader.
+    //   C) Pool exists → fall through to normal render (skip gate).
+    const scanRunning = !widerSearchPool && widerSearchInProgress;
+    const canStartScan = !widerSearchPool && !widerSearchInProgress && cards.length >= 5 && cards.length < 100;
+    if (scanRunning || canStartScan) {
+      if (bulk) bulk.hidden = true;
+      if (canStartScan) {
+        // Defer slightly so the panel slide-in animation can settle
+        // before the loader starts mutating the page (paginating).
+        setTimeout(() => onMatchesWiderSearch(null), 200);
+      }
+      return;
+    }
+
+    // Empty state #2 — no cards at all (and no scan running). Two flavors:
     //  a) We're already on a listing route (/vacantes, /comunidad/jobs,
     //     etc.) but no cards rendered → probably a transient/empty
     //     filter result. CTA: "Volver a escanear".
@@ -4646,34 +4672,10 @@
       return;
     }
 
-    // SCAN-IN-PROGRESS GATE: while the wider-search loop is gathering
-    // the cumulative pool (or we haven't started one yet for a listing
-    // with 5+ visible cards), KEEP the hero loader visible instead of
-    // flashing page-1 matches followed by an opaque shuffle.
-    //
-    // Two firing modes:
-    //   - First open this session (!pool, !inProgress) → trigger the
-    //     wider-search AND show the loader.
-    //   - Re-open during an in-flight wider-search (!pool, inProgress)
-    //     → DON'T re-fire (would duplicate), but STILL show the
-    //     loader. Fixes user-reported bug "NO SALIO EL DE CARGANDO
-    //     TODAS LAS VACANTES" — closing + reopening the panel mid-
-    //     scan made the matches render immediately because the gate
-    //     bailed on widerSearchInProgress=true.
-    //
-    // When the loop completes it re-calls renderMatchesPanelContent
-    // with widerSearchPool set, the gate falls through, and the
-    // ranked list renders.
-    if (!widerSearchPool && cards.length >= 5 && cards.length < 100) {
-      if (bulk) bulk.hidden = true;
-      // Only start a new wider-search if one isn't already running.
-      if (!widerSearchInProgress) {
-        // Defer slightly so the panel slide-in animation can settle
-        // before the loader starts mutating the page (paginating).
-        setTimeout(() => onMatchesWiderSearch(null), 200);
-      }
-      return;
-    }
+    // (Old SCAN-IN-PROGRESS GATE moved above the empty-state check —
+    // see the scanRunning/canStartScan branch up there. By the time
+    // we reach this point either widerSearchPool is populated OR the
+    // listing is too small/large for a scan, so just continue.)
 
     // Score every card. matchScoreModule is loaded by ensureDiscoveryDeps;
     // if it failed (rare, ad-blocker chains, etc.) we just sort by document
