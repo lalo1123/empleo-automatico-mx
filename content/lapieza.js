@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-24-scan-loader";
+  const EAMX_LAPIEZA_VERSION = "2026-05-24-loader-first";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -4473,6 +4473,30 @@
       return;
     }
 
+    // FIRST-OPEN GATE: when the panel is opening for the first time
+    // this session, we have current-page cards but no widerSearchPool
+    // yet, and there's a paginator with more pages to scan, KEEP the
+    // hero loader visible and trigger wider-search BEFORE rendering
+    // any matches. Otherwise the user sees page-1 matches flash up
+    // for a few seconds followed by an opaque shuffle, with only a
+    // tiny progress strip hinting that more work is happening
+    // (user feedback: "algo como cargando no se, mucho mejor en
+    // grande antes de ver las opciones no?").
+    //
+    // When wider-search completes it re-calls renderMatchesPanelContent
+    // (this function) with widerSearchPool set, which falls through
+    // this branch and renders the full ranked list.
+    if (!widerSearchPool && !widerSearchInProgress && cards.length >= 5 && cards.length < 100) {
+      // Loader is already in the host innerHTML from the panel init;
+      // we just need to NOT overwrite it. Hide the bulk row until
+      // results are ready so the page chrome stays clean.
+      if (bulk) bulk.hidden = true;
+      // Defer slightly so the panel slide-in animation can settle
+      // before the loader starts mutating the page (paginating).
+      setTimeout(() => onMatchesWiderSearch(null), 200);
+      return;
+    }
+
     // Score every card. matchScoreModule is loaded by ensureDiscoveryDeps;
     // if it failed (rare, ad-blocker chains, etc.) we just sort by document
     // order and fall back to the unknown level.
@@ -4691,25 +4715,10 @@
     if (cards.length < 5) attachMatchesScrollHandler();
     else detachMatchesScrollHandler();
 
-    // Auto-fire the wider-search loop on first panel open. The user
-    // explicitly asked for this in live test: "quita el botón y que
-    // siempre busque más amplio automático". We gate on:
-    //   - !widerSearchPool: only fire once per session — pool survives
-    //     close/reopen
-    //   - !widerSearchInProgress: re-entrancy guard
-    //   - >= 5 cards: <5 means the user's filters are too tight and
-    //     LaPieza pagination won't find more
-    //   - < 100 effective: hit the ceiling, no headroom left
-    const effectiveCards = Math.max(
-      cards.length,
-      (widerSearchPool && widerSearchPool.size) || 0
-    );
-    if (!widerSearchPool && !widerSearchInProgress && effectiveCards >= 5 && effectiveCards < 100) {
-      // Fire-and-forget — onMatchesWiderSearch handles its own progress
-      // strip + final re-render. We don't await so the initial Top-25
-      // paints first and the user sees results immediately.
-      setTimeout(() => onMatchesWiderSearch(null), 250);
-    }
+    // (Auto-fire of wider-search moved to the top of this function —
+    // see the FIRST-OPEN GATE branch. By the time we get here the
+    // pool is already populated, or the listing was too small/large
+    // to warrant a scan, so nothing to do.)
 
     console.log(`[EmpleoAutomatico] best matches panel opened: ${topN.length} matches`);
   }
