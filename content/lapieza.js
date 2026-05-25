@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-24-loader-compact";
+  const EAMX_LAPIEZA_VERSION = "2026-05-24-closed-badge-detect";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -2417,34 +2417,33 @@
     }) || null;
   }
 
-  // Detect the "you've already applied to this vacancy" state. LaPieza
-  // shows variants like "Ya te postulaste", "Ya aplicaste", "Ya
-  // postulado a esta vacante", typically as a banner near the form or
-  // replacing the form entirely. Returns true if any visible element
-  // (outside our own UI) contains a matching phrase.
-  //
-  // We're tolerant: any one of the regexes hitting is enough. Live
-  // bug: user reported a chain row stayed on "Generando carta con
-  // IA…" even though they'd already applied — the chain has no way to
-  // know unless we explicitly look.
+  // Detect the "you've already applied to this vacancy" state.
+  // LaPieza variants: "Ya te postulaste", "Ya aplicaste", "Postulación
+  // enviada", short badges like "POSTULADO" / "APLICADO".
   function detectAlreadyAppliedState() {
-    const RX = [
+    const PHRASE_RX = [
       /\bya\s+(?:te\s+)?(?:postulaste|aplicaste|postulado)\b/i,
       /\bpostulaci[oó]n\s+enviada\b/i,
+      /\baplicaci[oó]n\s+enviada\b/i,
       /\bya\s+postulado\s+(?:a|para)\s+esta\b/i,
       /\byou\s+(?:have\s+)?already\s+applied\b/i,
-      /\bapplied\s+on\b/i
+      /\bapplied\s+on\b/i,
+      /\btu\s+postulaci[oó]n\s+(?:fue\s+)?(?:enviada|recibida)\b/i
+    ];
+    const BADGE_RX = [
+      /^(?:\s*[•·*-]?\s*)?(?:POSTULADO|APLICADO|APPLIED|YA\s+POSTULADO)\b/i,
+      /^\s*✓\s*(?:postulaste|aplicaste|postulado)\s*$/i
     ];
     try {
-      // Scan visible elements only — meta tags / hidden divs don't count.
-      const candidates = document.querySelectorAll("p, span, div, h1, h2, h3, h4, strong");
+      const candidates = document.querySelectorAll("p, span, div, h1, h2, h3, h4, strong, em, b, label");
       for (const el of candidates) {
         try {
           if (el.closest(".eamx-fab, .eamx-panel, .eamx-overlay, .eamx-matches-panel, .eamx-toast, .eamx-bulk-progress, [data-eamx]")) continue;
           if (!isVisible(el)) continue;
           const t = (el.textContent || "").trim();
-          if (!t || t.length > 200) continue; // skip giant blobs
-          if (RX.some((rx) => rx.test(t))) return true;
+          if (!t) continue;
+          if (t.length <= 250 && PHRASE_RX.some((rx) => rx.test(t))) return true;
+          if (t.length <= 30 && BADGE_RX.some((rx) => rx.test(t))) return true;
         } catch (_) { /* skip */ }
       }
     } catch (_) {}
@@ -2452,26 +2451,50 @@
   }
 
   // Detect the "this vacancy is closed / no longer available" state.
-  // LaPieza variants: "Vacante cerrada", "no longer available",
-  // "vacante no disponible", "expirada", "ya no recibe postulaciones".
+  // LaPieza variants seen live:
+  //   - "CERRADA" badge (standalone, no "vacante" prefix) — case-
+  //     reported by user
+  //   - "La empresa ha finalizado el proceso de reclutamiento de esta
+  //     vacante" — alongside the CERRADA badge
+  //   - "Vacante cerrada/expirada/no disponible"
+  //   - "Oferta cerrada/expirada"
+  //   - "Ya no recibe postulaciones"
+  //   - "Position closed/expired" / "No longer available/accepting"
   function detectVacancyClosedState() {
-    const RX = [
+    // Phrase regex (allow long text snippets).
+    const PHRASE_RX = [
       /\bvacante\s+(?:cerrada|expirada|no\s+disponible|no\s+activa)\b/i,
-      /\bno\s+(?:est[áa]\s+)?(?:disponible|activa)\b/i,
       /\bya\s+no\s+recibe\s+postulaciones\b/i,
       /\bno\s+longer\s+(?:available|accepting)\b/i,
-      /\b(?:position|job)\s+(?:closed|expired)\b/i,
-      /\boferta\s+(?:cerrada|expirada)\b/i
+      /\b(?:position|job|posting)\s+(?:closed|expired|filled)\b/i,
+      /\boferta\s+(?:cerrada|expirada|no\s+disponible)\b/i,
+      /\b(?:la\s+empresa\s+ha\s+)?finalizado?\s+el\s+proceso\s+de\s+reclutamiento\b/i,
+      /\b(?:proceso\s+de\s+)?reclutamiento\s+(?:cerrado|finalizado)\b/i,
+      /\bya\s+(?:cubrim|llenam)os?\s+(?:esta|la)\s+(?:vacante|posici[oó]n)\b/i
+    ];
+    // Standalone-badge regex — short text that contains only the
+    // closed marker (e.g. a chip/badge with literal "CERRADA"). We
+    // require the badge text to be SHORT (<= 30 chars) to avoid
+    // false positives on description paragraphs that include the
+    // word "cerrada" in a different context.
+    const BADGE_RX = [
+      /^(?:\s*[•·*-]?\s*)?(?:CERRADA|CLOSED|EXPIRADA|EXPIRED|FILLED)\b/i,
+      /^\s*(?:vacante\s+)?(?:cerrada|expirada|inactiva)\s*$/i
     ];
     try {
-      const candidates = document.querySelectorAll("p, span, div, h1, h2, h3, h4, strong");
+      const candidates = document.querySelectorAll("p, span, div, h1, h2, h3, h4, strong, em, b, label");
       for (const el of candidates) {
         try {
           if (el.closest(".eamx-fab, .eamx-panel, .eamx-overlay, .eamx-matches-panel, .eamx-toast, .eamx-bulk-progress, [data-eamx]")) continue;
           if (!isVisible(el)) continue;
           const t = (el.textContent || "").trim();
-          if (!t || t.length > 200) continue;
-          if (RX.some((rx) => rx.test(t))) return true;
+          if (!t) continue;
+          // Long-text phrase match — limit text length to avoid
+          // scanning huge job descriptions.
+          if (t.length <= 250 && PHRASE_RX.some((rx) => rx.test(t))) return true;
+          // Short-badge match — text must be short (most badges are
+          // <= 30 chars).
+          if (t.length <= 30 && BADGE_RX.some((rx) => rx.test(t))) return true;
         } catch (_) {}
       }
     } catch (_) {}
@@ -2605,6 +2628,53 @@
       );
       return;
     }
+
+    // VACANCY-PAGE TERMINAL-STATE DETECTORS: catch "CERRADA" badges
+    // and "ya postulada" banners BEFORE the 3s countdown + Postularme
+    // click. User reported a vacancy with a clear "CERRADA" badge +
+    // "La empresa ha finalizado el proceso de reclutamiento" message
+    // where the chain still tried to apply. Detecting here means we
+    // never even open /apply/ for these.
+    if (detectVacancyClosedState()) {
+      toast("Esta vacante está cerrada — no se puede postular.", "info", { durationMs: 5000 });
+      // Mark this URL as "tried but closed" via the queue so the
+      // matches panel can flag it if the user visits the listing
+      // later. Best-effort.
+      try {
+        const id = idFromUrl(location.href);
+        if (id && queueModule && typeof queueModule.upsertApplied === "function") {
+          // We use upsertApplied with a closed-reason so the badge
+          // shows "✓" but the reasons indicate it was closed, not
+          // actually submitted.
+          // NB: we DON'T mark as applied here — closed != applied.
+          // Just leave it; future runs will detect closed again.
+        }
+      } catch (_) {}
+      return;
+    }
+    if (detectAlreadyAppliedState()) {
+      toast("Ya postulaste a esta vacante antes.", "info", { durationMs: 5000 });
+      // Persist to local queue so the matches panel + bulk filter
+      // know about this on subsequent runs.
+      try {
+        const id = idFromUrl(location.href);
+        if (id && queueModule && typeof queueModule.upsertApplied === "function") {
+          await queueModule.upsertApplied({
+            id,
+            source: SOURCE,
+            url: location.href,
+            title: (lastJob && lastJob.title) || "",
+            company: (lastJob && lastJob.company) || "",
+            location: (lastJob && lastJob.location) || "",
+            savedAt: Date.now(),
+            matchScore: 0,
+            reasons: ["Detectada como ya postulada desde /vacante/"]
+          });
+        }
+      } catch (_) {}
+      return;
+    }
+
     quickApplyAborted = false;
     quickApplyEscHandler = (ev) => {
       if (ev.key === "Escape" || ev.key === "Esc") {
@@ -8066,29 +8136,34 @@
       const allText = (card.innerText || card.textContent || "").trim();
       if (!allText) return status;
 
-      // Applied markers — short phrases that should NEVER appear in
-      // the job description naturally. We bound length so a job
-      // titled "Lead Postulaciones" doesn't false-positive.
+      // Applied markers
       const APPLIED_RX = [
         /\bya\s+(?:te\s+)?(?:postulaste|aplicaste)\b/i,
         /\bya\s+postulado\b/i,
         /\bpostulaci[oó]n\s+enviada\b/i,
         /\baplicaci[oó]n\s+enviada\b/i,
-        /\bapplied\b\s+(?:on|·|\d{1,2})/i, // "Applied on Jun 1" / "Applied · 2 days"
+        /\bapplied\b\s+(?:on|·|\d{1,2})/i,
         /\bya\s+aplicaste\s+(?:a|para)\s+esta\b/i
       ];
-      // Closed/expired markers
+      // Closed/expired markers — includes the standalone "CERRADA"
+      // badge that LaPieza shows on closed vacancy cards. We detect
+      // it by surrounding context: a word-boundary CERRADA / CLOSED
+      // anywhere in the card text counts as a closed signal.
       const CLOSED_RX = [
         /\bvacante\s+(?:cerrada|expirada|no\s+disponible|no\s+activa)\b/i,
-        /\boferta\s+(?:cerrada|expirada)\b/i,
+        /\boferta\s+(?:cerrada|expirada|no\s+disponible)\b/i,
         /\bya\s+no\s+recibe\s+postulaciones\b/i,
-        /\b(?:position|job|posting)\s+(?:closed|expired)\b/i,
-        /\bno\s+longer\s+(?:available|accepting)\b/i
+        /\b(?:position|job|posting)\s+(?:closed|expired|filled)\b/i,
+        /\bno\s+longer\s+(?:available|accepting)\b/i,
+        /\b(?:la\s+empresa\s+ha\s+)?finalizado?\s+el\s+proceso\s+de\s+reclutamiento\b/i,
+        /\b(?:proceso\s+de\s+)?reclutamiento\s+(?:cerrado|finalizado)\b/i,
+        // Standalone "CERRADA" / "CLOSED" — only matches when it
+        // stands as its own word (badge) and is uppercased / title-
+        // cased like a real badge would be. Lowercase "cerrada" in
+        // free-flow text doesn't count to avoid false positives.
+        /\b(?:CERRADA|CLOSED|EXPIRADA|EXPIRED|FILLED)\b/
       ];
 
-      // Trim to first 600 chars — card text is usually short, but
-      // sometimes LaPieza embeds long descriptions. Plenty for our
-      // markers, fast to scan.
       const snippet = allText.slice(0, 600);
       for (const rx of APPLIED_RX) {
         if (rx.test(snippet)) { status.applied = true; break; }
