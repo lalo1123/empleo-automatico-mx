@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-25-onboarding";
+  const EAMX_LAPIEZA_VERSION = "2026-05-25-history-sync";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -1821,26 +1821,48 @@
       // shows "✓ Postulación enviada" with a green check instead of
       // staying stuck on "✓ Listo — dale Finalizar".
       try { reportBulkStatus("submitted"); } catch (_) {}
+      const job = lastJob || {};
+      const url = location.href;
+      const id = idFromUrl(url);
+      // 1) Local queue (for the matches panel + bulk filter).
       try {
-        if (!queueModule || typeof queueModule.upsertApplied !== "function") return;
-        const job = lastJob || {};
-        const url = location.href;
-        const id = idFromUrl(url);
-        if (!id) return;
-        await queueModule.upsertApplied({
-          id,
-          source: SOURCE,
-          url,
-          title: job.title || "",
-          company: job.company || "",
-          location: job.location || "",
-          savedAt: Date.now(),
-          matchScore: 0,
-          reasons: ["Postulada desde la extensión"]
-        });
-        console.log("[EmpleoAutomatico] vacancy marked applied:", id);
+        if (queueModule && typeof queueModule.upsertApplied === "function" && id) {
+          await queueModule.upsertApplied({
+            id,
+            source: SOURCE,
+            url,
+            title: job.title || "",
+            company: job.company || "",
+            location: job.location || "",
+            savedAt: Date.now(),
+            matchScore: 0,
+            reasons: ["Postulada desde la extensión"]
+          });
+          console.log("[EmpleoAutomatico] vacancy marked applied:", id);
+        }
       } catch (err) {
-        console.warn("[EmpleoAutomatico] applied-tracker failed", err);
+        console.warn("[EmpleoAutomatico] applied-tracker (local) failed", err);
+      }
+      // 2) Server-side sync for /account/historial. Best-effort —
+      //    if it fails we already have the row in the local queue.
+      if (id) {
+        try {
+          await sendMsg({
+            type: MSG.TRACK_APPLICATION,
+            source: SOURCE,
+            vacancyId: id,
+            url,
+            title: job.title || "",
+            company: job.company || "",
+            location: job.location || "",
+            matchScore: 0,
+            status: "applied",
+            sourceTs: Date.now(),
+            reasons: ["Postulada desde la extensión"]
+          });
+        } catch (err) {
+          console.warn("[EmpleoAutomatico] applied-tracker (backend) failed", err);
+        }
       }
     };
     // Capture phase so we run BEFORE LaPieza's handler navigates away

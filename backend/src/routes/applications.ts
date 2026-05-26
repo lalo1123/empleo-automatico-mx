@@ -20,6 +20,15 @@ import {
 } from "../lib/gemini.js";
 import { assertUnderLimit, incrementUsage } from "../lib/usage.js";
 import { getPlan } from "../lib/plans.js";
+import {
+  applicationCountsBySource,
+  countApplications,
+  insertApplication,
+  isValidApplicationSource,
+  isValidApplicationStatus,
+  listApplications,
+  rowToApplication
+} from "../lib/db.js";
 
 // Zod schemas for inbound bodies. We intentionally keep them loose on
 // optional fields (Gemini handles missing data) but strict on required keys.
@@ -528,6 +537,121 @@ applicationsRoutes.post(
     }
   }
 );
+
+// ---------------------------------------------------------------------------
+// HISTORY ENDPOINTS — synced from the Chrome extension when the user
+// finalizes a postulación. The web app reads them back via /account/historial.
+// No quota consumption — these are storage/lookup, not AI calls.
+// ---------------------------------------------------------------------------
+
+const trackSchema = z.object({
+  source: z.enum(["lapieza", "occ", "computrabajo", "bumeran", "indeed", "linkedin"]),
+  vacancyId: z.string().min(1).max(200),
+  url: z.string().max(2048).optional().default(""),
+  title: z.string().max(300).optional().default(""),
+  company: z.string().max(200).optional().default(""),
+  location: z.string().max(200).optional().default(""),
+  matchScore: z.number().int().min(0).max(100).optional().default(0),
+  status: z.enum(["applied", "viewed", "rejected", "hired"]).optional().default("applied"),
+  sourceTs: z.number().int().optional().nullable(),
+  reasons: z.array(z.string().max(200)).max(20).optional().default([])
+});
+
+applicationsRoutes.post("/track", authRequired(), async (c) => {
+  try {
+    const body = await c.req.json().catch(() => null);
+    const parsed = trackSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new HttpError(
+        400,
+        "VALIDATION_ERROR",
+        parsed.error.issues[0]?.message ?? "Datos de postulación inválidos"
+      );
+    }
+    const user = c.get("user");
+    const row = insertApplication({ userId: user.id, ...parsed.data });
+    return c.json({ ok: true, application: rowToApplication(row) });
+  } catch (err) {
+    return sendError(c, err);
+  }
+});
+
+// List the caller's applications. Filters: source, status, fromTs, toTs.
+// Pagination: page=N (default 1), pageSize=N (default 50, max 200).
+applicationsRoutes.get("/history", authRequired(), async (c) => {
+  try {
+    const user = c.get("user");
+    const q = c.req.query();
+
+    const source = q.source && isValidApplicationSource(q.source) ? q.source : undefined;
+    const status = q.status && isValidApplicationStatus(q.status) ? q.status : undefined;
+    const fromTs = q.fromTs ? Number(q.fromTs) : undefined;
+    const toTs = q.toTs ? Number(q.toTs) : undefined;
+    const page = Math.max(1, Number(q.page) || 1);
+    const pageSize = Math.min(200, Math.max(1, Number(q.pageSize) || 50));
+
+    const filters = {
+      userId: user.id,
+      source,
+      status,
+      fromTs: Number.isFinite(fromTs) ? fromTs : undefined,
+      toTs: Number.isFinite(toTs) ? toTs : undefined
+    };
+    const total = countApplications(filters);
+    const rows = listApplications({
+      ...filters,
+      limit: pageSize,
+      offset: (page - 1) * pageSize
+    });
+    return c.json({
+      ok: true,
+      page,
+      pageSize,
+      total,
+      applications: rows.map(rowToApplication)
+    });
+  } catch (err) {
+    return sendError(c, err);
+  }
+});
+
+// Aggregated stats — used by the dashboard and the history page header.
+applicationsRoutes.get("/stats", authRequired(), async (c) => {
+  try {
+    const user = c.get("user");
+    const now = Math.floor(Date.now() / 1000);
+    const startOfMonth = (() => {
+      const d = new Date();
+      return Math.floor(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) / 1000);
+    })();
+    const startOfWeek = (() => {
+      const d = new Date();
+      const day = (d.getUTCDay() + 6) % 7; // Monday = 0
+      const monday = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - day));
+      return Math.floor(monday.getTime() / 1000);
+    })();
+    const sevenDaysAgo = now - 7 * 24 * 60 * 60;
+
+    const totalAll = countApplications({ userId: user.id });
+    const totalMonth = countApplications({ userId: user.id, fromTs: startOfMonth });
+    const totalWeek = countApplications({ userId: user.id, fromTs: startOfWeek });
+    const total7d = countApplications({ userId: user.id, fromTs: sevenDaysAgo });
+    const bySource = applicationCountsBySource(user.id);
+
+    return c.json({
+      ok: true,
+      stats: {
+        totalAll,
+        totalMonth,
+        totalWeek,
+        total7d,
+        bySource
+      }
+    });
+  } catch (err) {
+    return sendError(c, err);
+  }
+});
 
 // parse-cv is intentionally free (one-time per user in the onboarding flow).
 applicationsRoutes.post("/parse-cv", authRequired(), async (c) => {

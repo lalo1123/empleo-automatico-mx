@@ -9,6 +9,10 @@ import { mkdirSync } from "node:fs";
 import { loadEnv, isAdminEmail } from "./env.js";
 import type { AppEnv } from "./env.js";
 import type {
+  Application,
+  ApplicationRow,
+  ApplicationSource,
+  ApplicationStatus,
   BillingInterval,
   EmailVerificationRow,
   PlanId,
@@ -522,4 +526,173 @@ export function setDailyUsageCount(userId: string, date: string, count: number):
     )
     .run(userId, date, count);
   return getDailyUsageCount(userId, date);
+}
+
+// APPLICATIONS HISTORY -------------------------------------------------------
+// Synced from the Chrome extension when the user finalizes a postulación
+// (extension calls TRACK_APPLICATION → service worker → backend
+// trackApplication → here). The web app reads them back via /account/historial.
+
+const VALID_APPLICATION_SOURCES: ApplicationSource[] =
+  ["lapieza", "occ", "computrabajo", "bumeran", "indeed", "linkedin"];
+const VALID_APPLICATION_STATUS: ApplicationStatus[] =
+  ["applied", "viewed", "rejected", "hired"];
+
+export function isValidApplicationSource(s: unknown): s is ApplicationSource {
+  return typeof s === "string" && (VALID_APPLICATION_SOURCES as string[]).includes(s);
+}
+export function isValidApplicationStatus(s: unknown): s is ApplicationStatus {
+  return typeof s === "string" && (VALID_APPLICATION_STATUS as string[]).includes(s);
+}
+
+/** Marshal a row to the API shape. */
+export function rowToApplication(row: ApplicationRow): Application {
+  let reasons: string[] = [];
+  try {
+    const parsed = JSON.parse(row.reasons_json || "[]");
+    if (Array.isArray(parsed)) reasons = parsed.filter((r) => typeof r === "string");
+  } catch (_) { /* keep [] */ }
+  return {
+    id: row.id,
+    source: row.source,
+    vacancyId: row.vacancy_id,
+    url: row.url,
+    title: row.title,
+    company: row.company,
+    location: row.location,
+    matchScore: row.match_score,
+    status: row.status,
+    appliedAt: row.applied_at,
+    sourceTs: row.source_ts,
+    reasons
+  };
+}
+
+/**
+ * Insert a new application row. ON CONFLICT (user_id, source, vacancy_id)
+ * DO NOTHING — if the extension fires TRACK_APPLICATION twice for the same
+ * vacancy (e.g. user re-opened the chain manually after auto-finalize), the
+ * oldest insert wins and the timeline stays clean.
+ *
+ * Returns the existing or newly-inserted row.
+ */
+export function insertApplication(input: {
+  userId: string;
+  source: ApplicationSource;
+  vacancyId: string;
+  url?: string;
+  title?: string;
+  company?: string;
+  location?: string;
+  matchScore?: number;
+  status?: ApplicationStatus;
+  sourceTs?: number | null;
+  reasons?: string[];
+}): ApplicationRow {
+  const nowSec = Math.floor(Date.now() / 1000);
+  const reasonsJson = JSON.stringify(Array.isArray(input.reasons) ? input.reasons.slice(0, 20) : []);
+  getDb()
+    .prepare(
+      `INSERT INTO applications
+        (user_id, source, vacancy_id, url, title, company, location, match_score, status, applied_at, source_ts, reasons_json)
+       VALUES
+        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(user_id, source, vacancy_id) DO NOTHING`
+    )
+    .run(
+      input.userId,
+      input.source,
+      input.vacancyId,
+      input.url ?? "",
+      input.title ?? "",
+      input.company ?? "",
+      input.location ?? "",
+      Math.max(0, Math.min(100, Number(input.matchScore ?? 0) | 0)),
+      input.status ?? "applied",
+      nowSec,
+      input.sourceTs ?? null,
+      reasonsJson
+    );
+  const row = getDb()
+    .prepare<[string, string, string], ApplicationRow>(
+      `SELECT * FROM applications
+       WHERE user_id = ? AND source = ? AND vacancy_id = ?
+       LIMIT 1`
+    )
+    .get(input.userId, input.source, input.vacancyId);
+  if (!row) {
+    // Should be unreachable — insert + ON CONFLICT then select can't race
+    // because better-sqlite3 is sync. Defensive throw so a logic error is
+    // surfaced loudly instead of silently returning a fake row.
+    throw new Error("insertApplication: row vanished after upsert");
+  }
+  return row;
+}
+
+/**
+ * List a user's applications, newest first, with optional filters.
+ * Pagination is offset-based (simple, since result sets stay small for
+ * individual users — months not years).
+ */
+export function listApplications(args: {
+  userId: string;
+  source?: ApplicationSource;
+  status?: ApplicationStatus;
+  /** Inclusive lower bound. Unix seconds. */
+  fromTs?: number;
+  /** Exclusive upper bound. Unix seconds. */
+  toTs?: number;
+  limit?: number;
+  offset?: number;
+}): ApplicationRow[] {
+  const limit = Math.min(200, Math.max(1, args.limit ?? 50));
+  const offset = Math.max(0, args.offset ?? 0);
+  const where: string[] = ["user_id = ?"];
+  const params: (string | number)[] = [args.userId];
+  if (args.source) { where.push("source = ?"); params.push(args.source); }
+  if (args.status) { where.push("status = ?"); params.push(args.status); }
+  if (Number.isFinite(args.fromTs)) { where.push("applied_at >= ?"); params.push(args.fromTs!); }
+  if (Number.isFinite(args.toTs))   { where.push("applied_at <  ?"); params.push(args.toTs!); }
+  params.push(limit, offset);
+  const sql = `
+    SELECT * FROM applications
+    WHERE ${where.join(" AND ")}
+    ORDER BY applied_at DESC, id DESC
+    LIMIT ? OFFSET ?
+  `;
+  return getDb().prepare(sql).all(...params) as ApplicationRow[];
+}
+
+export function countApplications(args: {
+  userId: string;
+  source?: ApplicationSource;
+  status?: ApplicationStatus;
+  fromTs?: number;
+  toTs?: number;
+}): number {
+  const where: string[] = ["user_id = ?"];
+  const params: (string | number)[] = [args.userId];
+  if (args.source) { where.push("source = ?"); params.push(args.source); }
+  if (args.status) { where.push("status = ?"); params.push(args.status); }
+  if (Number.isFinite(args.fromTs)) { where.push("applied_at >= ?"); params.push(args.fromTs!); }
+  if (Number.isFinite(args.toTs))   { where.push("applied_at <  ?"); params.push(args.toTs!); }
+  const sql = `SELECT COUNT(*) AS n FROM applications WHERE ${where.join(" AND ")}`;
+  const row = getDb().prepare(sql).get(...params) as { n: number } | undefined;
+  return row?.n ?? 0;
+}
+
+/** Per-source counts for the user, used by dashboard stats. */
+export function applicationCountsBySource(userId: string): Record<ApplicationSource, number> {
+  const out: Record<ApplicationSource, number> = {
+    lapieza: 0, occ: 0, computrabajo: 0, bumeran: 0, indeed: 0, linkedin: 0
+  };
+  const rows = getDb()
+    .prepare<[string], { source: ApplicationSource; n: number }>(
+      `SELECT source, COUNT(*) AS n FROM applications WHERE user_id = ? GROUP BY source`
+    )
+    .all(userId);
+  for (const r of rows) {
+    if (isValidApplicationSource(r.source)) out[r.source] = r.n;
+  }
+  return out;
 }

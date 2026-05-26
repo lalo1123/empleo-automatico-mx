@@ -84,6 +84,43 @@ export interface UsageRow {
   count: number;
 }
 
+export type ApplicationSource =
+  | "lapieza" | "occ" | "computrabajo" | "bumeran" | "indeed" | "linkedin";
+
+export type ApplicationStatus = "applied" | "viewed" | "rejected" | "hired";
+
+export interface ApplicationRow {
+  id: number;
+  user_id: string;
+  source: ApplicationSource;
+  vacancy_id: string;
+  url: string;
+  title: string;
+  company: string;
+  location: string;
+  match_score: number;
+  status: ApplicationStatus;
+  applied_at: number;       // unix seconds, server-stamped on insert
+  source_ts: number | null; // ms timestamp the extension reported
+  reasons_json: string;     // JSON array of strings
+}
+
+/** Public/JSON shape — reasons_json is parsed, snake_case → camelCase. */
+export interface Application {
+  id: number;
+  source: ApplicationSource;
+  vacancyId: string;
+  url: string;
+  title: string;
+  company: string;
+  location: string;
+  matchScore: number;
+  status: ApplicationStatus;
+  appliedAt: number;        // unix seconds
+  sourceTs: number | null;
+  reasons: string[];
+}
+
 // Profile shape (mirrors lib/schemas.js JSDoc).
 
 export interface PersonalInfo {

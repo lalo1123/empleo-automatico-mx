@@ -312,6 +312,13 @@ export default async function AccountPage({ searchParams }: PageProps) {
             </dl>
 
             <div className="mt-6 flex flex-wrap gap-3">
+              <Link
+                href="/account/historial"
+                className="inline-flex items-center justify-center gap-2 rounded-[12px] border border-[color:var(--color-border)] bg-white px-5 py-2.5 text-sm font-semibold text-[color:var(--color-ink)] hover:border-[color:var(--color-brand-400)]"
+              >
+                <span aria-hidden>📋</span>
+                Ver historial
+              </Link>
               {isFree ? (
                 <Link
                   href="/account/billing"

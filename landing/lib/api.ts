@@ -210,3 +210,65 @@ export function cancelSubscription(token: string) {
     token,
   });
 }
+
+// Application history (synced from the Chrome extension on Finalizar).
+
+export type ApplicationSource =
+  | "lapieza" | "occ" | "computrabajo" | "bumeran" | "indeed" | "linkedin";
+export type ApplicationStatus = "applied" | "viewed" | "rejected" | "hired";
+
+export interface Application {
+  id: number;
+  source: ApplicationSource;
+  vacancyId: string;
+  url: string;
+  title: string;
+  company: string;
+  location: string;
+  matchScore: number;
+  status: ApplicationStatus;
+  appliedAt: number;
+  sourceTs: number | null;
+  reasons: string[];
+}
+
+export interface ApplicationsHistoryResponse {
+  page: number;
+  pageSize: number;
+  total: number;
+  applications: Application[];
+}
+
+export interface ApplicationsStats {
+  totalAll: number;
+  totalMonth: number;
+  totalWeek: number;
+  total7d: number;
+  bySource: Record<ApplicationSource, number>;
+}
+
+export function getApplicationsHistory(
+  token: string,
+  opts: {
+    source?: ApplicationSource;
+    status?: ApplicationStatus;
+    page?: number;
+    pageSize?: number;
+    fromTs?: number;
+    toTs?: number;
+  } = {}
+) {
+  const qs = new URLSearchParams();
+  if (opts.source) qs.set("source", opts.source);
+  if (opts.status) qs.set("status", opts.status);
+  if (opts.page) qs.set("page", String(opts.page));
+  if (opts.pageSize) qs.set("pageSize", String(opts.pageSize));
+  if (opts.fromTs != null) qs.set("fromTs", String(opts.fromTs));
+  if (opts.toTs != null) qs.set("toTs", String(opts.toTs));
+  const suffix = qs.toString() ? `?${qs}` : "";
+  return apiRequest<ApplicationsHistoryResponse>(`/applications/history${suffix}`, { token });
+}
+
+export function getApplicationsStats(token: string) {
+  return apiRequest<{ stats: ApplicationsStats }>("/applications/stats", { token });
+}

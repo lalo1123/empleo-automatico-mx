@@ -758,6 +758,41 @@ async function handleOpenWelcome() {
 // enforces the allowlist via ADMIN_USER_EMAILS — we surface its FORBIDDEN
 // response unchanged. On success we refresh the cached user so the rest of
 // the UI reflects the new plan immediately (no /account roundtrip needed).
+// Track a finalized postulación so the web /account/historial can show it.
+// Called by content scripts (lapieza.js, occ.js, etc.) from the
+// attachFinalizeApplyTracker click handler. Best-effort — if the backend
+// is down or the call fails, the local queueModule.upsertApplied
+// already happened so the matches panel still shows the badge. We log
+// the failure for observability but never surface it to the user.
+async function handleTrackApplication(msg) {
+  const allowedSources = ["lapieza", "occ", "computrabajo", "bumeran", "indeed", "linkedin"];
+  if (!msg || !msg.source || !allowedSources.includes(msg.source)) {
+    return { ok: false, error: ERROR_CODES.INVALID_INPUT, message: "Source inválido" };
+  }
+  if (!msg.vacancyId || typeof msg.vacancyId !== "string") {
+    return { ok: false, error: ERROR_CODES.INVALID_INPUT, message: "vacancyId requerido" };
+  }
+  try {
+    const data = await backend.trackApplication({
+      source: msg.source,
+      vacancyId: msg.vacancyId,
+      url: msg.url || "",
+      title: msg.title || "",
+      company: msg.company || "",
+      location: msg.location || "",
+      matchScore: Number(msg.matchScore) || 0,
+      status: msg.status || "applied",
+      sourceTs: Number.isFinite(msg.sourceTs) ? msg.sourceTs : null,
+      reasons: Array.isArray(msg.reasons) ? msg.reasons.slice(0, 20) : []
+    });
+    return { ok: true, application: (data && data.application) || null };
+  } catch (e) {
+    // Non-fatal — log only. The local queue already has the row.
+    console.warn("[track-application] failed", e && e.message);
+    return failFromError(e);
+  }
+}
+
 async function handleAdminSetPlan(msg) {
   const plan = msg && msg.plan;
   if (plan !== "free" && plan !== "pro" && plan !== "premium") {
@@ -842,6 +877,8 @@ onMessage(async (msg) => {
       return handleOpenBackgroundTab(msg);
     case MESSAGE_TYPES.FOCUS_TAB:
       return handleFocusTab(msg);
+    case MESSAGE_TYPES.TRACK_APPLICATION:
+      return handleTrackApplication(msg);
     case MESSAGE_TYPES.ADMIN_SET_PLAN:
       return handleAdminSetPlan(msg);
     case MESSAGE_TYPES.ADMIN_SET_USAGE:
