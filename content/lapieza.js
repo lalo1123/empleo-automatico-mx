@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-25-quiz-detect-v2";
+  const EAMX_LAPIEZA_VERSION = "2026-05-25-daily-caps";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -5267,7 +5267,29 @@
         });
         savedN = Number(stored[`eamx:bulk-n:${userPlan}`]) || null;
       } catch (_) {}
-      bulkEl.innerHTML = renderBulkSection({ plan: userPlan, remaining: userRemaining, savedN });
+
+      // Per-portal daily cap (green-zone threshold) + how many of those
+      // we already used today. The bulk section uses both to: (1) cap
+      // the chip selector to (dailyCap - dailyCount), (2) render the
+      // safety pill showing the counter. Defends the user against
+      // portal bot-detection bans even if they manually try to push
+      // past the safe limit.
+      const dailyCap = AUTO_PORTAL_CAPS[SOURCE] ?? 20;
+      let dailyCount = 0;
+      try {
+        await ensureDiscoveryDeps();
+        if (queueModule && typeof queueModule.countAppliedTodayForSource === "function") {
+          dailyCount = await queueModule.countAppliedTodayForSource(SOURCE);
+        }
+      } catch (_) {}
+
+      bulkEl.innerHTML = renderBulkSection({
+        plan: userPlan,
+        remaining: userRemaining,
+        savedN,
+        dailyCount,
+        dailyCap
+      });
     }
 
     // Resolve initial marked state for each row asynchronously. We render
@@ -5314,7 +5336,7 @@
   // available chips at the user's remaining monthly cuota so they
   // can't pick more than they have credit for. The last-used N is
   // persisted to chrome.storage.local keyed per-plan.
-  function renderBulkSection({ plan = "free", remaining = null, savedN = null } = {}) {
+  function renderBulkSection({ plan = "free", remaining = null, savedN = null, dailyCount = 0, dailyCap = 20 } = {}) {
     // Per-plan chip options. Tuned so the user always sees a small,
     // a medium, and a "max for this plan" choice — and so Free never
     // sees an unattainable "10" chip.
@@ -5334,6 +5356,17 @@
       if (chips.length === 0 && remaining > 0) chips = [Math.min(remaining, 3)];
       if (chips.length === 0) chips = [chips[0] ?? 3];
     }
+    // ALSO cap by the per-portal daily green-zone threshold. This is
+    // the anti-bot-detection floor — LinkedIn 15/day, OCC 20/day, etc.
+    // Calibrated against published green-zone thresholds; competitors
+    // like Breeze Apply / LazyApply skip this gate and earn bans.
+    const dailyRemaining = Math.max(0, dailyCap - dailyCount);
+    if (Number.isFinite(dailyRemaining)) {
+      chips = chips.filter((n) => n <= dailyRemaining);
+      if (chips.length === 0 && dailyRemaining > 0) chips = [dailyRemaining];
+      if (chips.length === 0) chips = [1]; // defensive, the gate up the chain handles "0 left"
+    }
+
     // Pick the initial active N: savedN if it's still in the chip set,
     // else the middle option, else the first.
     const defaultIdx = Math.min(1, chips.length - 1);
@@ -5352,7 +5385,35 @@
     // postulaciones IA al mes".
     const planNoun = plan === "free" ? "Plan Free" : plan === "pro" ? "Plan Pro" : "Plan Premium";
 
+    // Daily safety pill — shows the per-portal counter + tooltip
+    // explaining why the cap exists. User explicit ask: "y del riesgo
+    // a que bloquen o eso no?". We surface the protection so they
+    // know we're being careful with their account.
+    const dailyPct = dailyCap > 0 ? Math.min(100, Math.round((dailyCount / dailyCap) * 100)) : 0;
+    const dailyTone = dailyCount >= dailyCap
+      ? "eamx-bulk__safety--max"
+      : dailyCount >= Math.floor(dailyCap * 0.75)
+        ? "eamx-bulk__safety--warn"
+        : "eamx-bulk__safety--ok";
+    const dailyMsg = dailyCount >= dailyCap
+      ? `Llegaste al cap diario seguro (${dailyCap}). Continúa mañana para no arriesgar tu cuenta.`
+      : `Cap diario para no disparar detección de bot. LinkedIn e Indeed: 15/día · LaPieza, OCC, Computrabajo, Bumeran: 20/día. Total entre portales: 110/día.`;
+    const safetyPill = `
+      <div class="eamx-bulk__safety ${dailyTone}" title="${escapeHtml(dailyMsg)}">
+        <div class="eamx-bulk__safety-row">
+          <span class="eamx-bulk__safety-icon" aria-hidden="true">🛡️</span>
+          <span class="eamx-bulk__safety-label">Hoy en este portal</span>
+          <span class="eamx-bulk__safety-count">${dailyCount} / ${dailyCap}</span>
+        </div>
+        <div class="eamx-bulk__safety-bar" aria-hidden="true">
+          <div class="eamx-bulk__safety-fill" style="width: ${dailyPct}%"></div>
+        </div>
+        <p class="eamx-bulk__safety-hint">Cap diario seguro para no arriesgar tu cuenta.</p>
+      </div>
+    `;
+
     return `
+      ${safetyPill}
       <div class="eamx-bulk__selector" role="group" aria-label="Cantidad a postular">
         <span class="eamx-bulk__selector-label">Cantidad</span>
         <div class="eamx-bulk__chips">${chipBtns}</div>
@@ -5884,7 +5945,42 @@
       // bypasses that (e.g. manual injection into matchesCurrentTopN).
       .filter((m) => !m.closedFromCard);
     const skipped = (matchesCurrentTopN || []).length - candidates.length;
-    const topN = candidates.slice(0, N);
+
+    // DAILY CAP GATE — green-zone protection. Per-portal limits:
+    //   LinkedIn / Indeed: 15/day
+    //   LaPieza / OCC / Computrabajo / Bumeran: 20/day
+    // If the user already burned their daily allowance, refuse the
+    // bulk OUTRIGHT with a friendly toast pointing to "ven mañana".
+    // If they have some left but less than the requested N, clamp to
+    // what's safe and warn. User explicit ask: "y del riesgo a que
+    // bloquen o eso no?" — this IS the protection.
+    const dailyCap = AUTO_PORTAL_CAPS[SOURCE] ?? 20;
+    let dailyCount = 0;
+    try {
+      if (queueModule && typeof queueModule.countAppliedTodayForSource === "function") {
+        dailyCount = await queueModule.countAppliedTodayForSource(SOURCE);
+      }
+    } catch (_) {}
+    const dailyRemaining = Math.max(0, dailyCap - dailyCount);
+    if (dailyRemaining === 0) {
+      toast(
+        `Llegaste al cap diario seguro en este portal (${dailyCap}). Vuelve mañana para no arriesgar tu cuenta.`,
+        "info",
+        { durationMs: 9000 }
+      );
+      return;
+    }
+
+    let topN = candidates.slice(0, N);
+    if (topN.length > dailyRemaining) {
+      const trimmed = topN.length - dailyRemaining;
+      topN = topN.slice(0, dailyRemaining);
+      toast(
+        `Limitando a ${dailyRemaining} para no exceder el cap diario seguro de ${dailyCap}. ${trimmed} vacante${trimmed > 1 ? "s" : ""} se quedan para mañana.`,
+        "info",
+        { durationMs: 7000 }
+      );
+    }
 
     if (!topN.length) {
       const msg = skipped > 0

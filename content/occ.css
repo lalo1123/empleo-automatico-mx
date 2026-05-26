@@ -3215,6 +3215,76 @@
   color: #94a3b8;
 }
 
+/* Safety pill — shows "Hoy en este portal: X/Y" above the bulk
+   selector. Caps are anti-bot-detection thresholds (LinkedIn 15/day,
+   LaPieza 20/day, etc.). Color shifts ok → warn → max as the user
+   approaches the daily limit. */
+.eamx-bulk__safety {
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  cursor: help;
+}
+.eamx-bulk__safety-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.eamx-bulk__safety-icon { font-size: 14px; line-height: 1; }
+.eamx-bulk__safety-label {
+  flex: 1 1 auto;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(226, 232, 240, 0.55);
+}
+.eamx-bulk__safety-count {
+  font: 700 13px inherit;
+  font-variant-numeric: tabular-nums;
+  color: #e2e8f0;
+}
+.eamx-bulk__safety-bar {
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+.eamx-bulk__safety-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 320ms ease, background 200ms ease;
+}
+.eamx-bulk__safety-hint {
+  margin: 6px 0 0;
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: rgba(226, 232, 240, 0.40);
+}
+.eamx-bulk__safety--ok .eamx-bulk__safety-fill {
+  background: linear-gradient(90deg, #2dd4bf 0%, #14b8a6 100%);
+}
+.eamx-bulk__safety--warn { border-color: rgba(251, 191, 36, 0.30); }
+.eamx-bulk__safety--warn .eamx-bulk__safety-count { color: #fcd34d; }
+.eamx-bulk__safety--warn .eamx-bulk__safety-fill {
+  background: linear-gradient(90deg, #fbbf24 0%, #f59e0b 100%);
+}
+.eamx-bulk__safety--max {
+  border-color: rgba(239, 68, 68, 0.40);
+  background: rgba(127, 29, 29, 0.18);
+}
+.eamx-bulk__safety--max .eamx-bulk__safety-count { color: #fca5a5; }
+.eamx-bulk__safety--max .eamx-bulk__safety-fill {
+  background: linear-gradient(90deg, #f87171 0%, #dc2626 100%);
+}
+.eamx-bulk__safety--max .eamx-bulk__safety-hint {
+  color: rgba(252, 165, 165, 0.78);
+  font-weight: 500;
+}
+
 /* Chip selector — "Cantidad: [1] [2] [3]" row above the bulk buttons.
    Plan-aware: Free shows 1/2/3, Pro 3/5/10, Premium 5/10/15/25. */
 .eamx-bulk__selector {
