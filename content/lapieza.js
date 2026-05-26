@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-26-audit-fixes-2";
+  const EAMX_LAPIEZA_VERSION = "2026-05-26-deep-audit";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -1417,6 +1417,13 @@
   async function chainApplyStepsToFinalizeInner() {
     console.log("[EmpleoAutomatico] chain inner: starting", { isApplyPage: isApplyPage(), url: location.href.split("?")[0] });
     quickApplyAborted = false;
+    // RESET stateful flags from any previous chain run on this same
+    // URL. watchUrlChanges resets these on SPA navigation but a manual
+    // history back→forward to the same /apply/<uuid> doesn't change
+    // location.href, so the previous run's cvState="success" /
+    // questionsState="success" would suppress fresh fetches.
+    cvState = "idle"; cvHtml = ""; cvSummary = ""; cvError = "";
+    detectedQuestions = []; questionAnswers = []; questionsState = "idle"; questionsError = "";
     reportBulkStatus("starting");
 
     // Install the Esc kill switch FIRST so the user can cancel during
@@ -5403,9 +5410,10 @@
     `).join("");
 
     // The plan label shown next to the chips. Helps the user
-    // understand WHY Free only shows 1/2/3 — "Plan Free permite hasta 3
-    // postulaciones IA al mes".
-    const planNoun = plan === "free" ? "Plan Free" : plan === "pro" ? "Plan Pro" : "Plan Premium";
+    // understand WHY Free only shows 1/2/3 — "Plan Gratis permite hasta
+    // 3 postulaciones IA al mes". Use the Spanish label (matches the
+    // canonical PLAN_LABELS in lib/schemas.js — "Plan Gratis").
+    const planNoun = plan === "free" ? "Plan Gratis" : plan === "pro" ? "Plan Pro" : "Plan Premium";
 
     // Daily safety pill — shows the per-portal counter + tooltip
     // explaining why the cap exists. User explicit ask: "y del riesgo
@@ -6996,7 +7004,7 @@
       const tail = pastedCount > 0
         ? ` Respondí ${pastedCount} pregunta${pastedCount === 1 ? "" : "s"} también.`
         : "";
-      toast("Listo — revisa y da click a 'Enviar' cuando estés conforme." + tail, "success");
+      toast("Listo — revisa y da clic a 'Enviar' cuando estés conforme." + tail, "success");
     } catch (err) {
       toast(humanizeError(err), "error");
     } finally {
@@ -7421,6 +7429,32 @@
     btn.innerHTML = '<span aria-hidden="true">✨</span><span>Respuesta con IA</span>';
     document.documentElement.appendChild(btn);
     anchorTo(btn, textarea, "above-right");
+
+    // Anchor watcher — when LaPieza re-renders the apply step and
+    // unmounts the textarea, this button becomes orphaned but its
+    // anchor's window.scroll+resize listeners stay attached. Without
+    // cleanup, each SPA step adds 2 leaked listeners. We watch the
+    // textarea via MutationObserver on its parent; once it's gone we
+    // call removeFlowHelper which fires the __eamxCleanup closure.
+    try {
+      const parent = textarea.parentElement;
+      if (parent) {
+        const mo = new MutationObserver(() => {
+          if (!document.documentElement.contains(textarea)) {
+            try { removeFlowHelper(btn); } catch (_) {}
+            try { mo.disconnect(); } catch (_) {}
+          }
+        });
+        mo.observe(parent, { childList: true, subtree: true });
+        // Stash the observer on the button so a future explicit
+        // removeFlowHelper(btn) also disconnects it.
+        const prevCleanup = btn.__eamxCleanup;
+        btn.__eamxCleanup = () => {
+          try { mo.disconnect(); } catch (_) {}
+          try { prevCleanup?.(); } catch (_) {}
+        };
+      }
+    } catch (_) { /* anchor watcher is best-effort */ }
 
     const setState = (state, label) => {
       btn.classList.remove("eamx-flow-paste-btn--ok", "eamx-flow-paste-btn--err", "eamx-flow-paste-btn--loading");
@@ -8286,7 +8320,14 @@
         return;
       }
 
-      const answerKey = (res.answerKey || "").toUpperCase();
+      // Normalize the answer key — Gemini may return Y/N variants
+      // ("SÍ" with diacritic, "YES", "Y", "N") that don't directly
+      // match our canonical "SI"/"NO" option keys. normalizeYesNoKey
+      // collapses them; for A/B/C/D quizzes the toUpperCase preserves
+      // the key as-is.
+      const rawKey = (res.answerKey || "").trim().toUpperCase();
+      const normalizedYN = normalizeYesNoKey(rawKey);
+      const answerKey = normalizedYN || rawKey;
       const choice = state.options.find((o) => o.key === answerKey);
       if (!choice) {
         // Backend returned a key we don't have in the DOM. Shouldn't happen

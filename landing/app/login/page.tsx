@@ -29,8 +29,14 @@ async function loginAction(formData: FormData) {
   const rawTurnstile = String(formData.get("cf-turnstile-response") ?? "");
   const turnstileToken = rawTurnstile.length > 0 ? rawTurnstile : undefined;
 
+  // Preserve `next` across error redirects so the user lands on the
+  // destination they originally requested (e.g. /account/historial)
+  // after fixing a bad password, instead of falling back to /account.
+  const safeNext = next.startsWith("/") && !next.startsWith("//") ? next : "/account";
+  const nextSuffix = safeNext === "/account" ? "" : `&next=${encodeURIComponent(safeNext)}`;
+
   if (!email || !password) {
-    redirect("/login?error=missing");
+    redirect(`/login?error=missing${nextSuffix}`);
   }
 
   try {
@@ -39,15 +45,13 @@ async function loginAction(formData: FormData) {
   } catch (err) {
     if (err instanceof ApiCallError) {
       if (err.code === "INVALID_CREDENTIALS")
-        redirect("/login?error=invalid");
+        redirect(`/login?error=invalid${nextSuffix}`);
       if (err.code === "CAPTCHA_FAILED")
-        redirect("/login?error=captcha");
-      redirect(`/login?error=${encodeURIComponent(err.code)}`);
+        redirect(`/login?error=captcha${nextSuffix}`);
+      redirect(`/login?error=${encodeURIComponent(err.code)}${nextSuffix}`);
     }
-    redirect("/login?error=unknown");
+    redirect(`/login?error=unknown${nextSuffix}`);
   }
-  // Basic open-redirect guard: only allow same-origin paths.
-  const safeNext = next.startsWith("/") && !next.startsWith("//") ? next : "/account";
   redirect(safeNext);
 }
 

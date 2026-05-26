@@ -125,6 +125,18 @@ export default async function HistorialPage({ searchParams }: PageProps) {
   const stats = statsData!.stats;
   const { applications, total } = historyData!;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  // Clamp the page param so deep-linking ?page=999 doesn't strand the
+  // user on an empty page with no "← Anterior" affordance. If we
+  // detect an out-of-range page AND there are results, server-redirect
+  // to the last valid page.
+  if (page > totalPages && total > 0) {
+    const params = new URLSearchParams();
+    if (selectedSource) params.set("source", selectedSource);
+    if (selectedStatus) params.set("status", selectedStatus);
+    if (totalPages > 1) params.set("page", String(totalPages));
+    const suffix = params.toString();
+    redirect(`/account/historial${suffix ? "?" + suffix : ""}`);
+  }
 
   // Build "previous filter" URLs while preserving the other filters.
   function buildHref(overrides: { source?: string; status?: string; page?: number }) {

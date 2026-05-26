@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Nav } from "@/components/nav";
 import { Footer } from "@/components/footer";
+import { CancelSubscriptionForm } from "@/components/cancel-subscription-form";
 import {
   getAccount,
   cancelSubscription,
@@ -442,14 +443,14 @@ export default async function AccountPage({ searchParams }: PageProps) {
                   >
                     Gestionar suscripción
                   </Link>
-                  <form action={cancelAction}>
+                  <CancelSubscriptionForm action={cancelAction}>
                     <button
                       type="submit"
                       className="inline-flex items-center justify-center rounded-[12px] border border-red-200 bg-white px-5 py-2.5 text-sm font-semibold text-red-700 hover:border-red-300 hover:bg-red-50"
                     >
                       Cancelar suscripción
                     </button>
-                  </form>
+                  </CancelSubscriptionForm>
                 </>
               )}
             </div>

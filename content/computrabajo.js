@@ -17,6 +17,10 @@
 (function () {
   "use strict";
 
+  const EAMX_COMPUTRABAJO_VERSION = "2026-05-26-audit-pass";
+  console.log(`[EmpleoAutomatico] computrabajo.js loaded — version ${EAMX_COMPUTRABAJO_VERSION} — ${location.href}`);
+  try { window.__eamx_loaded = { source: "computrabajo", version: EAMX_COMPUTRABAJO_VERSION, at: new Date().toISOString() }; } catch (_) {}
+
   const SOURCE = "computrabajo";
   const MSG = { GENERATE_DRAFT: "GENERATE_DRAFT", APPROVE_DRAFT: "APPROVE_DRAFT", REJECT_DRAFT: "REJECT_DRAFT", OPEN_BILLING: "OPEN_BILLING" };
   const ERR = { UNAUTHORIZED: "UNAUTHORIZED", PLAN_LIMIT_EXCEEDED: "PLAN_LIMIT_EXCEEDED" };
@@ -550,7 +554,7 @@
       fillForm(fields);
       closePanel();
       highlightSubmitButton();
-      toast("Listo — revisa y da click a 'Enviar' cuando estés conforme.", "success");
+      toast("Listo — revisa y da clic a 'Enviar' cuando estés conforme.", "success");
     } catch (err) {
       toast(humanizeError(err), "error");
     } finally {

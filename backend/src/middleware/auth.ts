@@ -37,6 +37,14 @@ export function authRequired(): MiddlewareHandler<AppContext> {
     if (!session || session.revoked === 1) {
       return errorResponse(c, 401, "UNAUTHORIZED", "Sesion revocada. Inicia sesion de nuevo.");
     }
+    // Defense-in-depth: the session row's user_id MUST match the JWT
+    // sub. Without this check, a JTI collision (astronomically rare
+    // with UUIDv4 but possible) or a malicious rebinding could load
+    // the wrong user. Cheap equality check; should always pass for
+    // legitimate tokens.
+    if (session.user_id !== payload.sub) {
+      return errorResponse(c, 401, "UNAUTHORIZED", "Sesion invalida.");
+    }
 
     const userRow = findUserById(payload.sub);
     if (!userRow) {

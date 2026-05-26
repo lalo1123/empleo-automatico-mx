@@ -26,9 +26,15 @@ function patternMatches(pattern: string, origin: string): boolean {
 }
 
 function isOriginAllowed(origin: string, patterns: string[]): boolean {
-  // Always allow chrome-extension origins (extension IDs are not stable across
-  // unpacked dev and published store builds).
-  if (origin.startsWith("chrome-extension://")) return true;
+  // chrome-extension origins: rather than the previous blanket
+  // "always allow", consult the patterns list. The CORS_ORIGINS env
+  // can include explicit IDs (e.g. "chrome-extension://abcd...") or
+  // the dev wildcard "chrome-extension://*". In prod we expect the
+  // pinned store ID. Wildcard remains supported but should ONLY be
+  // set in dev / staging envs.
+  if (origin.startsWith("chrome-extension://")) {
+    return patterns.some((p) => patternMatches(p.trim(), origin));
+  }
   return patterns.some((p) => patternMatches(p.trim(), origin));
 }
 

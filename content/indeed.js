@@ -25,6 +25,10 @@
 (function () {
   "use strict";
 
+  const EAMX_INDEED_VERSION = "2026-05-26-audit-pass";
+  console.log(`[EmpleoAutomatico] indeed.js loaded — version ${EAMX_INDEED_VERSION} — ${location.href}`);
+  try { window.__eamx_loaded = { source: "indeed", version: EAMX_INDEED_VERSION, at: new Date().toISOString() }; } catch (_) {}
+
   const SOURCE = "indeed"; // schemas.js will gain SOURCES.INDEED — string is safe to use early.
   const MSG = { GENERATE_DRAFT: "GENERATE_DRAFT", APPROVE_DRAFT: "APPROVE_DRAFT", REJECT_DRAFT: "REJECT_DRAFT", OPEN_BILLING: "OPEN_BILLING" };
   const ERR = { UNAUTHORIZED: "UNAUTHORIZED", PLAN_LIMIT_EXCEEDED: "PLAN_LIMIT_EXCEEDED" };
@@ -546,7 +550,7 @@
       // + pulse the "Aplica ahora" button so the user takes over the official flow.
       if (detectInlineApplyForm()) {
         fillForm(fields); closePanel(); highlightSubmitButton();
-        toast("Listo — revisa y da click a 'Enviar' cuando estés conforme.", "success");
+        toast("Listo — revisa y da clic a 'Enviar' cuando estés conforme.", "success");
       } else {
         try { await navigator.clipboard.writeText(coverLetter); } catch (_) { /* ignore */ }
         closePanel(); highlightApplyNowButton();

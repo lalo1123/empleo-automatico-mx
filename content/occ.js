@@ -16,10 +16,15 @@
 (function () {
   "use strict";
 
+  // BUMP on every commit that changes occ.js behavior. Surfaces as a
+  // diagnostic breadcrumb when a user reports "extension not working"
+  // — we can verify which version is actually loaded.
+  const EAMX_OCC_VERSION = "2026-05-26-audit-pass";
+
   // Debug marker — open DevTools Console on OCC page; if this line shows up,
   // the content script IS injecting. Then inspect window.__eamx_loaded.
-  console.log("[EmpleoAutomatico] occ.js loaded on", location.href);
-  try { window.__eamx_loaded = { source: "occ", at: new Date().toISOString() }; } catch (_) {}
+  console.log(`[EmpleoAutomatico] occ.js loaded — version ${EAMX_OCC_VERSION} — ${location.href}`);
+  try { window.__eamx_loaded = { source: "occ", version: EAMX_OCC_VERSION, at: new Date().toISOString() }; } catch (_) {}
 
   // Visible boot banner: a tiny pill at the top-left of the page, fades after 4s.
   // This proves the script injected without requiring DevTools.
@@ -1135,7 +1140,7 @@
       highlightSubmitButton();
       // Show in-panel success state for ~2s, then auto-close.
       showApproveSuccess();
-      toast("Listo — revisa y da click a 'Enviar' cuando estés conforme.", "success");
+      toast("Listo — revisa y da clic a 'Enviar' cuando estés conforme.", "success");
       setTimeout(() => { closePanel(); setFabBusy(false); }, 2200);
     } catch (err) {
       toast(humanizeError(err), "error");

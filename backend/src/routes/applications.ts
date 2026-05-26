@@ -18,7 +18,7 @@ import {
   generateTailoredCv,
   parseCvText
 } from "../lib/gemini.js";
-import { assertUnderLimit, incrementUsage } from "../lib/usage.js";
+import { assertUnderLimit, incrementUsage, reserveUsageSlot, refundUsageSlot } from "../lib/usage.js";
 import { getPlan } from "../lib/plans.js";
 import {
   applicationCountsBySource,
@@ -168,17 +168,23 @@ applicationsRoutes.post("/generate", authRequired(), emailVerifiedRequired(), as
 
     const env = loadEnv();
     const user = c.get("user");
-    assertUnderLimit(user.id, user.plan);
-
-    const result = await generateCoverLetter({
-      apiKey: env.GEMINI_API_KEY,
-      model: env.GEMINI_MODEL,
-      profile: parsed.data.profile,
-      job: parsed.data.job
-    });
-
-    // Only increment once Gemini returned a valid response.
-    const newCount = incrementUsage(user.id);
+    // Atomic reserve-then-call pattern. reserveUsageSlot returns the
+    // new count AFTER incrementing inside a transaction, so two parallel
+    // requests at limit-1 can't both pass the check. If Gemini fails we
+    // refund.
+    const newCount = reserveUsageSlot(user.id, user.plan);
+    let result;
+    try {
+      result = await generateCoverLetter({
+        apiKey: env.GEMINI_API_KEY,
+        model: env.GEMINI_MODEL,
+        profile: parsed.data.profile,
+        job: parsed.data.job
+      });
+    } catch (e) {
+      refundUsageSlot(user.id);
+      throw e;
+    }
     const plan = getPlan(user.plan);
 
     // Log meta only, never content.
@@ -252,17 +258,19 @@ applicationsRoutes.post(
 
       const env = loadEnv();
       const user = c.get("user");
-      assertUnderLimit(user.id, user.plan);
-
-      const result = await generateTailoredCv({
-        apiKey: env.GEMINI_API_KEY,
-        model: env.GEMINI_MODEL,
-        profile,
-        job
-      });
-
-      // Only increment once Gemini returned a valid response.
-      const newCount = incrementUsage(user.id);
+      const newCount = reserveUsageSlot(user.id, user.plan);
+      let result;
+      try {
+        result = await generateTailoredCv({
+          apiKey: env.GEMINI_API_KEY,
+          model: env.GEMINI_MODEL,
+          profile,
+          job
+        });
+      } catch (e) {
+        refundUsageSlot(user.id);
+        throw e;
+      }
       const plan = getPlan(user.plan);
 
       // Log meta only, never content (CVs include PII).
@@ -331,23 +339,26 @@ applicationsRoutes.post(
 
       const env = loadEnv();
       const user = c.get("user");
-      assertUnderLimit(user.id, user.plan);
-
-      // 1) Generate the tailored HTML CV (same path as /generate-cv).
-      const result = await generateTailoredCv({
-        apiKey: env.GEMINI_API_KEY,
-        model: env.GEMINI_MODEL,
-        profile,
-        job
-      });
-
-      // 2) Render that HTML to a PDF buffer via puppeteer-core.
-      const { htmlToPdf } = await import("../lib/pdf.js");
-      const pdfBuf = await htmlToPdf(result.html);
-
-      // 3) Charge the quota only after BOTH the AI call and the render
-      // succeed. Failure to render shouldn't burn the user's quota.
-      const newCount = incrementUsage(user.id);
+      // Atomic reserve. If either Gemini or the PDF render fails we
+      // refund. Race-safe even with parallel requests at limit-1.
+      const newCount = reserveUsageSlot(user.id, user.plan);
+      let result;
+      let pdfBuf;
+      try {
+        // 1) Generate the tailored HTML CV (same path as /generate-cv).
+        result = await generateTailoredCv({
+          apiKey: env.GEMINI_API_KEY,
+          model: env.GEMINI_MODEL,
+          profile,
+          job
+        });
+        // 2) Render that HTML to a PDF buffer via puppeteer-core.
+        const { htmlToPdf } = await import("../lib/pdf.js");
+        pdfBuf = await htmlToPdf(result.html);
+      } catch (e) {
+        refundUsageSlot(user.id);
+        throw e;
+      }
       const plan = getPlan(user.plan);
       console.log(
         `[generate-cv-pdf] ok user=${user.id} plan=${user.plan} job=${job.source}:${job.id} bytes=${pdfBuf.length} usage=${newCount}/${plan.monthlyLimit}`
@@ -544,20 +555,35 @@ applicationsRoutes.post(
 // No quota consumption — these are storage/lookup, not AI calls.
 // ---------------------------------------------------------------------------
 
+// Block any character that could lead to stored-XSS when the web
+// dashboard renders these fields. We're permissive about diacritics
+// and emojis (real job titles use them), but disallow HTML/JS-active
+// chars and `javascript:`/`data:` URL prefixes.
+const STRIP_XSS_CHARS = /[<>]/g;
+const sanitizeFreeText = (s: string) =>
+  s.replace(STRIP_XSS_CHARS, "").trim();
+const sanitizeUrl = (s: string) => {
+  const t = s.trim();
+  if (!t) return "";
+  // Only allow http(s) URLs — block javascript:, data:, etc.
+  if (!/^https?:\/\//i.test(t)) return "";
+  return t.replace(STRIP_XSS_CHARS, "");
+};
+
 const trackSchema = z.object({
   source: z.enum(["lapieza", "occ", "computrabajo", "bumeran", "indeed", "linkedin"]),
-  vacancyId: z.string().min(1).max(200),
-  url: z.string().max(2048).optional().default(""),
-  title: z.string().max(300).optional().default(""),
-  company: z.string().max(200).optional().default(""),
-  location: z.string().max(200).optional().default(""),
+  vacancyId: z.string().min(1).max(200).transform(sanitizeFreeText),
+  url: z.string().max(2048).optional().default("").transform(sanitizeUrl),
+  title: z.string().max(300).optional().default("").transform(sanitizeFreeText),
+  company: z.string().max(200).optional().default("").transform(sanitizeFreeText),
+  location: z.string().max(200).optional().default("").transform(sanitizeFreeText),
   matchScore: z.number().int().min(0).max(100).optional().default(0),
   status: z.enum(["applied", "viewed", "rejected", "hired"]).optional().default("applied"),
   sourceTs: z.number().int().optional().nullable(),
-  reasons: z.array(z.string().max(200)).max(20).optional().default([])
+  reasons: z.array(z.string().max(200).transform(sanitizeFreeText)).max(20).optional().default([])
 });
 
-applicationsRoutes.post("/track", authRequired(), async (c) => {
+applicationsRoutes.post("/track", authRequired(), emailVerifiedRequired(), async (c) => {
   try {
     const body = await c.req.json().catch(() => null);
     const parsed = trackSchema.safeParse(body);
@@ -578,7 +604,7 @@ applicationsRoutes.post("/track", authRequired(), async (c) => {
 
 // List the caller's applications. Filters: source, status, fromTs, toTs.
 // Pagination: page=N (default 1), pageSize=N (default 50, max 200).
-applicationsRoutes.get("/history", authRequired(), async (c) => {
+applicationsRoutes.get("/history", authRequired(), emailVerifiedRequired(), async (c) => {
   try {
     const user = c.get("user");
     const q = c.req.query();
@@ -616,7 +642,7 @@ applicationsRoutes.get("/history", authRequired(), async (c) => {
 });
 
 // Aggregated stats — used by the dashboard and the history page header.
-applicationsRoutes.get("/stats", authRequired(), async (c) => {
+applicationsRoutes.get("/stats", authRequired(), emailVerifiedRequired(), async (c) => {
   try {
     const user = c.get("user");
     const now = Math.floor(Date.now() / 1000);

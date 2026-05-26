@@ -171,7 +171,7 @@ async function handleGenerateDraft(msg) {
       return {
         ok: false,
         error: ERROR_CODES.PLAN_LIMIT_EXCEEDED,
-        message: "Llegaste al límite de tu plan. Upgrade en empleo.skybrandmx.com/account/billing"
+        message: "Llegaste al límite de tu plan. Sube de plan en empleo.skybrandmx.com/account/billing"
       };
     }
     return failFromError(e);
@@ -285,7 +285,7 @@ async function handleGenerateCv(msg) {
       return {
         ok: false,
         error: ERROR_CODES.PLAN_LIMIT_EXCEEDED,
-        message: "Llegaste al límite de tu plan. Upgrade en empleo.skybrandmx.com/account/billing"
+        message: "Llegaste al límite de tu plan. Sube de plan en empleo.skybrandmx.com/account/billing"
       };
     }
     // 422 PROFILE_TOO_THIN bubbles up via the generic INVALID_INPUT code.
@@ -359,7 +359,7 @@ async function handleGenerateCvPdf(msg) {
       return {
         ok: false,
         error: ERROR_CODES.PLAN_LIMIT_EXCEEDED,
-        message: "Llegaste al límite de tu plan. Upgrade en empleo.skybrandmx.com/account/billing"
+        message: "Llegaste al límite de tu plan. Sube de plan en empleo.skybrandmx.com/account/billing"
       };
     }
     return failFromError(e);
@@ -492,7 +492,7 @@ async function handleAnswerQuestions(msg) {
       return {
         ok: false,
         error: ERROR_CODES.PLAN_LIMIT_EXCEEDED,
-        message: "Llegaste al límite de tu plan. Upgrade en empleo.skybrandmx.com/account/billing"
+        message: "Llegaste al límite de tu plan. Sube de plan en empleo.skybrandmx.com/account/billing"
       };
     }
     // 422 PROFILE_TOO_THIN bubbles up via INVALID_INPUT — the content script
@@ -594,7 +594,7 @@ async function handleAnswerQuiz(msg) {
       return {
         ok: false,
         error: ERROR_CODES.PLAN_LIMIT_EXCEEDED,
-        message: "Llegaste al límite de tu plan. Upgrade en empleo.skybrandmx.com/account/billing"
+        message: "Llegaste al límite de tu plan. Sube de plan en empleo.skybrandmx.com/account/billing"
       };
     }
     return failFromError(e);

@@ -30,6 +30,10 @@
 (function () {
   "use strict";
 
+  const EAMX_LINKEDIN_VERSION = "2026-05-26-audit-pass";
+  console.log(`[EmpleoAutomatico] linkedin.js loaded — version ${EAMX_LINKEDIN_VERSION} — ${location.href}`);
+  try { window.__eamx_loaded = { source: "linkedin", version: EAMX_LINKEDIN_VERSION, at: new Date().toISOString() }; } catch (_) {}
+
   const SOURCE = "linkedin";
   const MSG = { GENERATE_DRAFT: "GENERATE_DRAFT", APPROVE_DRAFT: "APPROVE_DRAFT", REJECT_DRAFT: "REJECT_DRAFT", OPEN_BILLING: "OPEN_BILLING" };
   const ERR = { UNAUTHORIZED: "UNAUTHORIZED", PLAN_LIMIT_EXCEEDED: "PLAN_LIMIT_EXCEEDED" };
