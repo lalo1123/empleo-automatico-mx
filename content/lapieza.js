@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-25-history-sync";
+  const EAMX_LAPIEZA_VERSION = "2026-05-25-quiz-detect-v2";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -1556,6 +1556,28 @@
     toast("⚡ Cadena: te llevo paso a paso… (Esc cancela)", "info", { durationMs: 4500 });
     console.log("[EmpleoAutomatico] chain inner: toast fired, entering loop");
 
+    // Loop-stuck detector. Computes a cheap signature of the page each
+    // iteration. If the signature matches the previous iter AND we
+    // didn't take any meaningful action (CV/quiz-warn/fill), we count
+    // it as a "no-op" tick. Three consecutive no-ops → bail with a
+    // friendly toast pointing the user to do it manually.
+    //
+    // Live bug (user logs 2026-05-25): chain ran 20 iterations clicking
+    // Continuar with no progress because LaPieza's quiz DOM changed
+    // and our detector missed it. The chain went silent without
+    // telling the user — the new detector turns that into a clear
+    // "no pude avanzar" toast at iter 4-5 instead of iter 19.
+    let lastDomSignature = "";
+    let stuckTicks = 0;
+    const MAX_STUCK_TICKS = 3;
+    function computeDomSignature() {
+      try {
+        const url = location.href.split("?")[0];
+        const main = document.body.innerText.slice(0, 800).replace(/\s+/g, " ");
+        return `${url}|${main}`;
+      } catch (_) { return Math.random().toString(); }
+    }
+
     // Iteration cap. Live data (Oportun Lifecycle Marketing Manager, 18-Q
     // quiz + 2-3 open-ended questions): the chain needs to survive the
     // quiz-wait loop AND the per-step Continuar clicks that come after.
@@ -1724,6 +1746,31 @@
       }
       // If neither Continuar nor Finalizar is visible, we'll loop again
       // (the DOM may still be settling after a previous click).
+
+      // LOOP-STUCK DETECTOR: if the DOM signature hasn't changed and we
+      // didn't take a meaningful action this iter (no CV branch, no
+      // quiz-warn click, no fillable Express run), count it as a no-op
+      // tick. After MAX_STUCK_TICKS consecutive no-ops, bail with a
+      // friendly toast so the user knows the chain gave up here. Better
+      // than running silently through 20 iters.
+      const sig = computeDomSignature();
+      if (sig === lastDomSignature && !hasFillable) {
+        stuckTicks++;
+        console.log("[EmpleoAutomatico] chain: stuck tick", stuckTicks, "of", MAX_STUCK_TICKS);
+        if (stuckTicks >= MAX_STUCK_TICKS) {
+          console.log("[EmpleoAutomatico] chain: stuck — bailing");
+          toast(
+            "No pude avanzar este paso. Continúa manual desde aquí.",
+            "info",
+            { durationMs: 7000 }
+          );
+          reportBulkStatus("error", { label: "Atascado — revisa la pestaña" });
+          break;
+        }
+      } else {
+        stuckTicks = 0;
+      }
+      lastDomSignature = sig;
     }
     // chainApplyStepsToFinalize() wrapper handles esc-listener cleanup
     // and chainInProgress release in its finally block.
@@ -1746,25 +1793,84 @@
   // taking the FIRST one with meaningful text content — that's the
   // CV option-card box.
   function looksLikeQuizStep() {
-    // PATH 1: radio-based quizzes (legacy LaPieza form / other portals).
-    // PATH 2: button.multi-select-button quizzes — LaPieza's modern apply
-    //   flow uses these on its knowledge-quiz step. detectQuizQuestion
-    //   below uses the SAME selector — keep them in sync.
-    //
-    // Bug history (2026-05-22): the original implementation only checked
-    // for radio inputs. LaPieza shipped a button-based quiz that has zero
-    // <input type="radio"> nodes, so this returned false during a live
-    // 18-question quiz and the chain incorrectly tried to click Continuar
-    // every iteration (exhausting the 8-iter cap before the quiz finished
-    // and the open-ended Q&A textarea even rendered).
+    // PATH 0: LaPieza-specific container. The questions step on the
+    // modern apply form renders inside `div.details__form__preguntas`.
+    // If that container is visible the chain MUST treat this as a quiz
+    // step regardless of which sub-DOM (radio, multi-select-button,
+    // future kind) LaPieza is shipping today.
+    try {
+      const container = document.querySelector("div.details__form__preguntas");
+      if (container) {
+        try { if (isVisible(container)) return true; } catch (_) {}
+      }
+    } catch (_) { /* fall through */ }
+
+    // PATH 1: button.multi-select-button — LaPieza's modern apply flow.
     try {
       const quizBtns = Array.from(document.querySelectorAll("button.multi-select-button"))
         .filter((b) => {
           try { return isVisible(b); } catch (_) { return false; }
         });
       if (quizBtns.length >= 2) return true;
-    } catch (_) { /* fall through to radio path */ }
+    } catch (_) { /* fall through */ }
 
+    // PATH 2: visible "Pregunta N de M" / "N / M" / "Question N of M"
+    // counter anywhere on the page. The quiz UI always renders such a
+    // counter at the top of each question. Cheap text scan, bounded so
+    // we don't scan the entire body.
+    try {
+      const COUNTER_RX = /(?:pregunta|question)\s+(\d+)\s*(?:de|of|\/)\s*(\d+)/i;
+      const SHORT_COUNTER_RX = /^\s*(\d+)\s*\/\s*(\d+)\s*$/;
+      const candidates = document.querySelectorAll("p, span, div, h1, h2, h3, h4, strong");
+      for (const el of candidates) {
+        try {
+          if (el.closest(".eamx-fab, .eamx-panel, .eamx-overlay, .eamx-matches-panel, .eamx-toast, .eamx-bulk-progress, [data-eamx]")) continue;
+          if (!isVisible(el)) continue;
+          const t = (el.textContent || "").trim();
+          if (!t || t.length > 60) continue;
+          if (COUNTER_RX.test(t)) return true;
+          if (el.children && el.children.length === 0 && SHORT_COUNTER_RX.test(t)) {
+            // Bare "5 / 18" leaf — must look like a quiz counter
+            // (small numbers). Reject obvious salaries / IDs.
+            const m = t.match(SHORT_COUNTER_RX);
+            const cur = Number(m[1]);
+            const tot = Number(m[2]);
+            if (cur > 0 && tot > 0 && tot <= 200 && cur <= tot) return true;
+          }
+        } catch (_) {}
+      }
+    } catch (_) {}
+
+    // PATH 3: multi-option-card layout (A/B/C/D buttons in
+    // non-multi-select-button class). Some LaPieza variants render
+    // <button> or <div role="button"> with leading "A)" "B)" etc.
+    try {
+      const QUIZ_OPTION_LEADING_RX = /^[A-Z][\)\.\:]\s+/;
+      const buttons = Array.from(document.querySelectorAll(
+        'button, div[role="button"], [class*="option" i]'
+      ));
+      let optionCount = 0;
+      const seenKeys = new Set();
+      for (const b of buttons) {
+        try {
+          if (!isVisible(b)) continue;
+          if (b.closest(".eamx-fab, .eamx-panel, .eamx-overlay, .eamx-matches-panel, .eamx-toast, [data-eamx]")) continue;
+          const t = (b.textContent || "").trim();
+          if (!t || t.length > 200) continue;
+          const m = t.match(QUIZ_OPTION_LEADING_RX);
+          if (!m) continue;
+          const key = t.charAt(0).toUpperCase();
+          if (seenKeys.has(key)) continue;
+          seenKeys.add(key);
+          optionCount++;
+          if (optionCount >= 2) return true;
+        } catch (_) {}
+      }
+    } catch (_) {}
+
+    // PATH 4: radio-based quizzes (legacy). Walk the radios + filter
+    // CV-selection look-alikes. Kept for back-compat with portals that
+    // haven't migrated to the button-based quiz.
     let radios = [];
     try { radios = Array.from(document.querySelectorAll('input[type="radio"]')); } catch (_) { return false; }
     let count = 0;
@@ -1775,10 +1881,6 @@
       let ctx = r.closest("label, [class*='option' i], [class*='question' i], [class*='quiz' i], [class*='answer' i]");
       if (!ctx) continue;
       let txt = (ctx.textContent || "").trim().toLowerCase();
-      // If the matched ancestor is empty (e.g. MUI's bare <label> wrapper
-      // around a hidden radio input), walk up the DOM to find the real
-      // container that holds the option's display text. Cap at 5 hops to
-      // avoid scanning the whole page.
       if (!txt) {
         let p = ctx.parentElement;
         for (let i = 0; i < 5 && p; i++, p = p.parentElement) {
@@ -1786,13 +1888,6 @@
           if (pTxt) { txt = pTxt; break; }
         }
       }
-      // Exclude CV-selection cards. We match a broad set of signals
-      // because the user may have multiple uploaded CVs and only one
-      // will carry the "PRINCIPAL" tag — the others look like generic
-      // filenames (e.g. "EDUARDO-SERRATOS-GUTIRREZ-Ejecutivo-de-Ventas-
-      // B2B.pdf 0 may 2026"), so we ALSO exclude any ancestor whose
-      // text ends with a `.pdf <date>` pattern that is unmistakably a
-      // CV-list card on LaPieza's CV-selection step.
       if (/principal|hoja\s*de\s*vida|cv\s*-|\.pdf\s*\d+\s*[a-z]{3}\s*\d{4}/i.test(txt)) continue;
       count++;
       if (count >= 2) return true;
