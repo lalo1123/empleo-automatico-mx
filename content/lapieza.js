@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-26-yn-quiz";
+  const EAMX_LAPIEZA_VERSION = "2026-05-26-audit-fixes-2";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -3957,7 +3957,14 @@
       return;
     }
     if (code === ERR.UNAUTHORIZED) {
-      toast("Inicia sesión para continuar.", "error", {
+      // Stop the chain — without abort the loop re-fires GENERATE_DRAFT
+      // on the next iter and hits 401 again. User sees a flood of toasts
+      // and the bulk-progress card never goes to "error". Auth-fail is
+      // terminal until they re-login, so treat it like plan-limit.
+      quickApplyAborted = true;
+      reportBulkStatus("error", { label: "Sesión expirada — inicia sesión" });
+      clearBulkModeFlag();
+      toast("Sesión expirada. Inicia sesión para continuar.", "error", {
         label: "Inicia sesión",
         onClick: () => openOptionsPage()
       });
@@ -5961,28 +5968,46 @@
       .filter((m) => !m.closedFromCard);
     const skipped = (matchesCurrentTopN || []).length - candidates.length;
 
-    // DAILY CAP GATE — green-zone protection. Per-portal limits:
-    //   LinkedIn / Indeed: 15/day
-    //   LaPieza / OCC / Computrabajo / Bumeran: 20/day
-    // If the user already burned their daily allowance, refuse the
-    // bulk OUTRIGHT with a friendly toast pointing to "ven mañana".
-    // If they have some left but less than the requested N, clamp to
-    // what's safe and warn. User explicit ask: "y del riesgo a que
-    // bloquen o eso no?" — this IS the protection.
+    // DAILY CAP GATE — two layers of green-zone protection:
+    //   1) PER-PORTAL: LinkedIn/Indeed 15, LaPieza/OCC/CT/Bumeran 20
+    //   2) CROSS-PORTAL TOTAL: 110/day across all 6 portals combined
+    // Layer 2 prevents a power-user from spreading across portals and
+    // hitting 120+ applications in a day (which trips "too human"
+    // bot-detection on several platforms). The effective limit is
+    // min(perPortalRemaining, totalRemaining).
     const dailyCap = AUTO_PORTAL_CAPS[SOURCE] ?? 20;
+    const totalCap = AUTO_TOTAL_CAP;
     let dailyCount = 0;
+    let totalCount = 0;
     try {
-      if (queueModule && typeof queueModule.countAppliedTodayForSource === "function") {
-        dailyCount = await queueModule.countAppliedTodayForSource(SOURCE);
+      if (queueModule) {
+        if (typeof queueModule.countAppliedTodayForSource === "function") {
+          dailyCount = await queueModule.countAppliedTodayForSource(SOURCE);
+        }
+        if (typeof queueModule.countAppliedTodayAcrossSources === "function") {
+          totalCount = await queueModule.countAppliedTodayAcrossSources();
+        }
       }
     } catch (_) {}
-    const dailyRemaining = Math.max(0, dailyCap - dailyCount);
+    const perPortalRemaining = Math.max(0, dailyCap - dailyCount);
+    const totalRemaining = Math.max(0, totalCap - totalCount);
+    const dailyRemaining = Math.min(perPortalRemaining, totalRemaining);
+
     if (dailyRemaining === 0) {
-      toast(
-        `Llegaste al cap diario seguro en este portal (${dailyCap}). Vuelve mañana para no arriesgar tu cuenta.`,
-        "info",
-        { durationMs: 9000 }
-      );
+      // Distinguish WHICH cap was hit so the user gets the right message.
+      if (perPortalRemaining === 0) {
+        toast(
+          `Llegaste al cap diario seguro en este portal (${dailyCap}). Vuelve mañana para no arriesgar tu cuenta.`,
+          "info",
+          { durationMs: 9000 }
+        );
+      } else {
+        toast(
+          `Llegaste al cap diario seguro entre todos los portales (${totalCap}). Vuelve mañana — protege tu cuenta de detección de bot.`,
+          "info",
+          { durationMs: 9000 }
+        );
+      }
       return;
     }
 
@@ -5990,8 +6015,12 @@
     if (topN.length > dailyRemaining) {
       const trimmed = topN.length - dailyRemaining;
       topN = topN.slice(0, dailyRemaining);
+      // Report which cap is the binding one so the user understands.
+      const reason = perPortalRemaining <= totalRemaining
+        ? `del cap diario seguro de ${dailyCap} en este portal`
+        : `del cap diario total seguro de ${totalCap} entre portales`;
       toast(
-        `Limitando a ${dailyRemaining} para no exceder el cap diario seguro de ${dailyCap}. ${trimmed} vacante${trimmed > 1 ? "s" : ""} se quedan para mañana.`,
+        `Limitando a ${dailyRemaining} para no exceder ${reason}. ${trimmed} vacante${trimmed > 1 ? "s" : ""} se quedan para mañana.`,
         "info",
         { durationMs: 7000 }
       );
@@ -6692,8 +6721,11 @@
     const code = res && res.error;
     const msg = (res && res.message) || "";
     if (code === ERR.UNAUTHORIZED) {
-      setQuestionsState("error", { error: "Inicia sesión para continuar." });
-      toast("Inicia sesión para continuar.", "error", {
+      setQuestionsState("error", { error: "Sesión expirada — inicia sesión." });
+      quickApplyAborted = true;
+      reportBulkStatus("error", { label: "Sesión expirada — inicia sesión" });
+      clearBulkModeFlag();
+      toast("Sesión expirada. Inicia sesión para continuar.", "error", {
         label: "Inicia sesión",
         onClick: () => openOptionsPage()
       });
@@ -6818,6 +6850,9 @@
         }
         if (code === ERR.UNAUTHORIZED) {
           setCvState("error", { error: "Tu sesión expiró. Inicia sesión en Opciones para continuar." });
+          quickApplyAborted = true;
+          reportBulkStatus("error", { label: "Sesión expirada — inicia sesión" });
+          clearBulkModeFlag();
           toast("Tu sesión expiró.", "error", {
             label: "Inicia sesión",
             onClick: () => openOptionsPage()
@@ -8229,7 +8264,13 @@
         // "✓ Quiz completo" final summary at the bottom of this function.
         clearQuizStickyToast();
         if (res && res.error === ERR.UNAUTHORIZED) {
-          toast("Inicia sesión para continuar el quiz.", "error", {
+          // Abort the outer chain too — without this, the chain loops
+          // back into another AI call and re-fails 401. Auth-fail is
+          // terminal until the user re-logs.
+          quickApplyAborted = true;
+          reportBulkStatus("error", { label: "Sesión expirada — inicia sesión" });
+          clearBulkModeFlag();
+          toast("Sesión expirada. Inicia sesión para continuar el quiz.", "error", {
             label: "Iniciar sesión",
             onClick: () => openOptionsPage()
           });
@@ -8580,7 +8621,8 @@
       const allText = (card.innerText || card.textContent || "").trim();
       if (!allText) return status;
 
-      // Applied markers
+      // Applied markers — full-text patterns (bounded by job description
+      // text usually fitting in 600 chars).
       const APPLIED_RX = [
         /\bya\s+(?:te\s+)?(?:postulaste|aplicaste)\b/i,
         /\bya\s+postulado\b/i,
@@ -8589,31 +8631,45 @@
         /\bapplied\b\s+(?:on|·|\d{1,2})/i,
         /\bya\s+aplicaste\s+(?:a|para)\s+esta\b/i
       ];
-      // Closed/expired markers — includes the standalone "CERRADA"
-      // badge that LaPieza shows on closed vacancy cards. We detect
-      // it by surrounding context: a word-boundary CERRADA / CLOSED
-      // anywhere in the card text counts as a closed signal.
-      const CLOSED_RX = [
+      // Closed/expired PHRASES — long enough that they don't false-
+      // positive inside descriptions. Tested against the snippet text.
+      const CLOSED_PHRASE_RX = [
         /\bvacante\s+(?:cerrada|expirada|no\s+disponible|no\s+activa)\b/i,
         /\boferta\s+(?:cerrada|expirada|no\s+disponible)\b/i,
         /\bya\s+no\s+recibe\s+postulaciones\b/i,
         /\b(?:position|job|posting)\s+(?:closed|expired|filled)\b/i,
         /\bno\s+longer\s+(?:available|accepting)\b/i,
         /\b(?:la\s+empresa\s+ha\s+)?finalizado?\s+el\s+proceso\s+de\s+reclutamiento\b/i,
-        /\b(?:proceso\s+de\s+)?reclutamiento\s+(?:cerrado|finalizado)\b/i,
-        // Standalone "CERRADA" / "CLOSED" — only matches when it
-        // stands as its own word (badge) and is uppercased / title-
-        // cased like a real badge would be. Lowercase "cerrada" in
-        // free-flow text doesn't count to avoid false positives.
-        /\b(?:CERRADA|CLOSED|EXPIRADA|EXPIRED|FILLED)\b/
+        /\b(?:proceso\s+de\s+)?reclutamiento\s+(?:cerrado|finalizado)\b/i
       ];
+      // Standalone BADGE regex — applied ONLY to short leaf text nodes
+      // (≤ 30 chars), NOT to the full card snippet. Without this guard
+      // a description like "AGENCIA CERRADA AL PÚBLICO LOS LUNES" in
+      // the first 600 chars false-positives. Mirrors the short-text
+      // guard in detectVacancyClosedState which has been correct for
+      // weeks.
+      const CLOSED_BADGE_RX = /\b(?:CERRADA|CLOSED|EXPIRADA|EXPIRED|FILLED)\b/;
 
       const snippet = allText.slice(0, 600);
       for (const rx of APPLIED_RX) {
         if (rx.test(snippet)) { status.applied = true; break; }
       }
-      for (const rx of CLOSED_RX) {
+      for (const rx of CLOSED_PHRASE_RX) {
         if (rx.test(snippet)) { status.closed = true; break; }
+      }
+      // Badge scan — only short leaf text nodes inside the card. We
+      // collect them with a quick query and test the badge regex per
+      // node. Stops on first match.
+      if (!status.closed) {
+        try {
+          const leaves = card.querySelectorAll("span, strong, em, b, label, div, p");
+          for (const el of leaves) {
+            if (el.children && el.children.length > 0) continue;
+            const t = (el.textContent || "").trim();
+            if (!t || t.length > 30) continue;
+            if (CLOSED_BADGE_RX.test(t)) { status.closed = true; break; }
+          }
+        } catch (_) { /* defensive */ }
       }
 
       // Attribute scan — LaPieza sometimes marks cards via class
