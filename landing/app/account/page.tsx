@@ -6,7 +6,12 @@ import {
   getAccount,
   cancelSubscription,
   resendVerification,
+  getApplicationsStats,
+  getApplicationsHistory,
   ApiCallError,
+  type ApplicationSource,
+  type ApplicationsStats,
+  type Application,
 } from "@/lib/api";
 import {
   clearSessionCookie,
@@ -97,8 +102,21 @@ export default async function AccountPage({ searchParams }: PageProps) {
   if (!token) redirect("/login?next=/account");
 
   let data;
+  // Stats + recent history fire in parallel with getAccount. They're
+  // best-effort — if either fails (extension never installed yet, or
+  // backend hiccup) we just render the dashboard with empty defaults
+  // instead of failing the whole page.
+  let statsData: { stats: ApplicationsStats } | null = null;
+  let recentData: { applications: Application[]; total: number } | null = null;
   try {
-    data = await getAccount(token!);
+    const [account, stats, recent] = await Promise.all([
+      getAccount(token!),
+      getApplicationsStats(token!).catch(() => null),
+      getApplicationsHistory(token!, { pageSize: 5 }).catch(() => null),
+    ]);
+    data = account;
+    statsData = stats;
+    recentData = recent;
   } catch (err) {
     if (err instanceof ApiCallError && (err.status === 401 || err.status === 403)) {
       await clearSessionCookie();
@@ -148,10 +166,53 @@ export default async function AccountPage({ searchParams }: PageProps) {
       ? Math.min(100, Math.round((usage.current / usage.limit) * 100))
       : 0;
 
+  // Derive dashboard hero stats. When stats endpoint failed we fall back
+  // to zero — the empty-state copy in the card handles the messaging.
+  const stats = statsData?.stats ?? {
+    totalAll: 0,
+    totalMonth: 0,
+    totalWeek: 0,
+    total7d: 0,
+    bySource: {
+      lapieza: 0, occ: 0, computrabajo: 0,
+      bumeran: 0, indeed: 0, linkedin: 0
+    } as Record<ApplicationSource, number>,
+  };
+  const recentApplications = recentData?.applications ?? [];
+
+  // Top portal — defaults to "—" when nothing applied yet.
+  const sourceLabels: Record<ApplicationSource, string> = {
+    lapieza: "LaPieza",
+    occ: "OCC",
+    computrabajo: "Computrabajo",
+    bumeran: "Bumeran",
+    indeed: "Indeed",
+    linkedin: "LinkedIn",
+  };
+  const sourceEntries = (Object.entries(stats.bySource) as [ApplicationSource, number][]).
+    sort(([, a], [, b]) => b - a);
+  const topSourceId = sourceEntries[0]?.[1] ? sourceEntries[0][0] : null;
+  const topSourceLabel = topSourceId ? sourceLabels[topSourceId] : "—";
+  const topSourceCount = topSourceId ? sourceEntries[0][1] : 0;
+
+  function formatRelativeTime(unixSec: number): string {
+    const diffMs = Date.now() - unixSec * 1000;
+    const minutes = Math.floor(diffMs / 60000);
+    if (minutes < 1) return "Ahora";
+    if (minutes < 60) return `Hace ${minutes} min`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `Hace ${hours} h`;
+    const days = Math.floor(hours / 24);
+    if (days === 1) return "Ayer";
+    if (days < 7) return `Hace ${days} días`;
+    const d = new Date(unixSec * 1000);
+    return d.toLocaleDateString("es-MX", { day: "numeric", month: "short" });
+  }
+
   return (
     <>
       <Nav authed />
-      <main className="mx-auto max-w-4xl px-4 py-12 sm:px-6">
+      <main className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
         <header className="flex flex-col gap-1">
           <p className="text-xs font-semibold uppercase tracking-widest text-[color:var(--color-brand-600)]">
             Mi cuenta
@@ -163,6 +224,41 @@ export default async function AccountPage({ searchParams }: PageProps) {
             {user.email}
           </p>
         </header>
+
+        {/* Stats hero — 4 cards showing application activity at a glance.
+            Renders even when stats failed (counts default to 0) so the
+            visual hierarchy stays consistent for new users. */}
+        <section className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <StatHero
+            label="Total"
+            value={stats.totalAll}
+            sub="postulaciones"
+            tone="brand"
+            icon="📋"
+          />
+          <StatHero
+            label="Este mes"
+            value={stats.totalMonth}
+            sub={stats.totalMonth > 0 ? "postulaciones" : "Empieza hoy"}
+            tone="sky"
+            icon="🗓️"
+          />
+          <StatHero
+            label="Esta semana"
+            value={stats.totalWeek}
+            sub={stats.totalWeek > 0 ? "postulaciones" : "—"}
+            tone="emerald"
+            icon="⚡"
+          />
+          <StatHero
+            label="Top portal"
+            value={topSourceLabel}
+            sub={topSourceCount > 0 ? `${topSourceCount} aplicadas` : "Aún sin datos"}
+            tone="amber"
+            icon="🏆"
+            isText
+          />
+        </section>
 
         {needsVerify && (
           <div
@@ -409,8 +505,227 @@ export default async function AccountPage({ searchParams }: PageProps) {
             </div>
           </aside>
         </section>
+
+        {/* Actividad reciente — preview of the last 5 applications, with a
+            CTA to the full history page. Hidden when the user hasn't
+            applied to anything yet. */}
+        {(stats.totalAll > 0 || recentApplications.length > 0) && (
+          <section className="mt-8 grid gap-5 lg:grid-cols-3">
+            <article className="lg:col-span-2 rounded-[16px] border border-[color:var(--color-border)] bg-white p-6 shadow-[var(--shadow-soft)]">
+              <header className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-widest text-[color:var(--color-ink-muted)]">
+                    Actividad reciente
+                  </p>
+                  <h2 className="mt-1 text-lg font-bold text-[color:var(--color-ink)]">
+                    Últimas postulaciones
+                  </h2>
+                </div>
+                <Link
+                  href="/account/historial"
+                  className="text-sm font-semibold text-[color:var(--color-brand-600)] hover:underline"
+                >
+                  Ver todo →
+                </Link>
+              </header>
+              {recentApplications.length > 0 ? (
+                <ul className="mt-4 divide-y divide-[color:var(--color-border)]">
+                  {recentApplications.map((app) => (
+                    <li key={app.id} className="flex items-start justify-between gap-4 py-3">
+                      <div className="min-w-0 flex-1">
+                        {app.url ? (
+                          <a
+                            href={app.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="block truncate text-sm font-semibold text-[color:var(--color-ink)] hover:text-[color:var(--color-brand-600)] hover:underline"
+                          >
+                            {app.title || "(sin título)"}
+                          </a>
+                        ) : (
+                          <span className="block truncate text-sm font-semibold text-[color:var(--color-ink)]">
+                            {app.title || "(sin título)"}
+                          </span>
+                        )}
+                        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-[color:var(--color-ink-muted)]">
+                          <span>{app.company || "—"}</span>
+                          <span aria-hidden>·</span>
+                          <span>{sourceLabels[app.source]}</span>
+                          {app.matchScore > 0 && (
+                            <>
+                              <span aria-hidden>·</span>
+                              <span className="font-medium text-[color:var(--color-ink-soft)]">
+                                {app.matchScore}% match
+                              </span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex flex-col items-end gap-1">
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                            app.status === "hired"
+                              ? "bg-emerald-50 text-emerald-800"
+                              : app.status === "viewed"
+                                ? "bg-sky-50 text-sky-800"
+                                : app.status === "rejected"
+                                  ? "bg-rose-50 text-rose-800"
+                                  : "bg-slate-100 text-slate-700"
+                          }`}
+                        >
+                          {app.status === "applied"
+                            ? "Postulado"
+                            : app.status === "viewed"
+                              ? "Visto"
+                              : app.status === "rejected"
+                                ? "Rechazado"
+                                : "Contratado"}
+                        </span>
+                        <span className="text-xs text-[color:var(--color-ink-muted)]">
+                          {formatRelativeTime(app.appliedAt)}
+                        </span>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-4 text-sm text-[color:var(--color-ink-soft)]">
+                  Tu primera postulación aparecerá aquí.
+                </p>
+              )}
+            </article>
+
+            {/* Distribución por portal */}
+            <article className="rounded-[16px] border border-[color:var(--color-border)] bg-white p-6 shadow-[var(--shadow-soft)]">
+              <header>
+                <p className="text-xs font-semibold uppercase tracking-widest text-[color:var(--color-ink-muted)]">
+                  Por portal
+                </p>
+                <h2 className="mt-1 text-lg font-bold text-[color:var(--color-ink)]">
+                  Distribución
+                </h2>
+              </header>
+              <ul className="mt-4 space-y-3">
+                {sourceEntries.map(([sourceId, count]) => {
+                  const pct = stats.totalAll > 0
+                    ? Math.round((count / stats.totalAll) * 100)
+                    : 0;
+                  return (
+                    <li key={sourceId}>
+                      <div className="flex items-baseline justify-between gap-2">
+                        <span className="text-sm font-medium text-[color:var(--color-ink)]">
+                          {sourceLabels[sourceId]}
+                        </span>
+                        <span className="text-xs text-[color:var(--color-ink-muted)] font-variant-numeric tabular-nums">
+                          {count} ({pct}%)
+                        </span>
+                      </div>
+                      <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-[color:var(--color-surface-soft)]">
+                        <div
+                          className={`h-full rounded-full ${
+                            count === 0
+                              ? "bg-slate-200"
+                              : "bg-gradient-to-r from-[#70d1c6] to-[#105971]"
+                          }`}
+                          style={{ width: `${Math.max(2, pct)}%` }}
+                        />
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </article>
+          </section>
+        )}
+
+        {/* Empty-state CTA for fresh users — shown when no applications yet */}
+        {stats.totalAll === 0 && (
+          <section className="mt-8 rounded-[16px] border border-[color:var(--color-brand-200)] bg-gradient-to-br from-[color:var(--color-brand-50)] to-white p-6 shadow-[var(--shadow-soft)]">
+            <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h3 className="text-base font-bold text-[color:var(--color-ink)]">
+                  Lista para tu primera postulación
+                </h3>
+                <p className="mt-1 text-sm text-[color:var(--color-ink-soft)]">
+                  Abre LaPieza, dale clic al botón <strong>⚡ Postular con IA</strong> en cualquier vacante y termina con <strong>Finalizar</strong>. Aparecerá aquí en segundos.
+                </p>
+              </div>
+              <a
+                href="https://lapieza.io/vacantes"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center justify-center gap-2 rounded-[12px] bg-[color:var(--color-brand-600)] px-5 py-2.5 text-sm font-semibold text-white shadow-[var(--shadow-brand)] hover:bg-[color:var(--color-brand-700)]"
+              >
+                Abrir LaPieza →
+              </a>
+            </div>
+          </section>
+        )}
       </main>
       <Footer />
     </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Sub-components
+// ---------------------------------------------------------------------------
+
+/**
+ * Hero stat card. Each tone has its own border/glow accent so the four
+ * cards read as a set without looking monotone.
+ */
+function StatHero({
+  label,
+  value,
+  sub,
+  tone,
+  icon,
+  isText = false,
+}: {
+  label: string;
+  value: number | string;
+  sub?: string;
+  tone: "brand" | "sky" | "emerald" | "amber";
+  icon: string;
+  isText?: boolean;
+}) {
+  const toneClasses: Record<string, string> = {
+    brand:
+      "border-[color:var(--color-brand-200)] bg-gradient-to-br from-[color:var(--color-brand-50)] to-white",
+    sky: "border-sky-200 bg-gradient-to-br from-sky-50 to-white",
+    emerald:
+      "border-emerald-200 bg-gradient-to-br from-emerald-50 to-white",
+    amber: "border-amber-200 bg-gradient-to-br from-amber-50 to-white",
+  };
+  const valueColor: Record<string, string> = {
+    brand: "text-[color:var(--color-brand-700)]",
+    sky: "text-sky-700",
+    emerald: "text-emerald-700",
+    amber: "text-amber-700",
+  };
+  return (
+    <div
+      className={`rounded-[14px] border p-4 shadow-[var(--shadow-soft)] ${toneClasses[tone]}`}
+    >
+      <div className="flex items-start justify-between">
+        <p className="text-xs font-semibold uppercase tracking-widest text-[color:var(--color-ink-muted)]">
+          {label}
+        </p>
+        <span aria-hidden className="text-lg leading-none">
+          {icon}
+        </span>
+      </div>
+      <div
+        className={`mt-2 ${isText ? "text-xl" : "text-3xl"} font-bold tracking-tight ${valueColor[tone]}`}
+      >
+        {typeof value === "number" ? value.toLocaleString("es-MX") : value}
+      </div>
+      {sub && (
+        <div className="mt-0.5 text-xs text-[color:var(--color-ink-muted)]">
+          {sub}
+        </div>
+      )}
+    </div>
   );
 }
