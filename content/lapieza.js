@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-25-daily-caps";
+  const EAMX_LAPIEZA_VERSION = "2026-05-26-yn-quiz";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -1812,6 +1812,21 @@
           try { return isVisible(b); } catch (_) { return false; }
         });
       if (quizBtns.length >= 2) return true;
+    } catch (_) { /* fall through */ }
+
+    // PATH 1.5: Y/N quiz — LaPieza shows knock-out screening questions
+    // (e.g. "Do you have 3+ years of experience with X?") with two
+    // big SI/NO buttons. Detected here so the chain doesn't blow
+    // past the quiz step thinking it's a no-op "click Continuar".
+    try {
+      const ynBtns = collectYesNoOptions(document.body);
+      if (ynBtns.length >= 2) {
+        // Sanity check: only flag as quiz step if there's a question
+        // mark in the visible body — without it, two bare SI/NO
+        // buttons could be from a cookie banner or other modal.
+        const bodyTxt = (document.body.innerText || "").slice(0, 3000);
+        if (bodyTxt.includes("?")) return true;
+      }
     } catch (_) { /* fall through */ }
 
     // PATH 2: visible "Pregunta N de M" / "N / M" / "Question N of M"
@@ -7789,28 +7804,84 @@
    *   nextButton: HTMLButtonElement | null
    * } | null}
    */
+  // Y/N quiz helpers. LaPieza shows knock-out screening questions on
+  // technical roles with just two buttons: SI / NO (with diacritical
+  // variants and English). User-reported: "1/6 Do you have 3+ years
+  // of analyzing and interpreting data with Redshift, Oracle, NoSQL
+  // etc. experience? [SI] [NO]" — our multi-select-button detector
+  // missed this and the chain looped on Continuar forever.
+  const YN_BUTTON_TEXT_RX = /^\s*(s[íi]|si|no|yes)\s*$/i;
+  function normalizeYesNoKey(text) {
+    const t = text.trim().toLowerCase();
+    if (t === "si" || t === "sí" || t === "yes") return "SI";
+    if (t === "no") return "NO";
+    return null;
+  }
+  function collectYesNoOptions(root) {
+    if (!root) return [];
+    const out = [];
+    const seen = new Set();
+    let buttons = [];
+    try { buttons = Array.from(root.querySelectorAll("button")); } catch (_) {}
+    for (const btn of buttons) {
+      try {
+        if (!isVisible(btn)) continue;
+        if (btn.disabled) continue;
+        if (btn.closest(".eamx-fab, .eamx-panel, .eamx-overlay, .eamx-matches-panel, .eamx-toast, [data-eamx]")) continue;
+        const text = (btn.textContent || "").trim();
+        if (!text || text.length > 5) continue;
+        if (!YN_BUTTON_TEXT_RX.test(text)) continue;
+        const key = normalizeYesNoKey(text);
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        out.push({ key, text: text.toUpperCase(), button: btn });
+      } catch (_) { /* skip */ }
+    }
+    return out;
+  }
+  // Find the closest ancestor that wraps a question + its Y/N buttons.
+  // Heuristic: the buttons' common ancestor that ALSO contains a "?"
+  // line. We walk up from the first SI button. If nothing matches we
+  // fall back to document.body so the question-text walker can still
+  // find the prompt.
+  function findYesNoQuizContainer() {
+    const ynBtns = collectYesNoOptions(document.body);
+    if (ynBtns.length < 2) return null;
+    let node = ynBtns[0].button;
+    for (let i = 0; i < 8 && node && node.parentElement; i++) {
+      node = node.parentElement;
+      const txt = (node.textContent || "").trim();
+      if (txt.includes("?") && txt.length <= QUIZ_QUESTION_MAX_LEN * 4) return node;
+    }
+    return document.body;
+  }
+
   function detectQuizQuestion() {
     let container = document.querySelector("div.details__form__preguntas");
     if (!container || !isVisible(container)) {
-      // Fallback: any element with ≥2 visible multi-select buttons. We
-      // walk up from each button group to find the smallest common
-      // ancestor — that's most likely the quiz container.
+      // Fallback A: any element with ≥2 visible multi-select buttons.
       const allOptions = Array.from(document.querySelectorAll("button.multi-select-button"))
         .filter(isVisible);
-      if (allOptions.length < 2) return null;
-      // Cheap heuristic: take the first option's parent as the container.
-      // For LaPieza this matches in practice; if it doesn't, the question-
-      // text walk below will fail gracefully and we'll bail.
-      container = allOptions[0].parentElement || allOptions[0];
+      if (allOptions.length >= 2) {
+        container = allOptions[0].parentElement || allOptions[0];
+      } else {
+        // Fallback B: Y/N quiz pattern — two visible <button> elements
+        // whose text is exactly "SI"/"NO"/"SÍ"/"YES"/"NO" (≤ 5 chars).
+        // LaPieza ships knock-out screening questions this way for
+        // technical roles ("Do you have 3+ years of X? [SI] [NO]").
+        // We detect them here so the chain doesn't get stuck on
+        // looksLikeQuizStep returning false.
+        const ynContainer = findYesNoQuizContainer();
+        if (!ynContainer) return null;
+        container = ynContainer;
+      }
     }
 
-    // Options — only direct or nested multi-select buttons inside this
-    // container. We re-query (vs. reusing allOptions) because the
-    // container fallback may have repositioned us.
+    // Options — try multi-select-button first; if none, fall back to Y/N.
+    let options = [];
+    const seenKeys = new Set();
     const optionButtons = Array.from(container.querySelectorAll("button.multi-select-button"))
       .filter(isVisible);
-    const options = [];
-    const seenKeys = new Set();
     for (const btn of optionButtons) {
       const text = (btn.textContent || "").trim();
       const m = text.match(QUIZ_OPTION_RX);
@@ -7822,7 +7893,15 @@
       seenKeys.add(key);
       options.push({ key, text: optText, button: btn });
     }
-    if (options.length < 2) return null;
+    if (options.length < 2) {
+      // Y/N fallback — same container, look for SI/NO buttons.
+      const ynOpts = collectYesNoOptions(container);
+      if (ynOpts.length >= 2) {
+        options = ynOpts;
+      } else {
+        return null;
+      }
+    }
 
     // Counter — walk the container looking for the X/Y pattern. Limit the
     // scan depth so we don't pick up a footer pagination accidentally.
