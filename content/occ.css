@@ -3335,6 +3335,18 @@
   color: #5eead4;
   box-shadow: 0 0 0 1px rgba(45, 212, 191, 0.10), inset 0 0 12px rgba(45, 212, 191, 0.10);
 }
+/* "Más…" chip — visually distinct from numeric chips so the user
+   knows it opens a prompt instead of selecting a fixed value. */
+.eamx-bulk__chip--more {
+  font-style: italic;
+  border-style: dashed;
+  color: rgba(94, 234, 212, 0.85);
+  flex: 0 0 auto;
+  min-width: 52px;
+}
+.eamx-bulk__chip--more:hover {
+  border-style: solid;
+}
 .eamx-bulk__chip:active { transform: scale(0.96); }
 .eamx-bulk__selector-plan {
   font-size: 10.5px;

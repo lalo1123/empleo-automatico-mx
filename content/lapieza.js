@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-26-deep-audit";
+  const EAMX_LAPIEZA_VERSION = "2026-05-26-daily-counter-fix";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -1398,6 +1398,14 @@
       clearBulkModeFlag();
       return;
     }
+
+    // Re-attach the tracker to `stillThere` in case LaPieza re-rendered
+    // the Finalizar button during the 5s countdown. Without this, the
+    // tracker is on the OLD button (now detached) and the click on the
+    // NEW one fires no upsertApplied → the daily cap counter never
+    // increments. attachFinalizeApplyTracker has its own data-attribute
+    // guard so re-attaching the same button is a no-op.
+    attachFinalizeApplyTracker(stillThere);
 
     // Clear the flag BEFORE clicking so the click handler in
     // attachFinalizeApplyTracker doesn't accidentally re-read a stale
@@ -4133,6 +4141,11 @@
   let matchesScrollHandler = null;
   let matchesScrollDebounce = null;
   let matchesQueueListener = null;
+  // Cached for refreshBulkSafety to recompute the bulk section without
+  // re-running the full panel render. Updated each time the bulk
+  // section is rendered.
+  let lastBulkPlan = "free";
+  let lastBulkRemaining = null;
   let matchesEscHandler = null;
   // Tracks the current top-N rendered list so the queue-onChanged listener
   // can re-paint button states without re-running findVacancyCards.
@@ -4251,15 +4264,21 @@
     document.addEventListener("keydown", matchesEscHandler, true);
 
     // Subscribe to queue changes so external "Quitar" actions update the
-    // per-item buttons immediately.
+    // per-item buttons immediately AND the safety pill (daily counter)
+    // reflects new applications without requiring a panel re-open.
     try {
       if (chrome?.storage?.onChanged) {
         matchesQueueListener = (changes, area) => {
           if (area !== "local") return;
           if (changes && changes["eamx:queue"]) {
-            // Repaint buttons based on the new queue snapshot. We don't
-            // re-run findVacancyCards because the score order is locked.
+            // 1) Mark buttons (per-card "✓ Marcada" badges).
             repaintMarkButtons();
+            // 2) Re-render the safety pill + chip selector so the
+            //    daily counter (e.g. "Hoy en este portal: 5/20")
+            //    moves the moment a Finalizar click lands a row.
+            //    Without this, the pill stays stuck at the value it
+            //    had when the panel first opened.
+            try { refreshBulkSafety(); } catch (_) {}
           }
         };
         chrome.storage.onChanged.addListener(matchesQueueListener);
@@ -4344,6 +4363,41 @@
       // choice per-plan so reopening the panel remembers it.
       ev.preventDefault();
       onMatchesBulkSelectN(action);
+      return;
+    }
+    if (what === "bulk-pick-custom-n") {
+      // User clicked the "Más…" chip — prompt for a custom N.
+      // Validated client-side against data-bulk-max (which already
+      // reflects min(monthlyRemaining, dailyRemaining)).
+      ev.preventDefault();
+      const max = Number(action.getAttribute("data-bulk-max")) || 0;
+      if (max <= 0) {
+        toast("Sin cupo disponible para postular más vacantes hoy.", "info", { durationMs: 5000 });
+        return;
+      }
+      const raw = window.prompt(
+        `¿Cuántas vacantes auto-postular? (1 – ${max})`,
+        String(Math.min(max, 7))
+      );
+      if (raw == null) return; // user cancelled
+      const n = parseInt(raw, 10);
+      if (!Number.isFinite(n) || n < 1) {
+        toast("Cantidad inválida.", "error", { durationMs: 4000 });
+        return;
+      }
+      if (n > max) {
+        toast(`Máximo permitido hoy: ${max}.`, "info", { durationMs: 5000 });
+        return;
+      }
+      // Persist + refresh the bulk section so the new N becomes the
+      // active chip and gets picked up by onMatchesBulkApplyTop.
+      try {
+        chrome.storage.local.set({ [`eamx:bulk-n:${lastBulkPlan}`]: n }, () => {
+          refreshBulkSafety().catch(() => {});
+        });
+      } catch (_) {
+        refreshBulkSafety().catch(() => {});
+      }
       return;
     }
     if (what === "focus-tab") {
@@ -5312,6 +5366,11 @@
         }
       } catch (_) {}
 
+      // Cache so refreshBulkSafety can re-render on queue change
+      // without re-running the full panel content pipeline.
+      lastBulkPlan = userPlan;
+      lastBulkRemaining = userRemaining;
+
       bulkEl.innerHTML = renderBulkSection({
         plan: userPlan,
         remaining: userRemaining,
@@ -5365,6 +5424,37 @@
   // available chips at the user's remaining monthly cuota so they
   // can't pick more than they have credit for. The last-used N is
   // persisted to chrome.storage.local keyed per-plan.
+  // Re-render the bulk section (chip selector + safety pill) in place
+  // without going through the full renderMatchesPanelContent pipeline.
+  // Triggered by the queue-change listener so the safety pill counter
+  // ("Hoy en este portal: N/M") moves the moment a Finalizar lands.
+  async function refreshBulkSafety() {
+    if (!matchesPanelEl) return;
+    const bulkEl = matchesPanelEl.querySelector("[data-eamx-matches-bulk]");
+    if (!bulkEl) return;
+    const dailyCap = AUTO_PORTAL_CAPS[SOURCE] ?? 20;
+    let dailyCount = 0;
+    try {
+      if (queueModule && typeof queueModule.countAppliedTodayForSource === "function") {
+        dailyCount = await queueModule.countAppliedTodayForSource(SOURCE);
+      }
+    } catch (_) {}
+    // Preserve the user's last-selected N (read from the live DOM —
+    // the chip with --active class is the source of truth).
+    let savedN = null;
+    try {
+      const activeChip = bulkEl.querySelector(".eamx-bulk__chip--active[data-bulk-n]");
+      if (activeChip) savedN = Number(activeChip.getAttribute("data-bulk-n")) || null;
+    } catch (_) {}
+    bulkEl.innerHTML = renderBulkSection({
+      plan: lastBulkPlan,
+      remaining: lastBulkRemaining,
+      savedN,
+      dailyCount,
+      dailyCap
+    });
+  }
+
   function renderBulkSection({ plan = "free", remaining = null, savedN = null, dailyCount = 0, dailyCap = 20 } = {}) {
     // Per-plan chip options. Tuned so the user always sees a small,
     // a medium, and a "max for this plan" choice — and so Free never
@@ -5399,7 +5489,26 @@
     // Pick the initial active N: savedN if it's still in the chip set,
     // else the middle option, else the first.
     const defaultIdx = Math.min(1, chips.length - 1);
-    const activeN = (savedN && chips.includes(savedN)) ? savedN : chips[defaultIdx];
+    // If savedN is bigger than the largest chip (user picked a custom
+    // value last time, e.g. 18) we add it as an extra chip so the
+    // active state has somewhere to land. Only when ≤ dailyRemaining.
+    let resolvedActive = chips[defaultIdx];
+    if (savedN && Number.isFinite(savedN) && savedN > 0 && savedN <= dailyRemaining) {
+      if (chips.includes(savedN)) {
+        resolvedActive = savedN;
+      } else {
+        // Insert savedN into chips in sorted order.
+        chips = chips.concat(savedN).sort((a, b) => a - b);
+        resolvedActive = savedN;
+      }
+    }
+    const activeN = resolvedActive;
+
+    // Maximum allowed for the custom input — same gate as the chips.
+    const customMax = Math.min(
+      Number.isFinite(remaining) ? remaining : 99,
+      Number.isFinite(dailyRemaining) ? dailyRemaining : 99
+    );
 
     const chipBtns = chips.map((n) => `
       <button type="button"
@@ -5408,6 +5517,16 @@
         data-bulk-n="${n}"
         aria-pressed="${n === activeN ? 'true' : 'false'}">${n}</button>
     `).join("");
+    // "Más…" chip — opens a numeric prompt so the user can pick any N
+    // up to customMax. Pro users wanted more flexibility than the
+    // fixed [3, 5, 10] set without forcing them to upgrade to Premium.
+    const moreChip = customMax > (chips[chips.length - 1] || 0)
+      ? `<button type="button"
+           class="eamx-bulk__chip eamx-bulk__chip--more"
+           data-action="bulk-pick-custom-n"
+           data-bulk-max="${customMax}"
+           title="Elige una cantidad personalizada (máx ${customMax})">Más…</button>`
+      : "";
 
     // The plan label shown next to the chips. Helps the user
     // understand WHY Free only shows 1/2/3 — "Plan Gratis permite hasta
@@ -5446,7 +5565,7 @@
       ${safetyPill}
       <div class="eamx-bulk__selector" role="group" aria-label="Cantidad a postular">
         <span class="eamx-bulk__selector-label">Cantidad</span>
-        <div class="eamx-bulk__chips">${chipBtns}</div>
+        <div class="eamx-bulk__chips">${chipBtns}${moreChip}</div>
         <span class="eamx-bulk__selector-plan">${escapeHtml(planNoun)}</span>
       </div>
       <button type="button" class="eamx-matches-panel__bulk-btn eamx-matches-panel__bulk-btn--primary" data-action="bulk-apply-top">
