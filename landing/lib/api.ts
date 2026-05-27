@@ -217,6 +217,18 @@ export type ApplicationSource =
   | "lapieza" | "occ" | "computrabajo" | "bumeran" | "indeed" | "linkedin";
 export type ApplicationStatus = "applied" | "viewed" | "rejected" | "hired";
 
+export type ApplicationStep =
+  | "starting" | "cv" | "cv_personalized" | "cover" | "questions" | "quiz"
+  | "ready" | "submitted" | "error" | "plan_limit" | "closed" | "no_form"
+  | "already_applied";
+
+export interface ApplicationEvent {
+  step: ApplicationStep;
+  at: number;
+  label?: string;
+  meta?: Record<string, string | number | boolean>;
+}
+
 export interface Application {
   id: number;
   source: ApplicationSource;
@@ -230,6 +242,7 @@ export interface Application {
   appliedAt: number;
   sourceTs: number | null;
   reasons: string[];
+  events: ApplicationEvent[];
 }
 
 export interface ApplicationsHistoryResponse {

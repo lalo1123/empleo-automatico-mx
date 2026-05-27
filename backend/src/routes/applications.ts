@@ -21,11 +21,13 @@ import {
 import { assertUnderLimit, incrementUsage, reserveUsageSlot, refundUsageSlot } from "../lib/usage.js";
 import { getPlan } from "../lib/plans.js";
 import {
+  appendApplicationEvent,
   applicationCountsBySource,
   countApplications,
   insertApplication,
   isValidApplicationSource,
   isValidApplicationStatus,
+  isValidApplicationStep,
   listApplications,
   rowToApplication
 } from "../lib/db.js";
@@ -597,6 +599,67 @@ applicationsRoutes.post("/track", authRequired(), emailVerifiedRequired(), async
     const user = c.get("user");
     const row = insertApplication({ userId: user.id, ...parsed.data });
     return c.json({ ok: true, application: rowToApplication(row) });
+  } catch (err) {
+    return sendError(c, err);
+  }
+});
+
+// Append a single timeline event to an application. Called by the
+// extension every time the chain transitions through a meaningful
+// step (cv / cover / questions / quiz / ready / submitted / ...).
+// The web /account/historial detail drawer reads these events to
+// show "what actually happened" on each postulación.
+const trackEventSchema = z.object({
+  source: z.enum(["lapieza", "occ", "computrabajo", "bumeran", "indeed", "linkedin"]),
+  vacancyId: z.string().min(1).max(200).transform(sanitizeFreeText),
+  step: z.enum([
+    "starting", "cv", "cv_personalized", "cover", "questions", "quiz",
+    "ready", "submitted", "error", "plan_limit", "closed", "no_form",
+    "already_applied"
+  ]),
+  label: z.string().max(120).optional().transform((s) => s ? sanitizeFreeText(s) : undefined),
+  // Meta is a small bag of scalars used by the web detail drawer to
+  // surface specifics (e.g. CV name, question count). Keys are kept
+  // short, values are filtered to scalars in appendApplicationEvent.
+  meta: z.record(z.union([z.string(), z.number(), z.boolean()])).optional(),
+  // Bootstrap data — sent on every event so the server can auto-create
+  // the application row if this is the first event for the vacancy.
+  // Without this, mid-chain events (cv/cover/questions/quiz) before
+  // Finalizar would be no-ops because the row doesn't exist yet.
+  bootstrap: z.object({
+    url: z.string().max(2048).optional().default("").transform(sanitizeUrl),
+    title: z.string().max(300).optional().default("").transform(sanitizeFreeText),
+    company: z.string().max(200).optional().default("").transform(sanitizeFreeText),
+    location: z.string().max(200).optional().default("").transform(sanitizeFreeText),
+    matchScore: z.number().int().min(0).max(100).optional().default(0)
+  }).optional()
+});
+
+applicationsRoutes.post("/track-event", authRequired(), emailVerifiedRequired(), async (c) => {
+  try {
+    const body = await c.req.json().catch(() => null);
+    const parsed = trackEventSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new HttpError(
+        400,
+        "VALIDATION_ERROR",
+        parsed.error.issues[0]?.message ?? "Evento inválido"
+      );
+    }
+    if (!isValidApplicationStep(parsed.data.step)) {
+      throw new HttpError(400, "VALIDATION_ERROR", "Step desconocido");
+    }
+    const user = c.get("user");
+    const appended = appendApplicationEvent({
+      userId: user.id,
+      source: parsed.data.source,
+      vacancyId: parsed.data.vacancyId,
+      step: parsed.data.step,
+      label: parsed.data.label,
+      meta: parsed.data.meta,
+      bootstrap: parsed.data.bootstrap
+    });
+    return c.json({ ok: true, appended });
   } catch (err) {
     return sendError(c, err);
   }

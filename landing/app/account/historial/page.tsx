@@ -17,6 +17,7 @@ import {
 import { clearSessionCookie, getSessionToken } from "@/lib/auth";
 import { pageMetadata } from "@/lib/seo";
 import type { Metadata } from "next";
+import { HistoryTable } from "@/components/history-table";
 
 export const metadata: Metadata = pageMetadata({
   title: "Historial de postulaciones",
@@ -233,73 +234,12 @@ export default async function HistorialPage({ searchParams }: PageProps) {
           ))}
         </section>
 
-        {/* Table */}
+        {/* Table — interactive (click a row → timeline drawer) */}
         <section className="mt-6 overflow-hidden rounded-[16px] border border-[color:var(--color-border)] bg-white shadow-[var(--shadow-soft)]">
           {applications.length === 0 ? (
             <EmptyState user={user.email} />
           ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead className="bg-[color:var(--color-surface-soft)] text-xs uppercase tracking-wider text-[color:var(--color-ink-muted)]">
-                  <tr>
-                    <th className="px-4 py-3 text-left font-semibold">Vacante</th>
-                    <th className="px-4 py-3 text-left font-semibold">Empresa</th>
-                    <th className="px-4 py-3 text-left font-semibold">Portal</th>
-                    <th className="px-4 py-3 text-left font-semibold">Match</th>
-                    <th className="px-4 py-3 text-left font-semibold">Estado</th>
-                    <th className="px-4 py-3 text-left font-semibold">Fecha</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[color:var(--color-border)]">
-                  {applications.map((app) => (
-                    <tr key={app.id} className="hover:bg-[color:var(--color-surface-soft)]">
-                      <td className="px-4 py-3 align-top">
-                        {app.url ? (
-                          <a
-                            href={app.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="font-medium text-[color:var(--color-ink)] hover:text-[color:var(--color-brand-600)] hover:underline"
-                          >
-                            {app.title || "(sin título)"}
-                          </a>
-                        ) : (
-                          <span className="font-medium text-[color:var(--color-ink)]">
-                            {app.title || "(sin título)"}
-                          </span>
-                        )}
-                        {app.location && (
-                          <div className="mt-0.5 text-xs text-[color:var(--color-ink-muted)]">
-                            {app.location}
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 align-top text-[color:var(--color-ink-soft)]">
-                        {app.company || "—"}
-                      </td>
-                      <td className="px-4 py-3 align-top text-[color:var(--color-ink-soft)]">
-                        {sourceLabel(app.source)}
-                      </td>
-                      <td className="px-4 py-3 align-top font-medium text-[color:var(--color-ink)]">
-                        {app.matchScore > 0 ? `${app.matchScore}%` : "—"}
-                      </td>
-                      <td className="px-4 py-3 align-top">
-                        <span
-                          className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${statusTone(
-                            app.status
-                          )}`}
-                        >
-                          {statusLabel(app.status)}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 align-top text-[color:var(--color-ink-soft)]">
-                        {formatDate(app.appliedAt)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <HistoryTable applications={applications} />
           )}
         </section>
 

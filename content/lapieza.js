@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-27-filters-chip-compact";
+  const EAMX_LAPIEZA_VERSION = "2026-05-27-timeline-track";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -1273,9 +1273,20 @@
   // "cover" | "questions" | "quiz" | "ready" | "submitted" | "error"
   // | "plan_limit". Pass an explicit `label` to override the canned
   // text (e.g. error path: "Sin cuota del plan").
+  // Steps we mirror to the backend timeline. Some intermediate steps
+  // (e.g. "starting") are too noisy to persist — they happen on every
+  // chain re-fire. The set below is "user-visible milestones" that
+  // make sense in a postulación detail drawer.
+  const TIMELINE_PERSIST_STEPS = new Set([
+    "cv", "cv_personalized", "cover", "questions", "quiz",
+    "ready", "submitted", "error", "plan_limit", "closed",
+    "no_form", "already_applied"
+  ]);
+
   async function reportBulkStatus(step, opts = {}) {
+    let jobId = null;
     try {
-      let jobId = (lastJob && lastJob.id) || null;
+      jobId = (lastJob && lastJob.id) || null;
       if (!jobId) { try { jobId = idFromUrl(location.href); } catch (_) {} }
       if (!jobId) return;
       if (!chrome?.storage?.session) return;
@@ -1289,7 +1300,38 @@
           );
         } catch (_) { resolve(); }
       });
-    } catch (_) { /* swallow — telemetry-style, never block the chain */ }
+    } catch (_) { /* swallow — local progress card is best-effort */ }
+
+    // ALSO mirror to the backend timeline so the web /account/historial
+    // detail drawer can show what happened. Fire-and-forget. Gated by
+    // TIMELINE_PERSIST_STEPS so we don't spam with every "starting"
+    // re-fire. lastJob.id is required (we need the same id the /track
+    // call used).
+    if (!jobId || !TIMELINE_PERSIST_STEPS.has(step)) return;
+    try {
+      const eventPayload = {
+        type: MSG.TRACK_EVENT,
+        source: SOURCE,
+        vacancyId: jobId,
+        step
+      };
+      if (opts.label) eventPayload.label = opts.label;
+      if (opts.meta && typeof opts.meta === "object") eventPayload.meta = opts.meta;
+      // Bootstrap data — the server auto-creates the application row
+      // on the first event if it doesn't exist (mid-chain events
+      // before Finalizar otherwise would be no-ops). Sourced from
+      // lastJob; safe to send on every event because the backend dedupes.
+      if (lastJob && (lastJob.title || lastJob.company || lastJob.url)) {
+        eventPayload.bootstrap = {
+          url: lastJob.url || location.href,
+          title: lastJob.title || "",
+          company: lastJob.company || "",
+          location: lastJob.location || ""
+        };
+      }
+      // Don't await — fire-and-forget, never block the chain.
+      try { sendMsg(eventPayload); } catch (_) {}
+    } catch (_) {}
   }
 
   // Read the eamx:bulk-mode:<jobId> flag. Set by onMatchesBulkApplyTop

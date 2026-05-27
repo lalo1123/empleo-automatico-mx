@@ -103,6 +103,29 @@ export interface ApplicationRow {
   applied_at: number;       // unix seconds, server-stamped on insert
   source_ts: number | null; // ms timestamp the extension reported
   reasons_json: string;     // JSON array of strings
+  events_json: string;      // JSON array of ApplicationEvent
+}
+
+export type ApplicationStep =
+  | "starting"
+  | "cv"
+  | "cv_personalized"
+  | "cover"
+  | "questions"
+  | "quiz"
+  | "ready"
+  | "submitted"
+  | "error"
+  | "plan_limit"
+  | "closed"
+  | "no_form"
+  | "already_applied";
+
+export interface ApplicationEvent {
+  step: ApplicationStep;
+  at: number;          // unix seconds, server-stamped
+  label?: string;      // human-readable detail (e.g. "Carta personalizada")
+  meta?: Record<string, unknown>;
 }
 
 export type Modality = "presencial" | "remoto" | "hibrido" | "any";
@@ -140,6 +163,7 @@ export interface Application {
   appliedAt: number;        // unix seconds
   sourceTs: number | null;
   reasons: string[];
+  events: ApplicationEvent[];
 }
 
 // Profile shape (mirrors lib/schemas.js JSDoc).

@@ -10,9 +10,11 @@ import { loadEnv, isAdminEmail } from "./env.js";
 import type { AppEnv } from "./env.js";
 import type {
   Application,
+  ApplicationEvent,
   ApplicationRow,
   ApplicationSource,
   ApplicationStatus,
+  ApplicationStep,
   BillingInterval,
   EmailVerificationRow,
   Modality,
@@ -548,6 +550,26 @@ export function isValidApplicationStatus(s: unknown): s is ApplicationStatus {
   return typeof s === "string" && (VALID_APPLICATION_STATUS as string[]).includes(s);
 }
 
+const VALID_STEPS: ApplicationStep[] = [
+  "starting", "cv", "cv_personalized", "cover", "questions", "quiz",
+  "ready", "submitted", "error", "plan_limit", "closed", "no_form",
+  "already_applied"
+];
+export function isValidApplicationStep(s: unknown): s is ApplicationStep {
+  return typeof s === "string" && (VALID_STEPS as string[]).includes(s);
+}
+
+function parseEvents(json: string | null | undefined): ApplicationEvent[] {
+  if (!json) return [];
+  try {
+    const parsed = JSON.parse(json);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((e) => e && typeof e === "object" && isValidApplicationStep((e as { step?: unknown }).step) && Number.isFinite((e as { at?: unknown }).at))
+      .slice(-50) as ApplicationEvent[];
+  } catch (_) { return []; }
+}
+
 /** Marshal a row to the API shape. */
 export function rowToApplication(row: ApplicationRow): Application {
   let reasons: string[] = [];
@@ -567,8 +589,119 @@ export function rowToApplication(row: ApplicationRow): Application {
     status: row.status,
     appliedAt: row.applied_at,
     sourceTs: row.source_ts,
-    reasons
+    reasons,
+    events: parseEvents(row.events_json)
   };
+}
+
+/**
+ * Append a single event to an application's events_json array. Looks
+ * the row up by (user_id, source, vacancy_id) — same composite key as
+ * insertApplication.
+ *
+ * If the row doesn't exist yet AND the caller passed bootstrap data
+ * (url/title/company/location/matchScore), creates the row first with
+ * status="applied". This lets the extension report in-progress steps
+ * (cv/cover/questions/quiz) before the user finalizes — the row
+ * appears immediately in /account/historial showing "started, didn't
+ * submit yet" timeline.
+ *
+ * Cap at 50 events per row to bound storage.
+ */
+export function appendApplicationEvent(input: {
+  userId: string;
+  source: ApplicationSource;
+  vacancyId: string;
+  step: ApplicationStep;
+  label?: string;
+  meta?: Record<string, unknown>;
+  /** Bootstrap data — used to create the row if it doesn't exist. */
+  bootstrap?: {
+    url?: string;
+    title?: string;
+    company?: string;
+    location?: string;
+    matchScore?: number;
+  };
+}): boolean {
+  let row = getDb()
+    .prepare<[string, string, string], ApplicationRow>(
+      `SELECT * FROM applications
+       WHERE user_id = ? AND source = ? AND vacancy_id = ?
+       LIMIT 1`
+    )
+    .get(input.userId, input.source, input.vacancyId);
+  if (!row && input.bootstrap) {
+    // Auto-create the row so subsequent events have somewhere to land.
+    insertApplication({
+      userId: input.userId,
+      source: input.source,
+      vacancyId: input.vacancyId,
+      url: input.bootstrap.url ?? "",
+      title: input.bootstrap.title ?? "",
+      company: input.bootstrap.company ?? "",
+      location: input.bootstrap.location ?? "",
+      matchScore: input.bootstrap.matchScore ?? 0,
+      status: "applied",
+      reasons: []
+    });
+    row = getDb()
+      .prepare<[string, string, string], ApplicationRow>(
+        `SELECT * FROM applications
+         WHERE user_id = ? AND source = ? AND vacancy_id = ?
+         LIMIT 1`
+      )
+      .get(input.userId, input.source, input.vacancyId);
+  }
+  if (!row) return false;
+
+  const events = parseEvents(row.events_json);
+  // Idempotency: if the LAST event has the same step within the last
+  // 5 seconds, skip — the extension fires reportBulkStatus many times
+  // per step and we only want the first one per step.
+  const nowSec = Math.floor(Date.now() / 1000);
+  const last = events[events.length - 1];
+  if (last && last.step === input.step && (nowSec - last.at) < 5) {
+    return false;
+  }
+  const next: ApplicationEvent = {
+    step: input.step,
+    at: nowSec
+  };
+  if (input.label) next.label = String(input.label).slice(0, 120);
+  if (input.meta && typeof input.meta === "object") {
+    // Keep meta small — sanitize values to scalars only.
+    const safeMeta: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(input.meta)) {
+      if (k.length > 32) continue;
+      if (typeof v === "string") safeMeta[k] = v.slice(0, 200);
+      else if (typeof v === "number" && Number.isFinite(v)) safeMeta[k] = v;
+      else if (typeof v === "boolean") safeMeta[k] = v;
+    }
+    if (Object.keys(safeMeta).length) next.meta = safeMeta;
+  }
+  const trimmed = events.concat(next).slice(-50);
+
+  getDb()
+    .prepare(
+      `UPDATE applications SET events_json = ?
+       WHERE user_id = ? AND source = ? AND vacancy_id = ?`
+    )
+    .run(JSON.stringify(trimmed), input.userId, input.source, input.vacancyId);
+
+  // When the step is "submitted" also bump the row's applied_at
+  // forward so the historial sorts the user's actual submit moment
+  // (not their original insertApplication call).
+  if (input.step === "submitted") {
+    getDb()
+      .prepare(
+        `UPDATE applications SET applied_at = ?, source_ts = ?
+         WHERE user_id = ? AND source = ? AND vacancy_id = ?`
+      )
+      .run(nowSec, Date.now(), input.userId, input.source, input.vacancyId);
+  }
+
+  return true;
 }
 
 /**

@@ -3284,14 +3284,14 @@
   color: #94a3b8;
 }
 
-/* Safety pill — shows "Hoy en este portal: X/Y" above the bulk
-   selector. Caps are anti-bot-detection thresholds (LinkedIn 15/day,
-   LaPieza 20/day, etc.). Color shifts ok → warn → max as the user
-   approaches the daily limit. */
+/* Safety pill — compact 2-line variant. Anti-bot-detection daily cap
+   info shown above the bulk selector. Tooltip on hover spells out the
+   full per-portal limits; the pill itself stays small to leave more
+   room for the actual action buttons. */
 .eamx-bulk__safety {
-  margin: 0 0 10px;
-  padding: 10px 12px;
-  border-radius: 10px;
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
   background: rgba(15, 23, 42, 0.45);
   border: 1px solid rgba(255, 255, 255, 0.06);
   cursor: help;
@@ -3299,25 +3299,25 @@
 .eamx-bulk__safety-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
+  gap: 6px;
+  margin-bottom: 4px;
 }
-.eamx-bulk__safety-icon { font-size: 14px; line-height: 1; }
+.eamx-bulk__safety-icon { font-size: 12px; line-height: 1; }
 .eamx-bulk__safety-label {
   flex: 1 1 auto;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: rgba(226, 232, 240, 0.55);
 }
 .eamx-bulk__safety-count {
-  font: 700 13px inherit;
+  font: 700 12px inherit;
   font-variant-numeric: tabular-nums;
   color: #e2e8f0;
 }
 .eamx-bulk__safety-bar {
-  height: 4px;
+  height: 3px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.06);
   overflow: hidden;
@@ -3327,12 +3327,9 @@
   border-radius: 999px;
   transition: width 320ms ease, background 200ms ease;
 }
-.eamx-bulk__safety-hint {
-  margin: 6px 0 0;
-  font-size: 10.5px;
-  line-height: 1.4;
-  color: rgba(226, 232, 240, 0.40);
-}
+/* Hint hidden by default — the tooltip on hover (title attribute)
+   covers the explanation. Keeps the pill to 2 lines. */
+.eamx-bulk__safety-hint { display: none; }
 .eamx-bulk__safety--ok .eamx-bulk__safety-fill {
   background: linear-gradient(90deg, #2dd4bf 0%, #14b8a6 100%);
 }

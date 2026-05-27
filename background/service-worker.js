@@ -814,6 +814,40 @@ async function handleTrackApplication(msg) {
   }
 }
 
+// Append a single timeline event to an application. Fire-and-forget
+// — silent on failure. The frontend doesn't wait on the result; if
+// the backend is down we just lose visibility but the chain continues.
+async function handleTrackEvent(msg) {
+  const allowedSources = ["lapieza", "occ", "computrabajo", "bumeran", "indeed", "linkedin"];
+  const allowedSteps = [
+    "starting", "cv", "cv_personalized", "cover", "questions", "quiz",
+    "ready", "submitted", "error", "plan_limit", "closed", "no_form",
+    "already_applied"
+  ];
+  if (!msg || !allowedSources.includes(msg.source)) {
+    return { ok: false, error: ERROR_CODES.INVALID_INPUT, message: "Source inválido" };
+  }
+  if (!msg.vacancyId || typeof msg.vacancyId !== "string") {
+    return { ok: false, error: ERROR_CODES.INVALID_INPUT, message: "vacancyId requerido" };
+  }
+  if (!allowedSteps.includes(msg.step)) {
+    return { ok: false, error: ERROR_CODES.INVALID_INPUT, message: "Step inválido" };
+  }
+  try {
+    const data = await backend.trackEvent({
+      source: msg.source,
+      vacancyId: msg.vacancyId,
+      step: msg.step,
+      label: typeof msg.label === "string" ? msg.label : undefined,
+      meta: msg.meta && typeof msg.meta === "object" ? msg.meta : undefined
+    });
+    return { ok: true, appended: !!(data && data.appended) };
+  } catch (e) {
+    console.warn("[track-event] failed", e && e.message);
+    return failFromError(e);
+  }
+}
+
 async function handleAdminSetPlan(msg) {
   const plan = msg && msg.plan;
   if (plan !== "free" && plan !== "pro" && plan !== "premium") {
@@ -900,6 +934,8 @@ onMessage(async (msg) => {
       return handleFocusTab(msg);
     case MESSAGE_TYPES.TRACK_APPLICATION:
       return handleTrackApplication(msg);
+    case MESSAGE_TYPES.TRACK_EVENT:
+      return handleTrackEvent(msg);
     case MESSAGE_TYPES.ADMIN_SET_PLAN:
       return handleAdminSetPlan(msg);
     case MESSAGE_TYPES.ADMIN_SET_USAGE:
