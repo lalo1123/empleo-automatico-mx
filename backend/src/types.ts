@@ -105,6 +105,27 @@ export interface ApplicationRow {
   reasons_json: string;     // JSON array of strings
 }
 
+export type Modality = "presencial" | "remoto" | "hibrido" | "any";
+
+export interface PreferencesRow {
+  user_id: string;
+  city: string;
+  city_synonyms: string;       // JSON array
+  modality: Modality;
+  salary_min: number | null;
+  salary_max: number | null;
+  updated_at: number;          // unix seconds
+}
+
+export interface UserPreferences {
+  city: string;
+  citySynonyms: string[];
+  modality: Modality;
+  salaryMin: number | null;
+  salaryMax: number | null;
+  updatedAt: number;           // unix seconds
+}
+
 /** Public/JSON shape — reasons_json is parsed, snake_case → camelCase. */
 export interface Application {
   id: number;

@@ -272,3 +272,36 @@ export function getApplicationsHistory(
 export function getApplicationsStats(token: string) {
   return apiRequest<{ stats: ApplicationsStats }>("/applications/stats", { token });
 }
+
+// Preferences (city / modality / salary range)
+export type Modality = "presencial" | "remoto" | "hibrido" | "any";
+
+export interface UserPreferences {
+  city: string;
+  citySynonyms: string[];
+  modality: Modality;
+  salaryMin: number | null;
+  salaryMax: number | null;
+  updatedAt: number;
+}
+
+export function getPreferences(token: string) {
+  return apiRequest<{ preferences: UserPreferences }>("/account/preferences", { token });
+}
+
+export function putPreferences(
+  token: string,
+  body: {
+    city?: string;
+    citySynonyms?: string[];
+    modality?: Modality;
+    salaryMin?: number | null;
+    salaryMax?: number | null;
+  }
+) {
+  return apiRequest<{ preferences: UserPreferences }>("/account/preferences", {
+    method: "PUT",
+    token,
+    body
+  });
+}

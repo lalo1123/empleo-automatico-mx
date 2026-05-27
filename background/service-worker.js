@@ -682,7 +682,28 @@ async function handleGetAuthStatus() {
   // Best-effort: try a fresh /account call; fall back to cached user if offline.
   try {
     const data = await backend.getAccount();
-    return { ok: true, loggedIn: true, user: data.user, usage: data.usage };
+    // Mirror server-side preferences into chrome.storage.local so the
+    // scoring loop on the content script can use them without an extra
+    // round-trip. Server = canonical truth; local cache is a fast read.
+    if (data && data.preferences && chrome?.storage?.local) {
+      try {
+        await new Promise((resolve) => {
+          try {
+            chrome.storage.local.set(
+              { "eamx:preferences": data.preferences },
+              () => resolve()
+            );
+          } catch (_) { resolve(); }
+        });
+      } catch (_) {}
+    }
+    return {
+      ok: true,
+      loggedIn: true,
+      user: data.user,
+      usage: data.usage,
+      preferences: (data && data.preferences) || null
+    };
   } catch (e) {
     if (e instanceof backend.UnauthorizedError) {
       return { ok: true, loggedIn: false, user: null, usage: null };

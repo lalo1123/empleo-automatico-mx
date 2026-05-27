@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-26-daily-counter-fix";
+  const EAMX_LAPIEZA_VERSION = "2026-05-27-prefs-on-web";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -4495,13 +4495,19 @@
       return;
     }
     if (what === "toggle-filters") {
+      // Filters now live on the web. The extension is just the apply
+      // engine — user explicit ask: "que la extension sea mas para
+      // aplicar o autoaplicar y ya". Click → open web preferences in
+      // a new tab. The extension polls /account on next open to pick
+      // up the new prefs.
       ev.preventDefault();
-      const drawer = matchesPanelEl?.querySelector("[data-eamx-filters]");
-      if (drawer) {
-        const isOpen = !drawer.hasAttribute("hidden");
-        if (isOpen) drawer.setAttribute("hidden", "");
-        else drawer.removeAttribute("hidden");
-      }
+      try {
+        window.open(
+          "https://empleo.skybrandmx.com/account/preferences",
+          "_blank",
+          "noopener,noreferrer"
+        );
+      } catch (_) {}
       return;
     }
     if (what === "filter-modality") {
@@ -5263,7 +5269,7 @@
           <span class="eamx-matches-panel__stat-label">Vistas</span>
           <span class="eamx-matches-panel__stat-value">${cards.length}</span>
         </div>
-        <button type="button" class="eamx-matches-panel__stat eamx-matches-panel__stat--clickable" data-action="toggle-filters" title="Click para abrir filtros (ciudad, modalidad, salario)">
+        <button type="button" class="eamx-matches-panel__stat eamx-matches-panel__stat--clickable" data-action="toggle-filters" title="Abrir filtros en empleo.skybrandmx.com (nueva pestaña)">
           <span class="eamx-matches-panel__stat-label">Filtros</span>
           <span class="eamx-matches-panel__stat-value">${filtersValue}</span>
         </button>

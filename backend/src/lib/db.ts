@@ -15,11 +15,14 @@ import type {
   ApplicationStatus,
   BillingInterval,
   EmailVerificationRow,
+  Modality,
   PlanId,
+  PreferencesRow,
   SessionRow,
   SubscriptionRow,
   SubscriptionStatus,
   User,
+  UserPreferences,
   UserRow
 } from "../types.js";
 
@@ -695,4 +698,88 @@ export function applicationCountsBySource(userId: string): Record<ApplicationSou
     if (isValidApplicationSource(r.source)) out[r.source] = r.n;
   }
   return out;
+}
+
+// PREFERENCES ---------------------------------------------------------------
+// Single row per user. The extension also keeps a local copy in
+// chrome.storage.local["eamx:preferences"] for fast scoring without a
+// network round-trip; the server row is the canonical truth and overrides
+// the local cache on next /account fetch.
+
+const VALID_MODALITY: Modality[] = ["presencial", "remoto", "hibrido", "any"];
+export function isValidModality(m: unknown): m is Modality {
+  return typeof m === "string" && (VALID_MODALITY as string[]).includes(m);
+}
+
+export function rowToPreferences(row: PreferencesRow): UserPreferences {
+  let citySynonyms: string[] = [];
+  try {
+    const parsed = JSON.parse(row.city_synonyms || "[]");
+    if (Array.isArray(parsed)) citySynonyms = parsed.filter((s) => typeof s === "string");
+  } catch (_) { /* keep [] */ }
+  return {
+    city: row.city || "",
+    citySynonyms,
+    modality: isValidModality(row.modality) ? row.modality : "any",
+    salaryMin: row.salary_min,
+    salaryMax: row.salary_max,
+    updatedAt: row.updated_at
+  };
+}
+
+/** Default preferences when no row exists yet — matches the extension's
+ *  `defaultPreferences()` shape from lib/schemas.js. */
+export function defaultPreferences(): UserPreferences {
+  return {
+    city: "",
+    citySynonyms: [],
+    modality: "any",
+    salaryMin: null,
+    salaryMax: null,
+    updatedAt: Math.floor(Date.now() / 1000)
+  };
+}
+
+export function getPreferences(userId: string): UserPreferences {
+  const row = getDb()
+    .prepare<[string], PreferencesRow>(
+      `SELECT * FROM preferences WHERE user_id = ? LIMIT 1`
+    )
+    .get(userId);
+  if (!row) return defaultPreferences();
+  return rowToPreferences(row);
+}
+
+export function upsertPreferences(input: {
+  userId: string;
+  city?: string;
+  citySynonyms?: string[];
+  modality?: Modality;
+  salaryMin?: number | null;
+  salaryMax?: number | null;
+}): UserPreferences {
+  const nowSec = Math.floor(Date.now() / 1000);
+  const city = (input.city ?? "").slice(0, 100);
+  const citySynonymsJson = JSON.stringify(
+    Array.isArray(input.citySynonyms) ? input.citySynonyms.slice(0, 20) : []
+  );
+  const modality: Modality = isValidModality(input.modality) ? input.modality : "any";
+  const salaryMin = Number.isFinite(input.salaryMin) ? Math.max(0, Math.min(10_000_000, input.salaryMin as number)) : null;
+  const salaryMax = Number.isFinite(input.salaryMax) ? Math.max(0, Math.min(10_000_000, input.salaryMax as number)) : null;
+
+  getDb()
+    .prepare(
+      `INSERT INTO preferences (user_id, city, city_synonyms, modality, salary_min, salary_max, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(user_id) DO UPDATE SET
+         city = excluded.city,
+         city_synonyms = excluded.city_synonyms,
+         modality = excluded.modality,
+         salary_min = excluded.salary_min,
+         salary_max = excluded.salary_max,
+         updated_at = excluded.updated_at`
+    )
+    .run(input.userId, city, citySynonymsJson, modality, salaryMin, salaryMax, nowSec);
+
+  return getPreferences(input.userId);
 }
