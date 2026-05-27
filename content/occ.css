@@ -2998,28 +2998,26 @@
   outline-offset: 2px;
 }
 
-/* Filtros cell — UPGRADED affordance variant. User feedback: "no
-   parece como si fuera clickeable". This variant gets:
-   - teal-tinted background + border so it visually stands apart from
-     the read-only stat cells next to it
-   - external-link icon next to the label (signals "opens elsewhere")
-   - persistent "Editar →" / "Configurar →" CTA pill
-   - obvious hover lift + glow */
+/* Filtros cell — clickable variant with subtle teal accent. Same
+   footprint as the 3 read-only stat cells next to it (Mejor / Promedio
+   / Vistas) so the row stays balanced. Affordance from:
+   - teal-tinted border + faint background
+   - tiny ↗ external-link icon next to the label
+   - cursor pointer + hover lift + glow shadow */
 .eamx-matches-panel__stat--filters {
   cursor: pointer;
   appearance: none;
-  border: 1px solid rgba(94, 234, 212, 0.40);
-  background: linear-gradient(135deg,
-    rgba(45, 212, 191, 0.10) 0%,
-    rgba(20, 184, 166, 0.06) 100%);
-  border-radius: 10px;
-  padding: 6px 8px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
   font: inherit;
   color: inherit;
+  border: 1px solid rgba(94, 234, 212, 0.32);
+  background: rgba(45, 212, 191, 0.06);
+  border-radius: 8px;
+  padding: 0;
+  /* Match the implicit flex/grid layout of the sibling stat cells —
+     they're divs with no border, so the chip's border eats 1px on
+     each side. Negative inset margin compensates so column widths
+     stay uniform. */
+  margin: -1px;
   transition:
     background 160ms ease,
     border-color 160ms ease,
@@ -3027,12 +3025,10 @@
     box-shadow 160ms ease;
 }
 .eamx-matches-panel__stat--filters:hover {
-  background: linear-gradient(135deg,
-    rgba(45, 212, 191, 0.22) 0%,
-    rgba(20, 184, 166, 0.14) 100%);
-  border-color: rgba(94, 234, 212, 0.70);
+  background: rgba(45, 212, 191, 0.14);
+  border-color: rgba(94, 234, 212, 0.60);
   transform: translateY(-1px);
-  box-shadow: 0 6px 16px -8px rgba(45, 212, 191, 0.45);
+  box-shadow: 0 4px 12px -8px rgba(45, 212, 191, 0.50);
 }
 .eamx-matches-panel__stat--filters:active {
   transform: scale(0.98);
@@ -3044,41 +3040,31 @@
 .eamx-matches-panel__stat--filters .eamx-matches-panel__stat-label {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  justify-content: center;
+  gap: 3px;
   color: #5eead4;
 }
 .eamx-matches-panel__filters-ext {
   opacity: 0.75;
   transition: opacity 160ms ease, transform 160ms ease;
+  flex: 0 0 auto;
 }
 .eamx-matches-panel__stat--filters:hover .eamx-matches-panel__filters-ext {
   opacity: 1;
   transform: translate(1px, -1px);
 }
-.eamx-matches-panel__filters-icons {
-  font-size: 14px;
-  line-height: 1;
-  color: #f8fafc;
+.eamx-matches-panel__filters-value {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
 }
-.eamx-matches-panel__filters-icons--empty {
-  font-size: 11px;
-  font-weight: 500;
-  color: rgba(226, 232, 240, 0.55);
-  font-family: inherit;
-  text-transform: none;
-  letter-spacing: 0;
-}
-.eamx-matches-panel__filters-cta {
-  font: 600 10.5px/1 inherit;
-  letter-spacing: 0.02em;
-  color: #5eead4;
-  padding: 2px 6px;
-  border-radius: 999px;
-  background: rgba(45, 212, 191, 0.14);
-}
-.eamx-matches-panel__filters-cta--prompt {
+.eamx-matches-panel__filters-empty {
+  font-size: 12px;
+  font-weight: 600;
   color: #fcd34d;
-  background: rgba(251, 191, 36, 0.14);
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .eamx-matches-panel__stat-label {

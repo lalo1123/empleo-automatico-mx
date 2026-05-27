@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-27-filters-chip-cta";
+  const EAMX_LAPIEZA_VERSION = "2026-05-27-filters-chip-compact";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -5250,17 +5250,14 @@
     if (prefsForUi?.modality && prefsForUi.modality !== "any") prefsIcons.push("🏠");
     if (Number.isFinite(prefsForUi?.salaryMin) || Number.isFinite(prefsForUi?.salaryMax)) prefsIcons.push("💰");
     const hasPrefs = prefsIcons.length > 0;
-    // Filtros chip — must read as "clickable, opens elsewhere". The
-    // user reported "no parece como si fuera clickeable". Now:
-    //   - distinct teal-bordered card vs the plain stat cells
-    //   - small "↗" external-link icon next to the label
-    //   - "Editar" sub-label when prefs exist, "Configurar" when empty
-    //   - hover state lifts + glows
-    const filtersInner = hasPrefs
-      ? `<span class="eamx-matches-panel__filters-icons">${prefsIcons.join(" ")}</span>
-         <span class="eamx-matches-panel__filters-cta">Editar →</span>`
-      : `<span class="eamx-matches-panel__filters-icons eamx-matches-panel__filters-icons--empty">Sin filtros</span>
-         <span class="eamx-matches-panel__filters-cta eamx-matches-panel__filters-cta--prompt">Configurar →</span>`;
+    // Filtros chip — compact version. Same height as the other 3
+    // stats so the row doesn't look uneven (user feedback: "se ve
+    // muy amontonado todo"). Affordance comes from: teal border +
+    // small ↗ icon next to the label + cursor pointer + hover glow.
+    // Value row shows either the prefs emojis or "Configurar" prompt.
+    const filtersValue = hasPrefs
+      ? prefsIcons.join(" ")
+      : `<span class="eamx-matches-panel__filters-empty">Configurar</span>`;
     const filtersTitle = hasPrefs
       ? "Abrir editor de preferencias en empleo.skybrandmx.com (nueva pestaña)"
       : "Configura ciudad, modalidad y salario en empleo.skybrandmx.com (nueva pestaña)";
@@ -5283,7 +5280,7 @@
             Filtros
             <svg class="eamx-matches-panel__filters-ext" viewBox="0 0 24 24" width="10" height="10" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7"/><path d="M9 7h8v8"/></svg>
           </span>
-          ${filtersInner}
+          <span class="eamx-matches-panel__stat-value eamx-matches-panel__filters-value">${filtersValue}</span>
         </button>
       </div>
       ${renderFiltersDrawer(prefsForUi)}
