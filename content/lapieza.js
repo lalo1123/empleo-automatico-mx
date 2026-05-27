@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-27-prefs-on-web";
+  const EAMX_LAPIEZA_VERSION = "2026-05-27-filters-chip-cta";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -5249,12 +5249,21 @@
     if (prefsForUi?.city) prefsIcons.push("📍");
     if (prefsForUi?.modality && prefsForUi.modality !== "any") prefsIcons.push("🏠");
     if (Number.isFinite(prefsForUi?.salaryMin) || Number.isFinite(prefsForUi?.salaryMax)) prefsIcons.push("💰");
-    const filtersValue = prefsIcons.length
-      ? prefsIcons.join(" ")
-      : `<span class="eamx-matches-panel__stat-value--muted">Sin filtros</span>`;
-    const filtersTitle = prefsIcons.length
-      ? "Click para editar tus preferencias"
-      : "Click para configurar ciudad, modalidad y salario";
+    const hasPrefs = prefsIcons.length > 0;
+    // Filtros chip — must read as "clickable, opens elsewhere". The
+    // user reported "no parece como si fuera clickeable". Now:
+    //   - distinct teal-bordered card vs the plain stat cells
+    //   - small "↗" external-link icon next to the label
+    //   - "Editar" sub-label when prefs exist, "Configurar" when empty
+    //   - hover state lifts + glows
+    const filtersInner = hasPrefs
+      ? `<span class="eamx-matches-panel__filters-icons">${prefsIcons.join(" ")}</span>
+         <span class="eamx-matches-panel__filters-cta">Editar →</span>`
+      : `<span class="eamx-matches-panel__filters-icons eamx-matches-panel__filters-icons--empty">Sin filtros</span>
+         <span class="eamx-matches-panel__filters-cta eamx-matches-panel__filters-cta--prompt">Configurar →</span>`;
+    const filtersTitle = hasPrefs
+      ? "Abrir editor de preferencias en empleo.skybrandmx.com (nueva pestaña)"
+      : "Configura ciudad, modalidad y salario en empleo.skybrandmx.com (nueva pestaña)";
     const stats = `
       <div class="eamx-matches-panel__stats eamx-matches-panel__stats--four">
         <div class="eamx-matches-panel__stat">
@@ -5269,9 +5278,12 @@
           <span class="eamx-matches-panel__stat-label">Vistas</span>
           <span class="eamx-matches-panel__stat-value">${cards.length}</span>
         </div>
-        <button type="button" class="eamx-matches-panel__stat eamx-matches-panel__stat--clickable" data-action="toggle-filters" title="Abrir filtros en empleo.skybrandmx.com (nueva pestaña)">
-          <span class="eamx-matches-panel__stat-label">Filtros</span>
-          <span class="eamx-matches-panel__stat-value">${filtersValue}</span>
+        <button type="button" class="eamx-matches-panel__stat eamx-matches-panel__stat--filters" data-action="toggle-filters" title="${escapeHtml(filtersTitle)}" aria-label="${escapeHtml(filtersTitle)}">
+          <span class="eamx-matches-panel__stat-label">
+            Filtros
+            <svg class="eamx-matches-panel__filters-ext" viewBox="0 0 24 24" width="10" height="10" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7"/><path d="M9 7h8v8"/></svg>
+          </span>
+          ${filtersInner}
         </button>
       </div>
       ${renderFiltersDrawer(prefsForUi)}
