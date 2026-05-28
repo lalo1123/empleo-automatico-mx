@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-27-empty-race-fix";
+  const EAMX_LAPIEZA_VERSION = "2026-05-27-bottom-loader";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -4976,6 +4976,11 @@
         btn.disabled = false;
         btn.textContent = original || "🔍 Buscar más amplio";
       }
+      // Final render so the bottom "Buscando más vacantes…" loader can
+      // clear now that widerSearchInProgress is false. Without this the
+      // loader stays painted in the panel until the next external
+      // trigger (queue change, scroll, etc.).
+      try { renderMatchesPanelContent(); } catch (_) {}
     }
   }
 
@@ -5414,7 +5419,25 @@
     const footer = cards.length < 5
       ? `<p class="eamx-matches-panel__hint">Scroll para más vacantes.</p>`
       : "";
-    host.innerHTML = `${usagePill}${stats}${top1Banner}${lowFitNote}<ol class="eamx-matches-list">${list}</ol>${footer}`;
+    // Bottom loader — fills the space below the visible matches while the
+    // wider-search keeps fetching more pages. Without this, scrolling
+    // down past the last match landed on the panel's solid background,
+    // which the user read as "broken / black" instead of "still working".
+    // User feedback: "en vez de que salga en negro cuando bajo que salga
+    // cargando". A second render fires in onMatchesWiderSearch's finally
+    // block to clear this once the scan completes.
+    const scanRunningFooter = widerSearchInProgress
+      ? `<div class="eamx-matches-list-loader" aria-live="polite">
+           <div class="eamx-matches-list-loader__row">
+             <svg class="eamx-matches-list-loader__spinner" viewBox="0 0 50 50" aria-hidden="true">
+               <circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-dasharray="100" stroke-dashoffset="40"/>
+             </svg>
+             <span class="eamx-matches-list-loader__text">Buscando más vacantes en otras páginas…</span>
+           </div>
+           <div class="eamx-matches-list-loader__hint">La lista se irá ampliando sola conforme aparezcan más matches.</div>
+         </div>`
+      : "";
+    host.innerHTML = `${usagePill}${stats}${top1Banner}${lowFitNote}<ol class="eamx-matches-list">${list}</ol>${footer}${scanRunningFooter}`;
 
     // Regenerate the bulk section with plan-aware chips. The static
     // markup baked into the panel root only knows "top 5"; here we
