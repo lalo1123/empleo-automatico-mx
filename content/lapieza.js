@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-27-scroll-perf";
+  const EAMX_LAPIEZA_VERSION = "2026-05-27-empty-race-fix";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -5123,7 +5123,23 @@
     //  b) We're on the homepage / company landing / unknown route → the
     //     useful CTA is taking the user to the listing where vacancies
     //     ARE shown. CTA: "Ir a Vacantes →".
-    if (!cards.length) {
+    //
+    // DEFENSIVE: never paint empty state if the wider-search pool has
+    // ANY entries — the live cards are momentarily zero because LaPieza
+    // unmounts page N's DOM between pagination ticks, but the pool we
+    // accumulated is still the user's matches. Letting the empty state
+    // win here was the root of "Página 10/40 · 120 vacantes" co-existing
+    // with "No detecté vacantes" — the widening strip's text was the
+    // truth (pool has 120) but the body was painting from stale-DOM.
+    //
+    // Likewise, never paint empty state if a scan is in flight (either
+    // running or scheduled to start) — the scan loader card belongs here
+    // until it produces a pool. The gate above SHOULD have caught those
+    // cases already; this is belt-and-suspenders for any future re-entry
+    // path that bypasses the gate.
+    const poolHasEntries = !!(widerSearchPool && widerSearchPool.size);
+    const scanInFlight = widerSearchInProgress || widerSearchScheduled;
+    if (!cards.length && !poolHasEntries && !scanInFlight) {
       const onListingAlready = /^\/(?:vacantes|vacancies|jobs|empleos|comunidad)/i.test(location.pathname);
       const headline = onListingAlready ? "No detecté vacantes" : "Estás en una página sin vacantes";
       const body = onListingAlready
@@ -5142,6 +5158,18 @@
       if (bulk) bulk.hidden = true;
       console.log("[EmpleoAutomatico] best matches panel opened: 0 matches (no cards)");
       return;
+    }
+    // If we get here with cards.length === 0 it MUST be because we have
+    // a pool (or a scan in flight). Both will be handled below: the
+    // scoring path uses widerSearchPool when present, and if only a
+    // scan is in flight, the gate at the top of this function already
+    // returned us before reaching here. Defensive log so we see the
+    // race in the wild.
+    if (!cards.length) {
+      console.log(
+        "[EmpleoAutomatico] zero live cards but pool/scan present — using pool",
+        { poolSize: widerSearchPool?.size, scanInFlight }
+      );
     }
 
     // (Old SCAN-IN-PROGRESS GATE moved above the empty-state check —
@@ -5315,7 +5343,7 @@
         </div>
         <div class="eamx-matches-panel__stat">
           <span class="eamx-matches-panel__stat-label">Vistas</span>
-          <span class="eamx-matches-panel__stat-value">${cards.length}</span>
+          <span class="eamx-matches-panel__stat-value">${widerSearchPool?.size || cards.length}</span>
         </div>
         <button type="button" class="eamx-matches-panel__stat eamx-matches-panel__stat--filters" data-action="toggle-filters" title="${escapeHtml(filtersTitle)}" aria-label="${escapeHtml(filtersTitle)}">
           <span class="eamx-matches-panel__stat-label">
