@@ -2127,16 +2127,19 @@
   height: 7px;
   border-radius: 50%;
   background: #5eead4;
-  box-shadow: 0 0 0 0 rgba(94, 234, 212, 0.7);
+  /* Scroll perf: opacity animations composite on the GPU, while
+     box-shadow animations force a paint each frame and used to be
+     visible while scrolling the matches list. */
   animation: eamxMatchesWideningPulse 1.4s ease-in-out infinite;
+  will-change: opacity;
 }
 .eamx-matches-panel__widening-text {
   font-weight: 600;
   letter-spacing: 0.01em;
 }
 @keyframes eamxMatchesWideningPulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(94, 234, 212, 0.7); }
-  50%      { box-shadow: 0 0 0 6px rgba(94, 234, 212, 0); }
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.45; }
 }
 
 /* Body / list ---------------------------------------------------------- */
@@ -2147,6 +2150,13 @@
   padding: 8px 18px 16px 18px;
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+  /* Scroll perf: promote to own compositing layer + isolate its
+     paint so child reflows don't bubble up to the panel. Without
+     these hints, scrolling 20+ match cards stutters because the
+     browser repaints the whole panel chrome on each frame. */
+  contain: layout style paint;
+  will-change: scroll-position;
+  transform: translateZ(0);
 }
 
 .eamx-matches-panel__content::-webkit-scrollbar { width: 8px; }
@@ -2202,6 +2212,9 @@
   border-left: 4px solid var(--eamx-c-brand-300);
   border-radius: 10px;
   transition: transform 160ms cubic-bezier(0.4, 0, 0.2, 1), background 160ms ease, border-color 160ms ease;
+  /* Scroll perf: each card is its own paint context, so hovering or
+     repainting one doesn't invalidate the whole list. */
+  contain: layout style paint;
 }
 
 .eamx-match-item:hover {
@@ -2571,10 +2584,12 @@
   margin: 12px 22px 14px;
   padding: 14px 16px;
   border-radius: 14px;
-  background: rgba(15, 23, 42, 0.55);
+  /* Solid-ish background (was rgba 0.55 + blur). Removing
+     backdrop-filter eliminates a GPU compositing layer; scroll feels
+     smoother. */
+  background: #0d1929;
   border: 1px solid rgba(45, 212, 191, 0.22);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  contain: layout style;
 }
 .eamx-bulk-progress__head {
   display: flex;
@@ -3453,10 +3468,8 @@
   margin: 8px 22px 14px;
   padding: 14px 16px;
   border-radius: 14px;
-  background: rgba(15, 23, 42, 0.55);
+  background: #0d1929;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -3623,13 +3636,10 @@
   position: relative;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.06);
-  background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.04) 0%, rgba(255, 255, 255, 0.01) 100%),
-    rgba(15, 23, 42, 0.55);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  background: #0d1929;
   color: #f8fafc;
   transition: border-color 200ms ease, background 200ms ease, transform 200ms ease;
+  contain: layout style;
 }
 button.eamx-usage {
   cursor: pointer;
@@ -3706,26 +3716,8 @@ button.eamx-usage:hover {
   transition: width 400ms cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
 }
-/* Subtle shimmer on the fill for the modern dashboard feel */
-.eamx-usage__fill::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    rgba(255, 255, 255, 0.18) 50%,
-    transparent 100%
-  );
-  animation: eamxUsageShimmer 2.4s ease-in-out infinite;
-}
-@keyframes eamxUsageShimmer {
-  0%, 100% { transform: translateX(-100%); }
-  50% { transform: translateX(100%); }
-}
+/* Shimmer disabled — was causing scroll repaints on the GPU layer.
+   The usage pill is static info, doesn't need motion to draw attention. */
 
 .eamx-usage__cta {
   margin-top: 12px;
@@ -4216,12 +4208,12 @@ button.eamx-matches-panel__usage:hover {
   margin: 10px 14px 14px;
   padding: 20px 16px;
   border-radius: 14px;
-  background:
-    linear-gradient(135deg, rgba(45, 212, 191, 0.06) 0%, rgba(99, 102, 241, 0.06) 100%),
-    rgba(15, 23, 42, 0.65);
+  /* Solid background (was rgba + gradient + blur) — eliminates GPU
+     compositing during scroll. The hero loader is below-the-fold once
+     scanning completes so we don't need glass effects. */
+  background: #0d1929;
   border: 1px solid rgba(94, 234, 212, 0.20);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  contain: layout style;
   display: flex;
   flex-direction: column;
   align-items: center;
