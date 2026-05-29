@@ -2159,6 +2159,23 @@
   transform: translateZ(0);
 }
 
+/* When the content area holds ONLY the scan loader or an empty state
+   (i.e. there is no scrollable match list yet), center it vertically.
+   Otherwise the compact loader/empty card pins to the top and leaves a
+   tall dark void below it that the user reads as "the panel went black"
+   when they scroll down. User feedback: "en vez de que salga en negro
+   cuando bajo que salga cargando". `safe` keeps the top reachable if the
+   viewport is ever shorter than the card (no flexbox-centering clip).
+   The :has() selector scopes this to the loader/empty states only —
+   when the match list renders, the rule stops matching and the list
+   flows from the top and scrolls normally. */
+.eamx-matches-panel__content:has(> .eamx-scan-loader),
+.eamx-matches-panel__content:has(> .eamx-matches-empty) {
+  display: flex;
+  flex-direction: column;
+  justify-content: safe center;
+}
+
 .eamx-matches-panel__content::-webkit-scrollbar { width: 8px; }
 .eamx-matches-panel__content::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.18);
