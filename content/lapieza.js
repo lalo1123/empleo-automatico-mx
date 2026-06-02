@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-05-27-loader-center";
+  const EAMX_LAPIEZA_VERSION = "2026-06-02-cover-error-visible";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -70,7 +70,7 @@
     // progress card stuck on "running" forever.
     GET_AUTH_STATUS: "GET_AUTH_STATUS"
   };
-  const ERR = { UNAUTHORIZED: "UNAUTHORIZED", PLAN_LIMIT_EXCEEDED: "PLAN_LIMIT_EXCEEDED", INVALID_INPUT: "INVALID_INPUT", SERVER_ERROR: "SERVER_ERROR" };
+  const ERR = { UNAUTHORIZED: "UNAUTHORIZED", PLAN_LIMIT_EXCEEDED: "PLAN_LIMIT_EXCEEDED", EMAIL_NOT_VERIFIED: "EMAIL_NOT_VERIFIED", INVALID_INPUT: "INVALID_INPUT", SERVER_ERROR: "SERVER_ERROR" };
   // Modo Auto storage keys — must mirror lib/schemas.js STORAGE_KEYS exactly.
   // Hardcoded so the auto-submit gates work synchronously without waiting for
   // the dynamic import to settle. The syncSchema() block below overwrites
@@ -152,6 +152,7 @@
       if (mod && mod.ERROR_CODES) Object.assign(ERR, {
         UNAUTHORIZED: mod.ERROR_CODES.UNAUTHORIZED,
         PLAN_LIMIT_EXCEEDED: mod.ERROR_CODES.PLAN_LIMIT_EXCEEDED,
+        EMAIL_NOT_VERIFIED: mod.ERROR_CODES.EMAIL_NOT_VERIFIED || ERR.EMAIL_NOT_VERIFIED,
         INVALID_INPUT: mod.ERROR_CODES.INVALID_INPUT,
         SERVER_ERROR: mod.ERROR_CODES.SERVER_ERROR
       });
@@ -3597,7 +3598,19 @@
         }
         const cover = (draft && draft.coverLetter) ? String(draft.coverLetter) : "";
         if (!cover) {
+          // SILENT-FAILURE FIX: this branch used to set status="error" and
+          // bail with NO toast and NO log — the panel then opened with an
+          // empty carta and the user saw "nada". Now we surface it loudly.
+          console.error(
+            "[EmpleoAutomatico] cover empty after generation (res ok but coverLetter blank)",
+            { draftId: activeDraftId, hadDraft: !!draft }
+          );
           overlay.markError("cover", "Carta vacía");
+          toast(
+            "La IA no devolvió la carta. Dale “Re-generar” en el panel o inténtalo de nuevo.",
+            "error",
+            { durationMs: 9000 }
+          );
           status.cover = "error";
           return null;
         }
@@ -3999,6 +4012,39 @@
   function handleExpressDraftFailure(res, _ctx) {
     const code = res?.error;
     const message = res?.message || "No se pudo generar la carta.";
+    // DIAGNOSTIC: always log the exact backend code + message. Before this,
+    // a cover-letter failure surfaced only as a fleeting toast — if the user
+    // didn't catch it ("no vi ningún mensaje") there was zero trace of WHY
+    // generation failed. This line makes every failure inspectable in the
+    // page console.
+    console.error(
+      `[EmpleoAutomatico] GENERATE_DRAFT failed — code=${code || "(none)"} message="${message}"`,
+      res
+    );
+    if (code === ERR.EMAIL_NOT_VERIFIED) {
+      // Terminal until they verify — stop the chain so we don't re-fire
+      // GENERATE_DRAFT and flood toasts. Sticky toast (no auto-dismiss) with
+      // a CTA that opens the account page where they can resend the link.
+      quickApplyAborted = true;
+      try { reportBulkStatus("error", { label: "Verifica tu correo" }); } catch (_) {}
+      try { clearBulkModeFlag(); } catch (_) {}
+      toast(
+        "Tu correo no está verificado. Confírmalo (revisa tu bandeja y spam) para generar cartas.",
+        "error",
+        {
+          // 20s + sticky: toast() has no true "never dismiss" — durationMs:0
+          // would clamp to 800ms (Math.max(800, 0)). sticky:true keeps a
+          // later toast() from clearing it before the user can act.
+          durationMs: 20000,
+          sticky: true,
+          label: "Abrir mi cuenta",
+          onClick: () => {
+            try { window.open("https://empleo.skybrandmx.com/account", "_blank", "noopener"); } catch (_) {}
+          }
+        }
+      );
+      return;
+    }
     if (code === ERR.PLAN_LIMIT_EXCEEDED) {
       // Stop the chain — otherwise the next iter would re-try the cover
       // step or move to Q&A and re-fire PLAN_LIMIT_EXCEEDED, each call
@@ -4034,7 +4080,10 @@
       });
       return;
     }
-    toast(message, "error");
+    // Generic fallback. Give it 10s (default is 4s) so the user actually
+    // reads WHY it failed — the whole point of this debugging pass is that
+    // a 4s toast was being missed ("no vi ningún mensaje").
+    toast(message, "error", { durationMs: 10000 });
   }
 
   // Find LaPieza's most-prominent submit-ish button + apply the
@@ -7404,10 +7453,29 @@
   function showBackendFailure(res) {
     const code = res?.error;
     const message = res?.message || "No se pudo generar el borrador.";
+    console.error(
+      `[EmpleoAutomatico] backend failure — code=${code || "(none)"} message="${message}"`,
+      res
+    );
     if (code === ERR.PLAN_LIMIT_EXCEEDED) {
       // Pretty modal — generic backend-failure path also used by the
       // panel "Generar carta" button which is a user-initiated click.
       showPlanLimitModal({ feature: "cartas IA" });
+      return;
+    }
+    if (code === ERR.EMAIL_NOT_VERIFIED) {
+      toast(
+        "Tu correo no está verificado. Confírmalo (revisa tu bandeja y spam) para generar cartas.",
+        "error",
+        {
+          durationMs: 20000,
+          sticky: true,
+          label: "Abrir mi cuenta",
+          onClick: () => {
+            try { window.open("https://empleo.skybrandmx.com/account", "_blank", "noopener"); } catch (_) {}
+          }
+        }
+      );
       return;
     }
     if (code === ERR.UNAUTHORIZED) {
@@ -7417,7 +7485,7 @@
       });
       return;
     }
-    toast(message, "error");
+    toast(message, "error", { durationMs: 10000 });
   }
 
   function openBilling() {
