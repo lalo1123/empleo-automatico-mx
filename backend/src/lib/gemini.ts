@@ -342,6 +342,19 @@ async function callGenerate(
     } catch {
       /* ignore */
     }
+    // Log the STATUS + model only (never the key or body) so an operator can
+    // diagnose from the Dokploy logs. 401/403 = bad/unauthorized GEMINI_API_KEY
+    // (or Generative Language API not enabled / key restricted); 404 = the
+    // GEMINI_MODEL name is wrong or retired; 429 = rate/quota limit upstream.
+    const hint =
+      res.status === 401 || res.status === 403
+        ? "check GEMINI_API_KEY (invalid/unauthorized, API not enabled, or key restricted)"
+        : res.status === 404
+          ? "check GEMINI_MODEL (unknown/retired model name)"
+          : res.status === 429
+            ? "Gemini rate/quota limit"
+            : "upstream Gemini error";
+    console.error(`[gemini] upstream ${res.status} model=${model} — ${hint}`);
     throw geminiHttpError(res.status);
   }
 
