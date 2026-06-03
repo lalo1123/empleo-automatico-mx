@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-02-loc-modal-watch";
+  const EAMX_LAPIEZA_VERSION = "2026-06-02-quiz-job-restore";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -1548,6 +1548,20 @@
   async function chainApplyStepsToFinalizeInner() {
     console.log("[EmpleoAutomatico] chain inner: starting", { isApplyPage: isApplyPage(), url: location.href.split("?")[0] });
     quickApplyAborted = false;
+    // Restore the vacancy cached on /vacante/ as EARLY as possible. The SPA
+    // nav to /apply/ nulled lastJob (watchUrlChanges), and the auto-quiz
+    // loop — armed independently by the flow assistant ~1.2s after /apply/
+    // — bails AND stickily disables itself (FLOW_TIPS_SHOWN "auto-quiz-no-job")
+    // if it fires while lastJob is null. On a CV→quiz form (no cover/Q&A step
+    // to restore lastJob first) that left the quiz unanswered and the chain
+    // stalling in its 90s wait. Restoring here, before any step renders,
+    // guarantees the quiz step has job context. (Quiz-vacancy blocker fix.)
+    if (!lastJob) {
+      try {
+        const cachedJob = await restoreJobFromSession();
+        if (cachedJob) lastJob = cachedJob;
+      } catch (_) { /* deep-linked w/o cache — the no-job toast guides the user */ }
+    }
     // RESET stateful flags from any previous chain run on this same
     // URL. watchUrlChanges resets these on SPA navigation but a manual
     // history back→forward to the same /apply/<uuid> doesn't change
@@ -8541,16 +8555,35 @@
     // bottom-left toast appear to flicker rapidly. FLOW_TIPS_SHOWN is
     // cleared on SPA URL change (see runFlowDetectors callers), so a new
     // /apply/ visit gets a fresh chance to show the tip.
-    if (FLOW_TIPS_SHOWN.has("auto-quiz-no-cv") || FLOW_TIPS_SHOWN.has("auto-quiz-no-job")) return;
+    // Only "no-cv" is a STICKY bail — it needs the user to act off-page
+    // (upload a CV). "no-job" used to be sticky too, which permanently
+    // disabled the auto-quiz for the whole /apply/ page if the loop fired
+    // before lastJob was restored (LaPieza swaps steps without a URL change,
+    // so FLOW_TIPS_SHOWN never got cleared between steps). It's recoverable,
+    // so it's no longer in this early-return.
+    if (FLOW_TIPS_SHOWN.has("auto-quiz-no-cv")) return;
     const state = detectQuizQuestion();
     if (!state) return;
     // Pre-flight BEFORE setting quizLoopActive so the flag pattern reflects
     // reality: if we never actually entered the loop, quizLoopActive stays
-    // false (it was already false). The user-visible toast is shown ONCE
-    // per page via FLOW_TIPS_SHOWN above.
+    // false (it was already false).
     if (!lastJob) {
-      FLOW_TIPS_SHOWN.add("auto-quiz-no-job");
-      toast("Auto-quiz: abre la vacante primero para que la IA la lea.", "info", { durationMs: 4500 });
+      // RECOVERABLE: the /apply/ nav nulled lastJob; restore the vacancy we
+      // cached on /vacante/ and re-try once it lands. Toast only ONCE
+      // (dedupe) to avoid flicker, but do NOT permanently block — once the
+      // job is restored a re-invocation starts the loop.
+      if (!FLOW_TIPS_SHOWN.has("auto-quiz-no-job")) {
+        FLOW_TIPS_SHOWN.add("auto-quiz-no-job");
+        toast("Auto-quiz: leyendo la vacante…", "info", { durationMs: 3000 });
+      }
+      restoreJobFromSession()
+        .then((j) => {
+          if (j && !lastJob) {
+            lastJob = j;
+            try { maybeStartAutoQuizLoop(); } catch (_) {}
+          }
+        })
+        .catch(() => {});
       return;
     }
     if (!cachedProfile) {
@@ -9642,6 +9675,16 @@
         // Reset the queued-reminder gate so we re-fire on the new vacancy
         // (or skip on a non-vacancy route).
         queuedReminderShown = false;
+        // Reset the chain abort flag + tear down any dangling Esc handler so
+        // the new route starts from a clean state. A prior chain that hit a
+        // terminal error (UNAUTHORIZED / PLAN_LIMIT / EMAIL_NOT_VERIFIED) set
+        // quickApplyAborted=true; without this, a later flow on a route that
+        // doesn't re-init the chain would inherit a pre-aborted state.
+        quickApplyAborted = false;
+        if (quickApplyEscHandler) {
+          try { document.removeEventListener("keydown", quickApplyEscHandler, true); } catch (_) {}
+          quickApplyEscHandler = null;
+        }
         // Tear down listing overlays — they're tied to the previous route's
         // DOM. detectAndMount() below re-arms them if we're still on a
         // listing path.
