@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-02-salary-hitl";
+  const EAMX_LAPIEZA_VERSION = "2026-06-02-loc-modal-standing";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -2974,6 +2974,46 @@
       if (!confirmRx.test(t)) return false;
       try { return isVisible(el) && !el.disabled; } catch (_) { return false; }
     }) || null;
+  }
+
+  // Standing auto-confirm for the "vacante lejana a tu ubicación" modal.
+  // The chain (runVacancyAutoChain) has its own short watcher, but that only
+  // covers ⚡ Postular. Users ALSO click LaPieza's native "¡Me quiero
+  // postular!" by hand — then no chain runs and the modal just sat there
+  // (user report: "no que daba ok?"). This watcher runs for the whole
+  // vacancy-page lifetime and confirms the modal however the apply was
+  // started. A ~1.2s grace lets the user hit "No, cancelar" first if the
+  // job really is too far. It only ever clicks the CONFIRM button
+  // (findLaPiezaLocationContinueCTA excludes cancel) and only advances PAST
+  // a warning — it never submits anything (Finalizar stays HITL).
+  let locationModalWatchActive = false;
+  let locationModalFirstSeenAt = 0;
+  function startLocationModalAutoConfirm() {
+    if (locationModalWatchActive) return;
+    locationModalWatchActive = true;
+    locationModalFirstSeenAt = 0;
+    const tick = () => {
+      if (!locationModalWatchActive) return;
+      try {
+        const btn = findLaPiezaLocationContinueCTA();
+        if (btn) {
+          if (!locationModalFirstSeenAt) {
+            locationModalFirstSeenAt = Date.now();
+          } else if (Date.now() - locationModalFirstSeenAt >= 1200) {
+            try { btn.click(); } catch (_) {}
+            locationModalFirstSeenAt = 0;
+          }
+        } else {
+          locationModalFirstSeenAt = 0; // modal closed / not present — reset grace
+        }
+      } catch (_) { /* ignore */ }
+      setTimeout(tick, 300);
+    };
+    setTimeout(tick, 300);
+  }
+  function stopLocationModalAutoConfirm() {
+    locationModalWatchActive = false;
+    locationModalFirstSeenAt = 0;
   }
 
   async function onFabClickExpressVacancy() {
@@ -9727,6 +9767,9 @@
       // vacancy chain) and auto-fires Express fill.
       if (fabMode() === "vacancy") {
         setTimeout(() => maybeAutoPrewarmFromQuickApply(), 1500);
+        // Standing location-modal auto-confirm — works for a MANUAL
+        // "¡Me quiero postular!" click too, not just ⚡ Postular.
+        try { startLocationModalAutoConfirm(); } catch (_) {}
       } else if (fabMode() === "apply") {
         setTimeout(() => maybeAutoFireExpressOnApply(), 600);
         // Always arm the flow assistant on /apply/ — even if the user
@@ -9744,6 +9787,7 @@
       // wider-search pool too, since it's listing-scoped and the user's
       // filters may differ on a return visit.
       widerSearchPool = null;
+      try { stopLocationModalAutoConfirm(); } catch (_) {}
       unmountFab();
       closePanel();
       closeMatchesPanel();
