@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-02-cover-error-visible";
+  const EAMX_LAPIEZA_VERSION = "2026-06-02-pool-cache";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -470,6 +470,67 @@
         chrome.storage.session.remove(draftCacheKey(url || location.href))
       ).catch(() => {});
     } catch (_) { /* ignore */ }
+  }
+
+  // -------------------------------------------------------------------------
+  // Wider-search pool cache (session) — avoid re-scanning on return
+  // -------------------------------------------------------------------------
+  // The wider-search loop pages through up to 40 LaPieza pages (~1-2 min).
+  // The pool lives in module memory and survives panel close, BUT a FULL
+  // page reload (which LaPieza does on some apply flows, and which a
+  // browser Back can trigger) wipes module state → widerSearchPool=null →
+  // the panel re-runs the entire scan even though we JUST did it. User
+  // report: "si ya postulé en uno, cuando regreso a vacantes vuelve a
+  // buscar cuando ya había buscado".
+  //
+  // Fix: persist the pool to chrome.storage.session (survives reloads
+  // within the browser session) keyed by the listing URL (pathname +
+  // search, so changing filters still triggers a fresh scan). A 15-min
+  // TTL bounds staleness.
+  const WIDER_POOL_STORAGE_KEY = "eamx:lapieza:wider-pool";
+  const WIDER_POOL_TTL_MS = 15 * 60_000;
+  function widerPoolKey() {
+    // pathname + search: LaPieza keeps its filters in the query string,
+    // so two different filter sets map to two different cache entries.
+    return location.pathname + location.search;
+  }
+  function persistWiderPoolToSession(pool) {
+    if (!pool || !pool.size || !chrome?.storage?.session) return;
+    try {
+      // Strip live DOM refs (anchor/card) — they don't survive a reload
+      // and aren't serializable. The panel re-resolves them as needed.
+      const entries = Array.from(pool.values()).map((e) => ({
+        jobLite: e.jobLite,
+        score: e.score,
+        reasons: Array.isArray(e.reasons) ? e.reasons : [],
+        level: e.level || "unknown",
+        appliedFromCard: !!e.appliedFromCard,
+        closedFromCard: !!e.closedFromCard
+      }));
+      Promise.resolve(chrome.storage.session.set({
+        [WIDER_POOL_STORAGE_KEY]: { url: widerPoolKey(), savedAt: Date.now(), entries }
+      })).catch(() => {});
+    } catch (_) { /* ignore */ }
+  }
+  async function restoreWiderPoolFromSession() {
+    if (!chrome?.storage?.session) return null;
+    try {
+      const obj = await new Promise((resolve) => {
+        chrome.storage.session.get([WIDER_POOL_STORAGE_KEY], (r) => resolve(r || {}));
+      });
+      const cached = obj && obj[WIDER_POOL_STORAGE_KEY];
+      if (!cached || typeof cached !== "object" || !Array.isArray(cached.entries)) return null;
+      if (cached.url !== widerPoolKey()) return null; // different filters/search
+      if (Date.now() - (cached.savedAt || 0) > WIDER_POOL_TTL_MS) return null; // stale
+      if (!cached.entries.length) return null;
+      const map = new Map();
+      for (const e of cached.entries) {
+        if (e && e.jobLite && e.jobLite.id) {
+          map.set(e.jobLite.id, { ...e, anchor: null, card: null });
+        }
+      }
+      return map.size ? map : null;
+    } catch (_) { return null; }
   }
 
   // Pre-warm the cover-letter generation in the background while the user is
@@ -5000,6 +5061,9 @@
       // Activate the pool for the panel render. renderMatchesPanelContent
       // checks widerSearchPool first and uses it instead of live cards.
       widerSearchPool = pool;
+      // Cache it so a return visit (even after a full reload from applying)
+      // reuses these results instead of re-scanning all 40 pages.
+      persistWiderPoolToSession(pool);
       await renderMatchesPanelContent();
       const best = matchesCurrentTopN[0]?.score ?? 0;
       setProgress(`✓ ${pool.size} vacantes analizadas · mejor ${best}%`);
@@ -5015,7 +5079,7 @@
       // change. Without this the user sees the spinning hero forever
       // when an early-iteration error trips the catch.
       try {
-        if (pool && pool.size > 0) widerSearchPool = pool;
+        if (pool && pool.size > 0) { widerSearchPool = pool; persistWiderPoolToSession(pool); }
         widerSearchInProgress = false; // clear early so the gate falls through
         await renderMatchesPanelContent();
       } catch (_) { /* even render failed — nothing more we can do gracefully */ }
@@ -5096,6 +5160,25 @@
       if (bulk) bulk.hidden = true;
       console.log("[EmpleoAutomatico] best matches panel opened: 0 matches (no profile)");
       return;
+    }
+
+    // RE-SCAN AVOIDANCE: if there's no in-memory pool (e.g. the user applied
+    // to a job and the page fully reloaded, wiping module state), try to
+    // restore a recent pool for THIS exact search from session storage.
+    // Without this, returning to /vacantes re-runs the whole 40-page scan
+    // even though we just did it. Keyed by pathname+search so changing
+    // filters still triggers a fresh scan; 15-min TTL bounds staleness.
+    if (!widerSearchPool && !widerSearchInProgress && !widerSearchScheduled) {
+      try {
+        const restored = await restoreWiderPoolFromSession();
+        if (restored && restored.size) {
+          widerSearchPool = restored;
+          console.log(
+            "[EmpleoAutomatico] restored wider-search pool from session:",
+            restored.size, "vacantes (skipping re-scan)"
+          );
+        }
+      } catch (_) { /* ignore — fall through to a fresh scan */ }
     }
 
     // Find cards on the page right now. We use findAllVacancyCards (no
