@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-02-loc-modal-standing";
+  const EAMX_LAPIEZA_VERSION = "2026-06-02-quota-clear-msg";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -3764,7 +3764,11 @@
           overlay.markPending("cover");
           const res = await sendMsg({ type: MSG.GENERATE_DRAFT, job });
           if (!res || !res.ok) {
-            handleExpressDraftFailure(res, { job });
+            // terminal = quota/session/email/no-CV → the toast/modal is the
+            // clear signal; don't ALSO open the blank "Re-generar" panel
+            // (re-generating can't fix being out of quota). User feedback:
+            // "que salga eso de error por falta de peticiones, no?".
+            status.coverTerminal = handleExpressDraftFailure(res, { job }) === true;
             overlay.markError("cover", "No se pudo generar la carta");
             errors.push("draft");
             status.cover = "error";
@@ -3955,9 +3959,14 @@
     await Promise.allSettled([coverPromise, questionsPromise, cvPromise]);
 
     // 7) If the cover letter failed AND there was a draft path (i.e. the
-    //    target field exists), that's the most critical failure — open the
-    //    panel for retry as the spec requires.
-    if (status.cover === "error" && coverField) {
+    //    target field exists), open the retry panel — BUT only for
+    //    transient failures. For TERMINAL failures (quota / session /
+    //    email / no-CV) handleExpressDraftFailure already showed the clear
+    //    modal/toast, and a blank "Re-generar" panel would just confuse
+    //    (re-generating can't restore quota). User feedback: "que salga eso
+    //    de error por falta de peticiones, no?" — so we show ONLY that
+    //    error, no blank panel.
+    if (status.cover === "error" && coverField && !status.coverTerminal) {
       try {
         if (lastDraft) {
           openPanel({ job, draft: lastDraft, partial: false });
@@ -3970,6 +3979,13 @@
       // The handleExpressDraftFailure helper already showed a typed toast.
       // Hide overlay after a beat.
       setTimeout(() => overlay.hide(), 1500);
+      return;
+    }
+    // Terminal cover failure (quota/session/email): no retry panel — the
+    // modal/toast from handleExpressDraftFailure is the signal. Just hide
+    // the progress overlay so the UI doesn't look frozen.
+    if (status.cover === "error" && status.coverTerminal) {
+      setTimeout(() => overlay.hide(), 1200);
       return;
     }
 
@@ -4191,6 +4207,10 @@
 
   // Surface a panel-style error for a failed GENERATE_DRAFT inside Express.
   // Mirrors showBackendFailure (toast with action) but keyed for Express.
+  // Returns TRUE when the failure is terminal (quota / session / email /
+  // missing-CV) — i.e. "Re-generar" can't help, so the caller should NOT
+  // open the blank retry panel; the toast/modal here is the clear signal.
+  // Returns FALSE for transient errors where a retry panel makes sense.
   function handleExpressDraftFailure(res, _ctx) {
     const code = res?.error;
     const message = res?.message || "No se pudo generar la carta.";
@@ -4225,7 +4245,7 @@
           }
         }
       );
-      return;
+      return true;
     }
     if (code === ERR.PLAN_LIMIT_EXCEEDED) {
       // Stop the chain — otherwise the next iter would re-try the cover
@@ -4239,7 +4259,7 @@
       // doesn't need the user's modal choice to proceed (the chain
       // already failed; the modal just gives upgrade paths).
       showPlanLimitModal({ feature: "cartas IA" });
-      return;
+      return true;
     }
     if (code === ERR.UNAUTHORIZED) {
       // Stop the chain — without abort the loop re-fires GENERATE_DRAFT
@@ -4253,19 +4273,21 @@
         label: "Inicia sesión",
         onClick: () => openOptionsPage()
       });
-      return;
+      return true;
     }
     if (code === ERR.INVALID_INPUT && /perfil|cv|profile/i.test(message)) {
       toast("Sube un CV más completo en Opciones.", "info", {
         label: "Abrir Opciones",
         onClick: () => openOptionsPage()
       });
-      return;
+      return true;
     }
     // Generic fallback. Give it 10s (default is 4s) so the user actually
     // reads WHY it failed — the whole point of this debugging pass is that
-    // a 4s toast was being missed ("no vi ningún mensaje").
+    // a 4s toast was being missed ("no vi ningún mensaje"). Transient →
+    // the retry panel is useful, so this is NOT terminal.
     toast(message, "error", { durationMs: 10000 });
+    return false;
   }
 
   // Find LaPieza's most-prominent submit-ish button + apply the
