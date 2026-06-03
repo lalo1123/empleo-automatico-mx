@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-02-applied-section";
+  const EAMX_LAPIEZA_VERSION = "2026-06-02-loc-modal-watch";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -2913,11 +2913,19 @@
   // con postulación" / variants. We look for a red-styled / primary
   // button inside a visible modal.
   function findLaPiezaLocationContinueCTA() {
-    const rx = /^s[ií],?\s+continuar(\s+con\s+postulaci[oó]n)?$/i;
-    const candidates = Array.from(document.querySelectorAll("button"));
+    // Confirm button on LaPieza's "esta vacante es lejana a tu ubicación"
+    // modal. Tolerant match (the label has shipped as "Sí, continuar",
+    // "Si, continuar con postulación", "Continuar con la postulación") but
+    // NEVER the cancel button. Not anchored ^…$ so a stray icon/whitespace
+    // in textContent can't break it.
+    const confirmRx = /continuar\s+con\s+(?:la\s+)?postulaci[oó]n|^s[ií][,.\s]+continuar\b/i;
+    const cancelRx = /\b(?:no|cancelar|cerrar|volver|atr[aá]s)\b/i;
+    const candidates = Array.from(document.querySelectorAll("button, a[role='button'], [role='button']"));
     return candidates.find((el) => {
       const t = (el.textContent || "").trim();
-      if (!rx.test(t)) return false;
+      if (!t) return false;
+      if (cancelRx.test(t)) return false;     // never click "No, cancelar"
+      if (!confirmRx.test(t)) return false;
       try { return isVisible(el) && !el.disabled; } catch (_) { return false; }
     }) || null;
   }
@@ -3064,29 +3072,37 @@
     } catch (_) {}
     try { applyBtn.click(); } catch (_) {}
 
-    // Wait for the location-warning modal to render. LaPieza animates it
-    // in over ~500-2000ms after the Postularme click; live test on
-    // /vacante/data-analyst-...-coca-cola-femsa showed the modal arriving
-    // ~3s in, AFTER our previous 2.8s window timed out.
+    // Auto-confirm the location-warning modal whenever it appears.
     //
-    // New budget: poll every 250ms for up to 10s (40 iterations). If the
-    // user ALREADY moved to /apply/ (modal didn't appear at all because
-    // their profile location matched the vacancy), bail early.
-    for (let i = 0; i < 40; i++) {
-      if (quickApplyAborted) return;
-      await new Promise((r) => setTimeout(r, 250));
-      // No modal needed if URL already advanced to /apply/.
-      if (isApplyPage()) break;
+    // Bug history: this used to be a fixed 10s poll. On slow networks
+    // LaPieza animates the modal in LATER than that, so the window expired
+    // before the modal rendered and it "se quedó" (user report + screenshot
+    // of the "vacante lejana" modal sitting unclicked). Replaced with a
+    // patient fire-and-forget watcher: polls every 300ms for up to 30s and
+    // clicks the "Sí, continuar con postulación" button the moment it
+    // shows. Self-stops on click, on Esc-abort, on navigation to /apply/
+    // (modal never appeared because the location matched), or on timeout —
+    // and tears down the Esc handler when it does.
+    const cleanupEsc = () => {
+      try {
+        if (quickApplyEscHandler) document.removeEventListener("keydown", quickApplyEscHandler, true);
+      } catch (_) {}
+      quickApplyEscHandler = null;
+    };
+    const watchStartedAt = Date.now();
+    const watchLocationModal = () => {
+      if (quickApplyAborted) { cleanupEsc(); return; }
+      if (isApplyPage()) { cleanupEsc(); return; } // advanced; /apply handler takes over
       const continueBtn = findLaPiezaLocationContinueCTA();
       if (continueBtn) {
         try { continueBtn.click(); } catch (_) {}
-        break;
+        cleanupEsc();
+        return;
       }
-    }
-    try {
-      if (quickApplyEscHandler) document.removeEventListener("keydown", quickApplyEscHandler, true);
-    } catch (_) {}
-    quickApplyEscHandler = null;
+      if (Date.now() - watchStartedAt > 30000) { cleanupEsc(); return; } // give up
+      setTimeout(watchLocationModal, 300);
+    };
+    setTimeout(watchLocationModal, 250);
   }
 
   // Express FAB click on /apply/<uuid>. Restore job + draft from session,
