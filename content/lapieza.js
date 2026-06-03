@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-02-bulk-pertab-job";
+  const EAMX_LAPIEZA_VERSION = "2026-06-02-bulk-hint-honest";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -4477,7 +4477,7 @@
       <div class="eamx-matches-panel__bulk" data-eamx-matches-bulk hidden>
         <button type="button" class="eamx-matches-panel__bulk-btn eamx-matches-panel__bulk-btn--primary" data-action="bulk-apply-top">⚡ Auto-postular top 5 (sin sacarte de aquí)</button>
         <button type="button" class="eamx-matches-panel__bulk-btn" data-action="mark-top-5">⭐ Solo marcar top 5 en mi cola</button>
-        <p class="eamx-matches-panel__bulk-hint"><strong>⚡ Auto-postular</strong> abre cada vacante en una pestaña EN SEGUNDO PLANO y corre la cadena (carta + CV + Q&A + quiz). Te quedas aquí viendo el progreso; haces clic en "Ver pestaña" cuando quieras revisar y Finalizar. <strong>⭐ Marcar</strong> solo guarda para postular después.</p>
+        <p class="eamx-matches-panel__bulk-hint"><strong>⚡ Auto-postular</strong> abre cada vacante en una pestaña en segundo plano, corre la cadena (carta + CV + Q&A + quiz) y al terminar la <strong>ENVÍA automáticamente</strong> — son postulaciones reales. Tienes <strong>5 s para cancelar</strong> cada una (Esc, o "Ver pestaña"). <strong>⭐ Marcar</strong> NO envía nada: solo guarda en tu cola para revisar y postular tú después.</p>
       </div>
     `;
 
@@ -5947,7 +5947,7 @@
         <span class="eamx-bulk-btn__icon" aria-hidden="true">⭐</span>
         <span class="eamx-bulk-btn__label">Solo marcar top <span data-bulk-count>${activeN}</span> en mi cola</span>
       </button>
-      <p class="eamx-matches-panel__bulk-hint"><strong>⚡ Auto-postular</strong> abre cada vacante en una pestaña EN SEGUNDO PLANO y corre la cadena (carta + CV + Q&A + quiz). Te quedas aquí viendo el progreso; haces clic en "Ver pestaña" cuando quieras revisar y Finalizar. <strong>⭐ Marcar</strong> solo guarda para postular después.</p>
+      <p class="eamx-matches-panel__bulk-hint"><strong>⚡ Auto-postular</strong> abre cada vacante en una pestaña en segundo plano, corre la cadena (carta + CV + Q&A + quiz) y al terminar la <strong>ENVÍA automáticamente</strong> — son postulaciones reales. Tienes <strong>5 s para cancelar</strong> cada una (Esc, o "Ver pestaña"). <strong>⭐ Marcar</strong> NO envía nada: solo guarda en tu cola para revisar y postular tú después.</p>
     `;
   }
 
