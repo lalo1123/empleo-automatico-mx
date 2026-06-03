@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-02-bulk-hint-honest";
+  const EAMX_LAPIEZA_VERSION = "2026-06-02-quiz-no-qmark";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -8549,6 +8549,35 @@
       return "";
     };
     question = pickQuestion(container) || pickQuestion(document.body);
+    // LENIENT FALLBACK — statement-style questions that DON'T end in "?".
+    // LaPieza mixes knowledge questions ("What is SAP SCM?") with screening
+    // statements ("Nivel de inglés CONVERSACIONAL", "Años de experiencia con
+    // X", "Disponibilidad para viajar"). pickQuestion above requires a "?"
+    // so those returned NO question → detectQuizQuestion returned null →
+    // the auto-quiz loop treated it as "quiz finished" and STOPPED, leaving
+    // the rest of the quiz unanswered (live-test: stalled at Q17/24 on the
+    // English-level question). Here we recover by taking the closest
+    // qualifying text node that sits just BEFORE the first option — that's
+    // the question label, with or without "?".
+    if (!question && options.length && options[0].button) {
+      const firstOpt = options[0].button;
+      const cands = document.querySelectorAll("p, div, span, h1, h2, h3, h4, h5, h6, label");
+      for (const el of cands) {
+        if (el.children && el.children.length > 0) continue;
+        if (el.tagName === "BUTTON") continue;
+        const txt = (el.textContent || "").trim();
+        if (!txt) continue;
+        if (txt.length < QUIZ_QUESTION_MIN_LEN || txt.length > QUIZ_QUESTION_MAX_LEN) continue;
+        if (!isVisible(el)) continue;
+        if (QUIZ_COUNTER_RX.test(txt)) continue;   // not the "17/24" counter
+        if (QUIZ_OPTION_RX.test(txt)) continue;    // not an "A) …" option
+        // Must appear BEFORE the first option in DOM order; keep the LAST
+        // such match (closest to the options = the actual prompt).
+        const pos = el.compareDocumentPosition(firstOpt);
+        if (!(pos & Node.DOCUMENT_POSITION_FOLLOWING)) continue;
+        question = txt;
+      }
+    }
     if (!question) return null;
 
     // Next button — visible <button> whose text matches QUIZ_NEXT_RX and
