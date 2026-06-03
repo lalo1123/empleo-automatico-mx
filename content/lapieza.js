@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-02-quiz-no-qmark";
+  const EAMX_LAPIEZA_VERSION = "2026-06-02-salary-hitl";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -8823,6 +8823,40 @@
   // the user-facing toast (caller owns that to avoid the flicker bug
   // where every observer tick re-fired the no-CV toast — fixed in
   // maybeStartAutoQuizLoop via FLOW_TIPS_SHOWN dedupe).
+  // Detect a free-text field that's BLOCKING the apply flow but that we
+  // intentionally don't auto-fill (salary/expectativa — see
+  // QUESTION_SKIP_RX). Returns {el, question} when a visible, empty,
+  // enabled text field sits next to a DISABLED next/Continuar button (i.e.
+  // the form won't advance until the user types). Used to give a clear HITL
+  // prompt instead of the auto-quiz silently stopping (live-test: the quiz
+  // hit a "¿Cuál es tu sueldo bruto mensual ESPERADO?" textarea at 18/24
+  // and just looked stuck). User choice: prompt + stop, never auto-fill
+  // salary.
+  function detectManualEntryBlocker() {
+    try {
+      let cover = null;
+      try { cover = findExpressCoverLetterField(); } catch (_) {}
+      const advRx = /continuar|siguiente|next|enviar|finaliz/i;
+      const blocked = Array.from(document.querySelectorAll("button")).some((b) => {
+        if (!isVisible(b)) return false;
+        if (!advRx.test((b.textContent || "").trim())) return false;
+        const cls = (b.className || "").toString();
+        return b.disabled || b.getAttribute("aria-disabled") === "true" || /\bdisabled\b/i.test(cls);
+      });
+      if (!blocked) return null; // nothing is gating progress → not a blocker
+      const fields = Array.from(document.querySelectorAll("textarea, input[type='text']")).filter(isVisible);
+      for (const el of fields) {
+        if (el === cover) continue;
+        if (el.disabled || el.readOnly) continue;
+        if ((el.value || "").trim()) continue; // already has content
+        const q = questionTextFor(el);
+        if (!q) continue;
+        return { el, question: q };
+      }
+    } catch (_) { /* ignore */ }
+    return null;
+  }
+
   async function runAutoQuizLoop() {
     // Pre-flight: lastJob + cachedProfile. The Express flow on /vacancy/<uuid>
     // sets both; if we got here without them the apply-side cache restore
@@ -8839,7 +8873,25 @@
 
       const state = detectQuizQuestion();
       if (!state) {
-        // Container is gone — quiz finished or LaPieza navigated away.
+        // detectQuizQuestion returns null when there are no multiple-choice
+        // options. That's usually "quiz finished" — BUT it's also a
+        // free-text question we don't auto-fill (salary/expectativa). If
+        // such a field is blocking a disabled Continuar, tell the user
+        // clearly + focus it instead of silently stopping (HITL handoff).
+        const blocker = detectManualEntryBlocker();
+        if (blocker) {
+          clearQuizStickyToast();
+          toast(
+            "✍️ Esta pregunta la respondes tú (ej. tu sueldo esperado). Escríbela y dale Continuar — lo demás ya quedó listo.",
+            "info",
+            { durationMs: 15000, sticky: true }
+          );
+          try {
+            blocker.el.scrollIntoView({ behavior: "smooth", block: "center" });
+            blocker.el.focus();
+          } catch (_) {}
+        }
+        // Quiz finished (or handed off to the user) — stop the loop.
         break;
       }
 
