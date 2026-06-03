@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-02-pool-cache";
+  const EAMX_LAPIEZA_VERSION = "2026-06-02-pool-cache-fab-hide";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -983,6 +983,9 @@
       try { fabEl.removeEventListener("click", onFabClick); } catch (_) {}
       fabEl.addEventListener("click", onFabClick);
       paintFabLabel();
+      // If the matches panel is open, keep the FAB hidden through this
+      // re-attach (a SPA route eval could otherwise un-hide it).
+      setFabHidden(isMatchesPanelOpen());
       return;
     }
     // If a stale FAB from a previous content-script instance is still in
@@ -1002,6 +1005,9 @@
     fabEl.addEventListener("click", onFabClick);
     document.body.appendChild(fabEl);
     paintFabLabel();
+    // Fresh mount while the matches panel is already open → keep it hidden
+    // so it doesn't peek out from behind the panel.
+    setFabHidden(isMatchesPanelOpen());
 
     // Show the "first-time FAB" tooltip if this is the user's first
     // mount in any supported portal this install. The tooltip is a
@@ -1106,6 +1112,19 @@
   }
 
   function unmountFab() { fabEl?.parentNode?.removeChild(fabEl); fabEl = null; }
+  // Hide/show the FAB. The matches panel is a full-height right-side sheet
+  // with a HIGHER z-index than the FAB, so an open panel sits ON TOP of the
+  // bottom-right FAB — the user sees it as "the button disappeared / is in
+  // a weird spot". The FAB is also redundant while the panel is open (its
+  // only job on a listing is to OPEN that panel, and the panel has its own
+  // ✕). So we hide it for the duration the panel is open and restore it on
+  // close. User report: "el botón sale a la izquierda hasta abajo y no se ve".
+  function setFabHidden(hidden) {
+    if (fabEl) fabEl.classList.toggle("eamx-fab--hidden", !!hidden);
+  }
+  function isMatchesPanelOpen() {
+    return !!(matchesPanelEl && document.documentElement.contains(matchesPanelEl));
+  }
   function setFabBusy(b) {
     if (!fabEl) return;
     fabEl.classList.toggle("eamx-fab--busy", !!b);
@@ -4405,6 +4424,10 @@
     matchesPanelEl.addEventListener("click", onMatchesPanelClick);
     document.documentElement.appendChild(matchesPanelEl);
     requestAnimationFrame(() => matchesPanelEl?.classList.add("eamx-matches-panel--open"));
+    // Hide the FAB while the panel is open — the panel covers the
+    // bottom-right corner where the FAB lives, so otherwise it's stuck
+    // behind the sheet ("no se ve"). Restored in closeMatchesPanel.
+    setFabHidden(true);
 
     // Escape key closes the panel.
     matchesEscHandler = (ev) => {
@@ -4470,6 +4493,8 @@
     try { matchesPanelEl.classList.remove("eamx-matches-panel--open"); } catch (_) {}
     const node = matchesPanelEl;
     matchesPanelEl = null;
+    // Panel is closing → bring the FAB back (it was hidden while open).
+    setFabHidden(false);
     // Allow the slide-out transition to complete before we unmount. Skip
     // the delay when reduced-motion is requested.
     let prefersReduced = false;

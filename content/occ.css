@@ -122,6 +122,11 @@
     0 0 0 5px rgba(112, 209, 198, 0.55);
 }
 
+/* Hidden while a full-height panel (matches sheet) is open — the panel's
+   higher z-index otherwise leaves the FAB stuck behind it in the
+   bottom-right corner. !important so it beats the base display:inline-flex. */
+.eamx-fab--hidden { display: none !important; }
+
 .eamx-fab__icon {
   font-size: 18px;
   line-height: 1;
