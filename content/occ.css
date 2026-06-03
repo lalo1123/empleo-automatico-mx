@@ -2453,6 +2453,83 @@
   opacity: 1;
 }
 
+/* "Ya postuladas" section — applied vacancies pulled out of the ranked
+   list and shown compactly here so they don't burn a top-25 slot. */
+.eamx-matches-applied {
+  margin: 18px 4px 4px 4px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.eamx-matches-applied__head {
+  margin: 0 0 10px 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font: 700 12px/1.2 inherit;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #5eead4;
+}
+.eamx-matches-applied__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.eamx-matches-applied__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  opacity: 0.82;
+  transition: opacity 140ms ease;
+}
+.eamx-matches-applied__item:hover { opacity: 1; }
+.eamx-matches-applied__score {
+  flex: 0 0 auto;
+  font: 700 12px/1 inherit;
+  font-variant-numeric: tabular-nums;
+  min-width: 38px;
+}
+.eamx-matches-applied__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.eamx-matches-applied__title {
+  font: 600 12.5px/1.25 inherit;
+  color: #e2e8f0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.eamx-matches-applied__company {
+  font: 500 11px/1.2 inherit;
+  color: #94a3b8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.eamx-matches-applied__open {
+  flex: 0 0 auto;
+  font: 600 11.5px/1 inherit;
+  color: #5eead4;
+  text-decoration: none;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(94, 234, 212, 0.25);
+}
+.eamx-matches-applied__open:hover {
+  background: rgba(94, 234, 212, 0.12);
+}
+
 /* CV-preview modal — appears after the backend returns the personalized
    PDF, BEFORE we inject it into LaPieza's file input. Shows the actual
    PDF in an iframe so the user can scan it and confirm before we

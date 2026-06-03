@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-02-pool-cache-fab-hide";
+  const EAMX_LAPIEZA_VERSION = "2026-06-02-applied-section";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -5413,21 +5413,36 @@
     }
 
     // AUTO-DETECTED STATUS HANDLING
-    // - Closed vacancies: drop from the scored set entirely. They can
-    //   never be applied to so they don't deserve a slot in the top-25.
-    // - Applied vacancies (detected from listing card markers but not
-    //   yet in our queue): silently upsert them so future runs filter
-    //   them at the bulk-candidate step. We KEEP them in the visible
-    //   list — they'll render with the "✓ Ya postulada" badge that the
-    //   per-card renderer already produces from queueModule lookups.
+    // - Closed vacancies: dropped entirely (can never be applied to).
+    // - Applied vacancies: pulled OUT of the ranked top-25 (you can't
+    //   apply again, so they shouldn't burn a slot) and surfaced in a
+    //   separate "Ya postuladas" section below the list. User ask: "si ya
+    //   se postuló mejor que ni salgan… que salgan los postulados aparte".
+    //
+    // "Applied" is detected PAGE-FIRST: the card's own marker that LaPieza
+    // paints ("Ya postulada", attrs) → detectCardStatus → appliedFromCard.
+    // The queue is the persistent fallback so a vacancy applied on a
+    // PREVIOUS visit / via the chain still counts after navigation or when
+    // we reuse the cached pool (whose frozen appliedFromCard predates the
+    // application). User ask: "de la página no de la extensión… que detecte
+    // los postulados".
     const closedDropped = scored.filter((m) => m.closedFromCard).length;
     scored = scored.filter((m) => !m.closedFromCard);
 
+    // Applied IDs from the queue (persisted page-detections + chain
+    // applications). Fetched here so the active/applied split can use it.
+    let appliedIds = new Set();
+    if (queueModule && typeof queueModule.appliedIdsForSource === "function") {
+      try { appliedIds = await queueModule.appliedIdsForSource(SOURCE); } catch (_) {}
+    }
+    const isAppliedMatch = (m) =>
+      !!(m && m.jobLite) &&
+      (m.appliedFromCard === true || appliedIds.has(String(m.jobLite.id || "")));
+
+    // Sync page-detected applications into the queue so the "applied"
+    // state persists across navigation. Fire-and-forget.
     const autoMarkApplied = scored.filter((m) => m.appliedFromCard && m.jobLite && m.jobLite.id);
     if (autoMarkApplied.length && queueModule && typeof queueModule.upsertApplied === "function") {
-      // Fire-and-forget — we don't need to block render on a queue
-      // write. The next panel render (queue.onChanged listener) will
-      // surface the new "applied" badges.
       Promise.all(autoMarkApplied.map((m) =>
         queueModule.upsertApplied({
           id: m.jobLite.id,
@@ -5443,8 +5458,19 @@
       )).catch(() => {});
     }
 
-    if (closedDropped > 0 || autoMarkApplied.length > 0) {
-      console.log("[EmpleoAutomatico] panel render: dropped", closedDropped, "closed,", autoMarkApplied.length, "auto-marked applied");
+    // Split: applied → their own section; everything else competes for the
+    // top-25 ranked list.
+    const appliedScored = scored
+      .filter(isAppliedMatch)
+      .sort((a, b) => (b.score - a.score) || 0)
+      .slice(0, 25);
+    scored = scored.filter((m) => !isAppliedMatch(m));
+
+    if (closedDropped > 0 || appliedScored.length > 0) {
+      console.log(
+        "[EmpleoAutomatico] panel render: dropped", closedDropped,
+        "closed,", appliedScored.length, "applied moved to its own section"
+      );
     }
 
     // Sort by score desc, then take 25. We doubled the cap from the
@@ -5457,9 +5483,16 @@
     matchesCurrentTopN = topN;
 
     // Render
-    const lowFitNote = topN.every((m) => m.score < 30)
-      ? `<div class="eamx-matches-panel__note">Pocas vacantes en esta página coinciden con tu perfil. Prueba con otros filtros o con palabras clave.</div>`
-      : "";
+    // Note logic:
+    //  - If there are no active (not-yet-applied) matches but there ARE
+    //    applied ones, say so — the empty list is "you applied to them all",
+    //    not "nothing matched".
+    //  - Otherwise, the usual low-fit hint when every active match is weak.
+    const lowFitNote = (topN.length === 0 && appliedScored.length > 0)
+      ? `<div class="eamx-matches-panel__note">Ya te postulaste a todas las vacantes que coincidían en esta vista. Cambia los filtros o busca otra cosa para ver más.</div>`
+      : (topN.length > 0 && topN.every((m) => m.score < 30))
+        ? `<div class="eamx-matches-panel__note">Pocas vacantes en esta página coinciden con tu perfil. Prueba con otros filtros o con palabras clave.</div>`
+        : "";
     // Stats strip — shows the best score, the average, the card count,
     // and a fourth Filtros cell summarizing the user's active preferences.
     // Helps the user calibrate at a glance ("is the top match really
@@ -5541,12 +5574,8 @@
         </div>
       `
       : "";
-    // Fetch applied IDs ONCE before rendering so each card knows whether
-    // to show the "✓ Ya postulada" badge in its first paint (no flicker).
-    let appliedIds = new Set();
-    if (queueModule && typeof queueModule.appliedIdsForSource === "function") {
-      try { appliedIds = await queueModule.appliedIdsForSource(SOURCE); } catch (_) {}
-    }
+    // (appliedIds was fetched earlier — before the active/applied split —
+    // and is reused here for the per-card badge.)
 
     // Fetch plan usage in parallel so the panel can surface "Te quedan
     // X de Y este mes" right above the stats strip. User explicit ask:
@@ -5573,6 +5602,20 @@
     } catch (_) { /* offline or network blip — skip pill */ }
 
     const list = topN.map((m, i) => renderMatchItem(m, i + 1, appliedIds)).join("");
+    // "Ya postuladas" section — applied vacancies pulled out of the ranked
+    // list above, shown compactly below so the user can see what's already
+    // done without it competing for the top-25. Display-only (no Marcar /
+    // Postular handlers) so it needs nothing from matchesCurrentTopN.
+    const appliedSection = appliedScored.length
+      ? `<section class="eamx-matches-applied" aria-label="Ya postuladas">
+           <h3 class="eamx-matches-applied__head">
+             <span aria-hidden="true">✓</span> Ya postuladas en esta búsqueda · ${appliedScored.length}
+           </h3>
+           <ol class="eamx-matches-applied__list">
+             ${appliedScored.map((m) => renderAppliedItem(m)).join("")}
+           </ol>
+         </section>`
+      : "";
     const footer = cards.length < 5
       ? `<p class="eamx-matches-panel__hint">Scroll para más vacantes.</p>`
       : "";
@@ -5594,7 +5637,7 @@
            <div class="eamx-matches-list-loader__hint">La lista se irá ampliando sola conforme aparezcan más matches.</div>
          </div>`
       : "";
-    host.innerHTML = `${usagePill}${stats}${top1Banner}${lowFitNote}<ol class="eamx-matches-list">${list}</ol>${footer}${scanRunningFooter}`;
+    host.innerHTML = `${usagePill}${stats}${top1Banner}${lowFitNote}<ol class="eamx-matches-list">${list}</ol>${appliedSection}${footer}${scanRunningFooter}`;
 
     // Regenerate the bulk section with plan-aware chips. The static
     // markup baked into the panel root only knows "top 5"; here we
@@ -6021,7 +6064,11 @@
     const safeLoc = jobLite.location ? escapeHtml(jobLite.location) : "";
     const safeUrl = encodeURI(jobLite.url || "#");
     const safeId = escapeHtml(jobLite.id || "");
-    const isApplied = appliedIds && appliedIds.has(String(jobLite.id || ""));
+    // Page-first: trust the card's own marker (appliedFromCard) as well as
+    // the persisted queue. (Applied items are normally pulled into their own
+    // section now, so this mainly guards any future reuse of renderMatchItem.)
+    const isApplied = match.appliedFromCard === true ||
+      (appliedIds && appliedIds.has(String(jobLite.id || "")));
     const reasonItems = (Array.isArray(reasons) ? reasons : [])
       .slice(0, 3)
       .map((r) => `<li>✓ ${escapeHtml(r)}</li>`)
@@ -6072,6 +6119,28 @@
           </div>
           ${manualMarkApplied}
         </div>
+      </li>
+    `;
+  }
+
+  // Compact row for the "Ya postuladas" section. Display-only: no Marcar /
+  // Postular buttons (so it needs nothing from matchesCurrentTopN), just the
+  // score, title, company and a plain "Abrir vacante" link for reference.
+  function renderAppliedItem(match) {
+    const { jobLite, score, level } = match;
+    const badgeLevel = level || "unknown";
+    const safeTitle = escapeHtml(jobLite.title || "(sin título)");
+    const safeCompany = escapeHtml(jobLite.company || "(empresa)");
+    const safeUrl = encodeURI(jobLite.url || "#");
+    const scoreStr = Number.isFinite(score) ? `${score}%` : "—";
+    return `
+      <li class="eamx-matches-applied__item">
+        <span class="eamx-matches-applied__score eamx-match-item__score--${badgeLevel}">${scoreStr}</span>
+        <span class="eamx-matches-applied__text">
+          <span class="eamx-matches-applied__title">${safeTitle}</span>
+          <span class="eamx-matches-applied__company">${safeCompany}</span>
+        </span>
+        <a href="${safeUrl}" target="_blank" rel="noopener" class="eamx-matches-applied__open" title="Abrir vacante en LaPieza">Abrir ↗</a>
       </li>
     `;
   }
