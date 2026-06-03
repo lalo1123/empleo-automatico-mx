@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-02-quiz-job-restore";
+  const EAMX_LAPIEZA_VERSION = "2026-06-02-bulk-pertab-job";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -368,8 +368,28 @@
   // for the same vacancy.
   const JOB_LATEST_KEY = "eamx:lapieza:job:__latest";
 
+  // Per-tab job cache key (window.sessionStorage). sessionStorage is scoped
+  // to the browsing context (tab) and survives same-origin navigation, so
+  // it's the ONLY storage that's both (a) carried across /vacante/ → /apply/
+  // and (b) isolated per tab. The chrome.storage.session keys below are
+  // SHARED across all tabs — fine for a single foreground flow, but in BULK
+  // (N background tabs running concurrently) the shared JOB_LATEST_KEY
+  // sentinel races: tab A on /apply/ could read tab B's job and apply to A
+  // with B's cover letter / track A under B's id. The per-tab cache fixes
+  // that; the chrome.storage keys remain as cross-context fallbacks.
+  const JOB_TAB_KEY = "eamx:lapieza:job:__tab";
+
   function persistJobToSession(job) {
-    if (!job || !chrome?.storage?.session) return;
+    if (!job) return;
+    // 1) Per-tab cache (authoritative on /apply/). Race-free across the
+    //    concurrent bulk tabs.
+    try {
+      window.sessionStorage.setItem(
+        JOB_TAB_KEY,
+        JSON.stringify({ ...job, persistedAt: Date.now() })
+      );
+    } catch (_) { /* sessionStorage blocked/full — fall back to chrome.storage */ }
+    if (!chrome?.storage?.session) return;
     try {
       const key = jobCacheKey(job.url || location.href);
       // Write BOTH the URL-keyed entry (fast path for the same URL on
@@ -383,6 +403,18 @@
     } catch (_) { /* ignore */ }
   }
   async function restoreJobFromSession() {
+    // 0) Per-tab cache FIRST — race-free across concurrent bulk tabs. This
+    //    is the authoritative source on /apply/ in the bulk flow.
+    try {
+      const raw = window.sessionStorage.getItem(JOB_TAB_KEY);
+      if (raw) {
+        const j = JSON.parse(raw);
+        if (j && typeof j === "object" && j.title &&
+            (Date.now() - (j.persistedAt || 0) < 15 * 60_000)) {
+          return j;
+        }
+      }
+    } catch (_) { /* ignore — fall through to chrome.storage */ }
     if (!chrome?.storage?.session) return null;
     try {
       const urlKey = jobCacheKey(location.href);
