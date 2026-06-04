@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-02-quota-clear-msg";
+  const EAMX_LAPIEZA_VERSION = "2026-06-02-salary-standalone";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -8919,6 +8919,68 @@
     return null;
   }
 
+  // Dedupe so we prompt about a given blocking field ONCE (keyed by its
+  // stamped fieldRef). Cleared when leaving the apply context.
+  const manualEntryPrompted = new Set();
+  function promptManualEntryIfBlocked() {
+    const blocker = detectManualEntryBlocker();
+    if (!blocker) return false;
+    let ref = "";
+    try { ref = ensureFieldRef(blocker.el); } catch (_) {}
+    if (ref && manualEntryPrompted.has(ref)) return true; // already told them
+    if (ref) manualEntryPrompted.add(ref);
+    try { clearQuizStickyToast(); } catch (_) {}
+    toast(
+      "✍️ Esta pregunta la respondes tú (ej. tu sueldo esperado). Escríbela y dale Continuar — lo demás ya quedó listo.",
+      "info",
+      { durationMs: 15000, sticky: true }
+    );
+    try {
+      blocker.el.scrollIntoView({ behavior: "smooth", block: "center" });
+      blocker.el.focus();
+    } catch (_) {}
+    return true;
+  }
+
+  // Standing watcher on /apply/ for a manual free-text field that blocks the
+  // flow but we don't auto-fill (salary/expectativa). The auto-quiz loop's
+  // blocker check only fires when a multiple-choice quiz is running; a vacancy
+  // whose ONLY step is "¿Cuál es tu expectativa salarial?" has no quiz, so the
+  // loop never starts and the chain just stopped silently at the empty box
+  // (user: "pasó como si acabara"). This watcher covers that: it polls, and
+  // when a free-text field has been BLOCKING a disabled Continuar for a few
+  // seconds (grace — so the chain/Q&A had its chance to fill what it CAN),
+  // it prompts the user once + focuses the field. Never auto-fills salary.
+  let manualEntryWatchActive = false;
+  function startManualEntryWatcher() {
+    if (manualEntryWatchActive) return;
+    manualEntryWatchActive = true;
+    const firstSeen = new Map(); // fieldRef -> first-seen timestamp
+    const GRACE_MS = 5000;
+    const tick = () => {
+      if (!manualEntryWatchActive) return;
+      try {
+        const blocker = detectManualEntryBlocker();
+        if (blocker) {
+          let ref = "";
+          try { ref = ensureFieldRef(blocker.el); } catch (_) {}
+          if (ref && !manualEntryPrompted.has(ref)) {
+            if (!firstSeen.has(ref)) firstSeen.set(ref, Date.now());
+            if (Date.now() - firstSeen.get(ref) >= GRACE_MS) {
+              promptManualEntryIfBlocked();
+            }
+          }
+        }
+      } catch (_) { /* ignore */ }
+      setTimeout(tick, 1500);
+    };
+    setTimeout(tick, 2000);
+  }
+  function stopManualEntryWatcher() {
+    manualEntryWatchActive = false;
+    try { manualEntryPrompted.clear(); } catch (_) {}
+  }
+
   async function runAutoQuizLoop() {
     // Pre-flight: lastJob + cachedProfile. The Express flow on /vacancy/<uuid>
     // sets both; if we got here without them the apply-side cache restore
@@ -8938,21 +9000,9 @@
         // detectQuizQuestion returns null when there are no multiple-choice
         // options. That's usually "quiz finished" — BUT it's also a
         // free-text question we don't auto-fill (salary/expectativa). If
-        // such a field is blocking a disabled Continuar, tell the user
-        // clearly + focus it instead of silently stopping (HITL handoff).
-        const blocker = detectManualEntryBlocker();
-        if (blocker) {
-          clearQuizStickyToast();
-          toast(
-            "✍️ Esta pregunta la respondes tú (ej. tu sueldo esperado). Escríbela y dale Continuar — lo demás ya quedó listo.",
-            "info",
-            { durationMs: 15000, sticky: true }
-          );
-          try {
-            blocker.el.scrollIntoView({ behavior: "smooth", block: "center" });
-            blocker.el.focus();
-          } catch (_) {}
-        }
+        // such a field blocks a disabled Continuar, prompt the user (deduped
+        // with the standing manual-entry watcher) instead of stopping silent.
+        try { promptManualEntryIfBlocked(); } catch (_) {}
         // Quiz finished (or handed off to the user) — stop the loop.
         break;
       }
@@ -9803,6 +9853,10 @@
         // missing the open-ended step entirely if the chain finished its
         // iterations before the textarea rendered.
         setTimeout(() => { try { startFlowAssistant(); } catch (_) {} }, 1200);
+        // Standing watcher for a manual field (e.g. a standalone "expectativa
+        // salarial" step) that blocks the flow but we don't auto-fill — prompts
+        // the user instead of the chain stopping silently.
+        try { startManualEntryWatcher(); } catch (_) {}
       }
     } else {
       // Left the job-detail / listing context entirely — drop the
@@ -9810,6 +9864,7 @@
       // filters may differ on a return visit.
       widerSearchPool = null;
       try { stopLocationModalAutoConfirm(); } catch (_) {}
+      try { stopManualEntryWatcher(); } catch (_) {}
       unmountFab();
       closePanel();
       closeMatchesPanel();
@@ -9873,6 +9928,9 @@
         // route. We clear the dedupe set so detectors can re-attach to
         // freshly-rendered inputs/textareas/buttons.
         stopFlowAssistant();
+        // Manual-entry watcher is per-apply-page; drop it on route change
+        // (detectAndMount re-arms it on the new /apply/).
+        try { stopManualEntryWatcher(); } catch (_) {}
         // Best-matches panel is page-scoped. If the user navigates away
         // mid-shortlist we close it AND drop the wider-search pool — the
         // underlying cards are gone, the user's filters may have changed,
