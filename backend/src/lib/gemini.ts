@@ -14,25 +14,40 @@ const COVER_LETTER_SYSTEM =
   "eres la persona ideal para este puesto?\" de formularios de aplicación " +
   "en México (LaPieza, OCC, Computrabajo, etc).\n\n" +
   "IMPORTANTE: esto NO es una carta formal. Los reclutadores ven este " +
-  "texto en una cajita del formulario, NO como un email. Reglas:\n" +
+  "texto en una cajita del formulario, NO como un email.\n\n" +
+  "REGLAS DE FORMATO:\n" +
   "1. NUNCA empieces con \"Estimados\", \"A quien corresponda\", \"Con " +
   "gran interés me dirijo\", ni saludos formales tipo carta o email.\n" +
   "2. NUNCA cierres con \"Atentamente\", \"Saludos cordiales\", firma, " +
   "ni datos de contacto.\n" +
-  "3. Arranca DIRECTO con una afirmación de fit en primera persona — ej. " +
-  "\"Soy la persona ideal para esta vacante porque...\" o \"Mi " +
-  "experiencia en X y Y me posiciona como candidato fuerte para...\".\n" +
-  "4. Tono: profesional pero conversacional, primera persona, español " +
-  "MX. Como si estuvieras platicando con el reclutador en una " +
-  "entrevista corta, no escribiendo un correo.\n" +
-  "5. Longitud: 150-220 palabras. Suficiente para sustentar el match, " +
-  "no tanto que el reclutador deje de leerlo.\n" +
-  "6. Referencias ESPECÍFICAS del CV que conecten con los requisitos " +
-  "de la vacante (años de experiencia, herramientas, logros). Sin " +
-  "inventar nada que no esté en el CV.\n" +
-  "7. Si el puesto tiene keywords técnicas (ej. \"Power BI\", \"SQL\", " +
-  "\"Salesforce\"), inclúyelas naturalmente en el texto SI el candidato " +
-  "las tiene en su CV.";
+  "3. Tono: profesional pero conversacional, primera persona, español " +
+  "MX. Como una entrevista corta, no un correo.\n" +
+  "4. Longitud: 150-220 palabras.\n\n" +
+  "REGLAS DE CONTENIDO — esto separa una respuesta BUENA de una GENÉRICA. " +
+  "Síguelas o el texto sirve de nada:\n" +
+  "5. Arranca DIRECTO con tu prueba más fuerte y CONCRETA, nunca con una " +
+  "afirmación vacía.\n" +
+  "   MAL: \"Soy la persona ideal porque soy proactivo y tengo sólida " +
+  "experiencia.\"\n" +
+  "   BIEN: \"En [empresa real del CV] lideré [logro/herramienta/métrica " +
+  "real del CV], justo lo que pide esta vacante de [puesto].\"\n" +
+  "6. Nombra a la empresa de la vacante al menos una vez y referencia UN " +
+  "elemento concreto de la descripción (una responsabilidad, herramienta " +
+  "o reto que menciona). Debe quedar OBVIO que no es una plantilla.\n" +
+  "7. CADA afirmación de fit va respaldada por un dato real del CV: " +
+  "nombre de empresa, herramienta, años o métrica. Si no hay dato que lo " +
+  "respalde, no lo afirmes.\n" +
+  "8. Refleja el lenguaje de la vacante: si pide \"Power BI\", " +
+  "\"liderazgo de equipo\", \"e-commerce\", usa ESAS mismas palabras SI " +
+  "el candidato las tiene en su CV.\n" +
+  "9. PROHIBIDO usar muletillas genéricas vacías: \"equipo dinámico\", " +
+  "\"me apasiona\", \"soy proactivo\", \"sólida/amplia experiencia\", " +
+  "\"orientado a resultados\", \"valor agregado\", \"trabajo bajo " +
+  "presión\", \"excelentes habilidades de comunicación\", \"diversas " +
+  "tareas\". Si una frase podría servir para CUALQUIER candidato en " +
+  "CUALQUIER puesto, bórrala y pon en su lugar un hecho específico del CV.\n" +
+  "10. NUNCA inventes nada que no esté en el CV (experiencia, " +
+  "herramientas, números). Optimista pero 100% verdadero.";
 
 const PARSE_CV_SYSTEM =
   "Extrae información estructurada de un CV en texto. Responde SOLO con el " +
@@ -97,25 +112,38 @@ const ANSWER_QUESTIONS_SYSTEM =
   "Eres un experto en redacción de respuestas para formularios de aplicación " +
   "a vacantes en México.\n" +
   "Recibes una lista de preguntas (cada una literal del formulario que el " +
-  "candidato está llenando) y debes responder cada una de forma específica, " +
+  "candidato está llenando) y debes responder cada una de forma ESPECÍFICA, " +
   "anclada en el perfil del candidato y la vacante.\n\n" +
   "Reglas:\n" +
   "1. NUNCA inventes experiencia, fechas, números o títulos que no estén en " +
   "el perfil.\n" +
   "2. Cada respuesta: 60-150 palabras, español MX, profesional pero humano, " +
   "primera persona.\n" +
-  "3. Si la pregunta es de \"fit/motivación/por qué eres ideal\" → conecta " +
-  "2-3 puntos del perfil con requisitos de la vacante.\n" +
-  "4. Si es \"disponibilidad\" → directa y breve (1-2 frases, mencionando " +
-  "la empresa).\n" +
-  "5. Si es \"expectativa salarial\" → si la vacante muestra rango, alinea; " +
-  "si no, usa lenguaje flexible (\"dentro del rango competitivo del mercado " +
+  "3. CADA respuesta debe citar al menos UN dato concreto del perfil " +
+  "(empresa, puesto, herramienta, años o métrica). Una respuesta que no " +
+  "menciona ningún hecho real del CV está MAL hecha.\n" +
+  "4. Nombra a la empresa de la vacante cuando la pregunta lo permita " +
+  "(motivación, disponibilidad, \"por qué aquí\").\n" +
+  "5. Refleja el lenguaje de la pregunta y las keywords de la vacante " +
+  "cuando el CV lo respalde.\n" +
+  "6. Tipos comunes:\n" +
+  "   - \"fit/motivación/por qué eres ideal\" → conecta 2-3 puntos del " +
+  "perfil con requisitos de la vacante.\n" +
+  "   - \"disponibilidad\" → directa y breve (1-2 frases, mencionando la " +
+  "empresa).\n" +
+  "   - \"expectativa salarial\" → si la vacante muestra rango, alinea; si " +
+  "no, lenguaje flexible (\"dentro del rango competitivo del mercado " +
   "para...\").\n" +
-  "6. Si es \"experiencia relevante\" → top 2-3 logros del perfil que " +
-  "matcheen la vacante.\n" +
-  "7. Si es una pregunta atípica (ej. \"¿qué te apasiona?\", \"¿qué harías " +
-  "en los primeros 90 días?\") → responde anclado en el perfil, sin " +
-  "clichés.\n" +
+  "   - \"experiencia relevante\" → top 2-3 logros del perfil que matcheen " +
+  "la vacante.\n" +
+  "   - atípica (\"¿qué te apasiona?\", \"¿primeros 90 días?\") → respuesta " +
+  "anclada en el perfil, sin clichés.\n" +
+  "7. PROHIBIDO usar muletillas genéricas vacías: \"equipo dinámico\", " +
+  "\"me apasiona\", \"soy proactivo\", \"sólida/amplia experiencia\", " +
+  "\"orientado a resultados\", \"valor agregado\", \"trabajo bajo " +
+  "presión\", \"excelentes habilidades de comunicación\". Si una frase " +
+  "serviría para CUALQUIER candidato en CUALQUIER puesto, cámbiala por un " +
+  "hecho específico del CV.\n" +
   "8. Devuelve un array de respuestas EN EL MISMO ORDEN que las preguntas. " +
   "Mismo length.";
 
@@ -416,10 +444,14 @@ export async function generateCoverLetter(
     contents: [{ role: "user", parts: [{ text: userText }] }],
     generationConfig: {
       temperature: 0.7,
-      // 2.5 burns "thinking" tokens before the response — disable thinking and
-      // size the budget for the JSON cover letter (~600 tokens worst case).
-      maxOutputTokens: 3000,
-      thinkingConfig: { thinkingBudget: 0 },
+      // A modest thinking budget is the single biggest lever against GENERIC
+      // output: it lets 2.5 reason about WHICH concrete CV facts to pick and
+      // how to tie them to this specific vacancy before writing. We cap it
+      // (not dynamic -1) for predictable cost, and keep maxOutputTokens ~4x
+      // above it so thinking can NEVER starve the JSON response (the old
+      // empty-cover bug). Response itself is ~600-800 tokens.
+      maxOutputTokens: 4000,
+      thinkingConfig: { thinkingBudget: 1024 },
       responseMimeType: "application/json",
       responseJsonSchema: COVER_LETTER_SCHEMA
     }
@@ -649,9 +681,11 @@ export async function answerQuestions(
     generationConfig: {
       // Some flexibility for varied phrasings, not too creative.
       temperature: 0.6,
-      // Worst case: 12 questions × ~300 tokens each.
-      maxOutputTokens: 4000,
-      thinkingConfig: { thinkingBudget: 0 },
+      // Thinking lets the model choose a concrete CV fact per answer instead
+      // of defaulting to boilerplate. Budget capped; maxOutputTokens sized so
+      // thinking + up to 12 answers (~200 tokens each) never collide.
+      maxOutputTokens: 6000,
+      thinkingConfig: { thinkingBudget: 1536 },
       responseMimeType: "application/json",
       responseJsonSchema: ANSWER_QUESTIONS_SCHEMA
     }
@@ -758,8 +792,13 @@ export async function answerQuiz(
       // Factual QA — keep creativity to a minimum so the model picks the
       // canonically correct option instead of "an interesting one".
       temperature: 0.1,
-      maxOutputTokens: 400,
-      thinkingConfig: { thinkingBudget: 0 },
+      // For a quiz "good" means CORRECT. A small thinking budget lets the
+      // model reason through tricky technical items (best-practice, "which
+      // is NOT…", multi-step) before committing. Kept small because a quiz
+      // can fire 20+ times and latency compounds; maxOutputTokens is bumped
+      // well above it so the answerKey is never truncated.
+      maxOutputTokens: 1400,
+      thinkingConfig: { thinkingBudget: 512 },
       responseMimeType: "application/json",
       responseJsonSchema: ANSWER_QUIZ_SCHEMA
     }
