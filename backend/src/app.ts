@@ -13,7 +13,7 @@ import { billingRoutes } from "./routes/billing.js";
 import { webhookRoutes } from "./routes/webhooks.js";
 import { adminRoutes } from "./routes/admin.js";
 
-const VERSION = "0.2.1";
+const VERSION = "0.2.2";
 
 export function createApp(): Hono<AppContext> {
   // Ensure env is loaded / validated at app construction time.
