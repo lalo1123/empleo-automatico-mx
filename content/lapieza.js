@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-06-manual-prompt-fallback";
+  const EAMX_LAPIEZA_VERSION = "2026-06-06-manual-prompt-in-chain";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -1855,6 +1855,14 @@
         const startedAt = Date.now();
         while (looksLikeQuizStep() && Date.now() - startedAt < 90_000) {
           if (quickApplyAborted) break;
+          // The "quiz" container can park on a free-text question we don't
+          // auto-fill (e.g. Konfío's "¿De qué volumen es tu cartera
+          // activa?" at 16/19): looksLikeQuizStep stays true, so without
+          // this the chain would just wait 90s then bail SILENTLY (the
+          // recurring "ahi se quedó"). The standing watcher can miss it
+          // (arming/race), but the chain is reliably running — so prompt
+          // here too (deduped via manualEntryPrompted). Never auto-fills.
+          try { promptManualEntryIfBlocked(); } catch (_) {}
           await new Promise((r) => setTimeout(r, 1500));
         }
         if (quickApplyAborted) break;
@@ -9020,7 +9028,7 @@
     toast(
       "✍️ Esta pregunta la respondes tú (ej. tu sueldo esperado). Escríbela y dale Continuar — lo demás ya quedó listo.",
       "info",
-      { durationMs: 15000, sticky: true }
+      { durationMs: 60000, sticky: true }
     );
     try {
       blocker.el.scrollIntoView({ behavior: "smooth", block: "center" });
