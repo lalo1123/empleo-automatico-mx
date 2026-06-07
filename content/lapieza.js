@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-02-salary-standalone";
+  const EAMX_LAPIEZA_VERSION = "2026-06-06-hitl-submit-guard";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -1754,6 +1754,14 @@
     let lastDomSignature = "";
     let stuckTicks = 0;
     const MAX_STUCK_TICKS = 3;
+    // Tracks whether the chain has done real work (CV step handled, cover/
+    // Q&A filled, or a quiz step processed). Used to recognize the FINAL
+    // submit step: on some LaPieza forms (e.g. ERM) the submit button is
+    // labeled "Continuar" (not "Finalizar"), so findApplyFlowFinalizeBtn()
+    // misses it. Once the work is done, a bare "Continuar" with nothing
+    // left to fill is almost certainly the submit — in HITL we must STOP
+    // there instead of clicking it (auto-submit = broken HITL contract).
+    let didProductiveWork = false;
     function computeDomSignature() {
       try {
         const url = location.href.split("?")[0];
@@ -1831,6 +1839,7 @@
         }
         const continueBtnCv = findApplyFlowContinueBtn();
         if (continueBtnCv) { try { continueBtnCv.click(); } catch (_) {} }
+        didProductiveWork = true;
         continue;
       }
 
@@ -1842,6 +1851,7 @@
       console.log("[EmpleoAutomatico] chain iter:", i, "quizStep:", isQuizStep);
       if (isQuizStep) {
         reportBulkStatus("quiz");
+        didProductiveWork = true;
         const startedAt = Date.now();
         while (looksLikeQuizStep() && Date.now() - startedAt < 90_000) {
           if (quickApplyAborted) break;
@@ -1890,6 +1900,7 @@
       // and that branch `continue`d. The redundant branch was removed
       // when we moved CV detection ahead of the quiz-check choke point.
       if (hasFillable) {
+        didProductiveWork = true;
         // Report what we're about to do — prefer "cover" if a cover
         // textarea is visible, fall back to "questions" otherwise.
         // Both can be true (open-ended Q&A often coexists with the
@@ -1911,6 +1922,28 @@
         if (quickApplyAborted) break;
         if (!isApplyPage()) break;
       } else {
+        // No fillable fields, not CV, not quiz. A bare "Continuar" here is
+        // ambiguous: a mid-flow advance vs the FINAL submit. Some LaPieza
+        // forms (e.g. ERM) label the submit button "Continuar" (not
+        // "Finalizar"), so findApplyFlowFinalizeBtn() misses it and we'd
+        // click it = auto-submit. Once we've done the real work
+        // (CV/cover/Q&A/quiz), this bare step is almost certainly the
+        // submit, so treat it as the finalize step: HITL STOPS (the user
+        // sends it), bulk runs the normal countdown+click+track.
+        if (didProductiveWork) {
+          const submitLike = findApplyFlowContinueBtn();
+          if (submitLike) {
+            if (!isBulkMode) {
+              try { highlightExpressSubmitButton(); } catch (_) {}
+              try { attachFinalizeApplyTracker(submitLike); } catch (_) {}
+              reportBulkStatus("ready");
+              toast("✓ Listo. Revisa todo y dale tú el último botón para enviar.", "success", { durationMs: 8000 });
+              break;
+            }
+            await handleReadyToFinalize(submitLike, true);
+            break;
+          }
+        }
         console.log("[EmpleoAutomatico] chain step: no cover/Q&A and not CV step, will just click Continuar");
       }
 
@@ -2986,12 +3019,35 @@
   // job really is too far. It only ever clicks the CONFIRM button
   // (findLaPiezaLocationContinueCTA excludes cancel) and only advances PAST
   // a warning — it never submits anything (Finalizar stays HITL).
+  // Best-effort activation for a stubborn modal button. A bare .click()
+  // works for most LaPieza buttons, but some renders only react to a full
+  // pointer+mouse event sequence (React components bound to pointer/mouse
+  // handlers rather than the synthetic click). Fire the whole sequence
+  // plus a native .click(); harmless if redundant.
+  function robustModalClick(btn) {
+    if (!btn) return;
+    try { btn.focus(); } catch (_) {}
+    const opts = { bubbles: true, cancelable: true, view: window };
+    for (const type of ["pointerdown", "mousedown", "mouseup", "click"]) {
+      try {
+        const usePointer = type.startsWith("pointer") && typeof PointerEvent === "function";
+        const Ev = usePointer ? PointerEvent : MouseEvent;
+        btn.dispatchEvent(new Ev(type, opts));
+      } catch (_) { /* ignore individual event failures */ }
+    }
+    try { btn.click(); } catch (_) {}
+  }
+
   let locationModalWatchActive = false;
   let locationModalFirstSeenAt = 0;
+  let locationModalClickAttempts = 0;
+  let locationModalHelpShown = false;
   function startLocationModalAutoConfirm() {
     if (locationModalWatchActive) return;
     locationModalWatchActive = true;
     locationModalFirstSeenAt = 0;
+    locationModalClickAttempts = 0;
+    locationModalHelpShown = false;
     const tick = () => {
       if (!locationModalWatchActive) return;
       try {
@@ -3000,11 +3056,30 @@
           if (!locationModalFirstSeenAt) {
             locationModalFirstSeenAt = Date.now();
           } else if (Date.now() - locationModalFirstSeenAt >= 1200) {
-            try { btn.click(); } catch (_) {}
+            try { robustModalClick(btn); } catch (_) {}
+            locationModalClickAttempts++;
             locationModalFirstSeenAt = 0;
+            // If we've clicked several times and the modal is STILL up,
+            // the page isn't reacting to synthetic clicks (a LaPieza
+            // render glitch — observed live). Turn the silent deadlock
+            // into a clear, actionable prompt instead of leaving the user
+            // staring at a stuck modal ("salio esto y ahi se quedo").
+            if (locationModalClickAttempts >= 3 && !locationModalHelpShown) {
+              locationModalHelpShown = true;
+              try {
+                toast(
+                  'Confírmalo tú: dale "Sí, continuar con postulación" para seguir.',
+                  "info",
+                  { durationMs: 9000 }
+                );
+              } catch (_) {}
+            }
           }
         } else {
-          locationModalFirstSeenAt = 0; // modal closed / not present — reset grace
+          // modal closed / not present — reset grace + attempt counters
+          locationModalFirstSeenAt = 0;
+          locationModalClickAttempts = 0;
+          locationModalHelpShown = false;
         }
       } catch (_) { /* ignore */ }
       setTimeout(tick, 300);
@@ -3014,6 +3089,8 @@
   function stopLocationModalAutoConfirm() {
     locationModalWatchActive = false;
     locationModalFirstSeenAt = 0;
+    locationModalClickAttempts = 0;
+    locationModalHelpShown = false;
   }
 
   async function onFabClickExpressVacancy() {
