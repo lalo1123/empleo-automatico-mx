@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-07-manual-marker-coverfix";
+  const EAMX_LAPIEZA_VERSION = "2026-06-07-bulk-safety";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -1860,13 +1860,28 @@
         while (looksLikeQuizStep() && Date.now() - startedAt < 90_000) {
           if (quickApplyAborted) break;
           // The "quiz" container can park on a free-text question we don't
-          // auto-fill (e.g. Konfío's "¿De qué volumen es tu cartera
-          // activa?" at 16/19): looksLikeQuizStep stays true, so without
-          // this the chain would just wait 90s then bail SILENTLY (the
-          // recurring "ahi se quedó"). The standing watcher can miss it
-          // (arming/race), but the chain is reliably running — so prompt
-          // here too (deduped via manualEntryPrompted). Never auto-fills.
-          try { promptManualEntryIfBlocked(); } catch (_) {}
+          // auto-fill (e.g. Konfío's "¿De qué volumen es tu cartera activa?"
+          // at 16/19): looksLikeQuizStep stays true.
+          if (isBulkMode) {
+            // BULK: the absent user can't type it and the quiz never resolves,
+            // so don't spin 90s × many iters — bail fast with a clear error
+            // (NO submit). HITL is handled below (marker/prompt).
+            let qb = null;
+            try { qb = detectManualEntryBlocker(); } catch (_) {}
+            if (qb) {
+              console.warn("[EmpleoAutomatico] bulk: manual field inside quiz — aborting WITHOUT submit");
+              reportBulkStatus("error", { label: "Necesita un dato tuyo — no enviado" });
+              try { clearBulkModeFlag(); } catch (_) {}
+              quickApplyAborted = true;
+              break;
+            }
+          } else {
+            // HITL: without this the chain would wait 90s then bail SILENTLY
+            // (the recurring "ahi se quedó"). The standing watcher can miss it
+            // (arming/race), but the chain is reliably running — so prompt +
+            // mark here too (deduped). Never auto-fills.
+            try { promptManualEntryIfBlocked(); } catch (_) {}
+          }
           await new Promise((r) => setTimeout(r, 1500));
         }
         if (quickApplyAborted) break;
@@ -1923,16 +1938,57 @@
         // chainApplyStepsToFinalize. forceOverwrite:true → since the
         // user explicitly clicked ⚡ Postular, we replace LaPieza's
         // pre-existing cover letter text from a previous submission.
+        let fillOk = true;
         try {
           await onFabClickExpressApply({
             skipCv: true,
             singleStep: true,
             forceOverwrite: true
           });
-        } catch (_) {}
+        } catch (_) { fillOk = false; }
         await new Promise((r) => setTimeout(r, 2200));
         if (quickApplyAborted) break;
         if (!isApplyPage()) break;
+        // ── BULK SAFETY GATE ──────────────────────────────────────────────
+        // A hands-off bulk user ("le doy a auto-postular y me voy") never sees
+        // a blank carta or a field we couldn't fill. So in BULK we must NEVER
+        // auto-submit an incomplete application. If, after the fill attempt,
+        // the cover is STILL empty (AI/backend failed) OR a field is still
+        // blocking a disabled Continuar (e.g. a manual salary/cartera field the
+        // user isn't here to type), ABORT this tab with a clear error instead
+        // of sending a weak/blank application — or looping silently. HITL mode
+        // is exempt: the user is right there to fix/decide.
+        if (isBulkMode) {
+          const coverStillEmpty = () => {
+            try {
+              const cf = hasCover ? findExpressCoverLetterField() : null;
+              return !!cf && !((cf.value || "").trim());
+            } catch (_) { return false; }
+          };
+          let coverEmpty = coverStillEmpty();
+          // Grace for a slow backend: re-check once before judging it failed.
+          if (coverEmpty) {
+            await new Promise((r) => setTimeout(r, 2500));
+            if (quickApplyAborted) break;
+            if (!isApplyPage()) break;
+            coverEmpty = coverStillEmpty();
+          }
+          let blocker = null;
+          try { blocker = detectManualEntryBlocker(); } catch (_) {}
+          if (!fillOk || coverEmpty || blocker) {
+            console.warn(
+              "[EmpleoAutomatico] bulk: incomplete application — aborting WITHOUT submit",
+              { fillOk, coverEmpty, hasBlocker: !!blocker, url: location.href.split("?")[0] }
+            );
+            reportBulkStatus("error", {
+              label: coverEmpty ? "Carta no se generó — no enviado"
+                : blocker ? "Necesita un dato tuyo — no enviado"
+                : "No se pudo completar — no enviado"
+            });
+            try { clearBulkModeFlag(); } catch (_) {}
+            break;
+          }
+        }
       } else {
         // No fillable fields, not CV, not quiz. A bare "Continuar" here is
         // ambiguous: a mid-flow advance vs the FINAL submit. Some LaPieza
@@ -2000,6 +2056,28 @@
         stuckTicks = 0;
       }
       lastDomSignature = sig;
+    }
+    // SAFETY NET (bulk): if the loop ran its full course without finalizing,
+    // aborting, or erroring — a rare stuck state (e.g. a quiz the AI never
+    // resolved over many iters) — don't leave a hands-off bulk row spinning
+    // forever. A real submit lands on LaPieza's confirmation ("ha recibido tu
+    // postulación" / "ya quedó" / "explorar más vacantes") or navigates off the
+    // apply form; if NONE of those is true, surface a clear error. No submit
+    // happened, so this never hides a real send.
+    if (isBulkMode && !quickApplyAborted) {
+      try {
+        await new Promise((r) => setTimeout(r, 2000));
+        const bodyTxt = (document.body.innerText || "").toLowerCase();
+        const looksSubmitted =
+          !isApplyPage() ||
+          detectAlreadyAppliedState() ||
+          /recibido tu postulaci|ya qued[oó]|explorar m[aá]s vacantes|postulaci[oó]n enviada/i.test(bodyTxt);
+        if (!looksSubmitted) {
+          console.warn("[EmpleoAutomatico] chain: loop ended without a clear finalize — reporting stuck (no submit)");
+          reportBulkStatus("error", { label: "No terminó — revisa la pestaña" });
+          clearBulkModeFlag();
+        }
+      } catch (_) { /* ignore */ }
     }
     // chainApplyStepsToFinalize() wrapper handles esc-listener cleanup
     // and chainInProgress release in its finally block.
