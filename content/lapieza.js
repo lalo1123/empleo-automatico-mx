@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-06-manual-prompt-in-chain";
+  const EAMX_LAPIEZA_VERSION = "2026-06-07-manual-marker";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -1602,6 +1602,10 @@
     cvState = "idle"; cvHtml = ""; cvSummary = ""; cvError = "";
     detectedQuestions = []; questionAnswers = []; questionsState = "idle"; questionsError = "";
     reportBulkStatus("starting");
+    // Arm the manual-entry watcher here too (not just in detectAndMount) so the
+    // persistent field marker is GUARANTEED active during a chain run — the
+    // detectAndMount arming proved unreliable on chain-driven navs. Idempotent.
+    try { startManualEntryWatcher(); } catch (_) {}
 
     // Install the Esc kill switch FIRST so the user can cancel during
     // any pre-flight (auth check, terminal-state detectors, 30s no-form
@@ -9017,12 +9021,58 @@
   // Dedupe so we prompt about a given blocking field ONCE (keyed by its
   // stamped fieldRef). Cleared when leaving the apply context.
   const manualEntryPrompted = new Set();
+
+  // PERSISTENT visual marker on a blocking manual-entry field. A toast is
+  // transient (auto-dismisses after durationMs) AND deduped, so on slow or
+  // awkward LaPieza renders the user can miss it and the field looks silently
+  // stuck (the recurring "ahi se quedó"). The marker is a glowing outline + an
+  // inline badge pinned to the field itself; it stays until the field is
+  // filled or the step changes. Applied idempotently from the watcher tick, so
+  // it self-heals and never depends on toast timing or dedup.
+  const manualMarkerFocused = new Set();
+  function applyManualEntryMarker(el) {
+    if (!el) return;
+    try {
+      el.classList.add("eamx-manual-field");
+      const parent = el.parentElement;
+      if (parent && !parent.querySelector(":scope > .eamx-manual-badge")) {
+        const badge = document.createElement("div");
+        badge.className = "eamx-manual-badge";
+        badge.textContent = "✍️ Esta la respondes tú — escríbela y dale Continuar. Lo demás ya quedó listo.";
+        try { parent.insertBefore(badge, el); } catch (_) {}
+      }
+      // Focus + scroll ONCE per field — re-focusing every tick would fight the
+      // user while they type.
+      let ref = "";
+      try { ref = ensureFieldRef(el); } catch (_) {}
+      if (ref && !manualMarkerFocused.has(ref)) {
+        manualMarkerFocused.add(ref);
+        try { el.scrollIntoView({ behavior: "smooth", block: "center" }); } catch (_) {}
+        try { el.focus(); } catch (_) {}
+      }
+    } catch (_) { /* ignore */ }
+  }
+  function clearManualEntryMarkers() {
+    try {
+      document.querySelectorAll(".eamx-manual-field").forEach((el) => {
+        try { el.classList.remove("eamx-manual-field"); } catch (_) {}
+      });
+      document.querySelectorAll(".eamx-manual-badge").forEach((b) => {
+        try { b.remove(); } catch (_) {}
+      });
+      manualMarkerFocused.clear();
+    } catch (_) { /* ignore */ }
+  }
+
   function promptManualEntryIfBlocked() {
     const blocker = detectManualEntryBlocker();
     if (!blocker) return false;
+    // Persistent marker FIRST (idempotent, no dedup) — this is the reliable
+    // cue. The toast below is a best-effort attention grab (deduped).
+    try { applyManualEntryMarker(blocker.el); } catch (_) {}
     let ref = "";
     try { ref = ensureFieldRef(blocker.el); } catch (_) {}
-    if (ref && manualEntryPrompted.has(ref)) return true; // already told them
+    if (ref && manualEntryPrompted.has(ref)) return true; // already toasted
     if (ref) manualEntryPrompted.add(ref);
     try { clearQuizStickyToast(); } catch (_) {}
     toast(
@@ -9030,10 +9080,6 @@
       "info",
       { durationMs: 60000, sticky: true }
     );
-    try {
-      blocker.el.scrollIntoView({ behavior: "smooth", block: "center" });
-      blocker.el.focus();
-    } catch (_) {}
     return true;
   }
 
@@ -9057,6 +9103,9 @@
       try {
         const blocker = detectManualEntryBlocker();
         if (blocker) {
+          // Persistent marker IMMEDIATELY (no grace) so the field never looks
+          // silently stuck. The toast still waits out the grace + dedup below.
+          try { applyManualEntryMarker(blocker.el); } catch (_) {}
           let ref = "";
           try { ref = ensureFieldRef(blocker.el); } catch (_) {}
           if (ref && !manualEntryPrompted.has(ref)) {
@@ -9065,6 +9114,9 @@
               promptManualEntryIfBlocked();
             }
           }
+        } else {
+          // Blocker gone (field filled or step advanced) → remove the marker.
+          try { clearManualEntryMarkers(); } catch (_) {}
         }
       } catch (_) { /* ignore */ }
       setTimeout(tick, 1500);
@@ -9074,6 +9126,7 @@
   function stopManualEntryWatcher() {
     manualEntryWatchActive = false;
     try { manualEntryPrompted.clear(); } catch (_) {}
+    try { clearManualEntryMarkers(); } catch (_) {}
   }
 
   async function runAutoQuizLoop() {

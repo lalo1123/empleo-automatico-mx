@@ -1372,6 +1372,39 @@
 }
 
 /* =============================================================================
+ * Manual-entry field marker — a PERSISTENT cue pinned to a free-text field we
+ * intentionally don't auto-fill (salary / expectativa / cartera). Replaces the
+ * easy-to-miss transient toast so the field never looks silently stuck.
+ * ============================================================================= */
+
+.eamx-manual-field {
+  outline: 3px solid #f59e0b !important;
+  outline-offset: 2px !important;
+  border-radius: 8px !important;
+  box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.25) !important;
+  animation: eamx-manual-pulse 1.6s ease-in-out infinite !important;
+}
+
+@keyframes eamx-manual-pulse {
+  0%, 100% { box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.28); }
+  50% { box-shadow: 0 0 0 8px rgba(245, 158, 11, 0.10); }
+}
+
+.eamx-manual-badge {
+  display: block !important;
+  margin: 0 0 8px 0 !important;
+  padding: 9px 13px !important;
+  background: #fef3c7 !important;
+  color: #92400e !important;
+  border: 1px solid #f59e0b !important;
+  border-radius: 8px !important;
+  font: 600 13px/1.4 var(--eamx-font-sans, system-ui, sans-serif) !important;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1) !important;
+  position: relative !important;
+  z-index: 5 !important;
+}
+
+/* =============================================================================
  * Toast
  * ============================================================================= */
 
