@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-06-hitl-submit-guard";
+  const EAMX_LAPIEZA_VERSION = "2026-06-06-manual-prompt-fallback";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -8984,14 +8984,24 @@
       });
       if (!blocked) return null; // nothing is gating progress → not a blocker
       const fields = Array.from(document.querySelectorAll("textarea, input[type='text']")).filter(isVisible);
+      let fallback = null;
       for (const el of fields) {
         if (el === cover) continue;
         if (el.disabled || el.readOnly) continue;
         if ((el.value || "").trim()) continue; // already has content
+        // Prefer a field whose question text we can extract (precise), but
+        // DON'T require it. questionTextFor() misses some LaPieza layouts —
+        // e.g. the quiz-embedded "16/19 ¿De qué volumen…?" free-text on
+        // Konfío returned no text, so the blocker went undetected and the
+        // flow stalled SILENTLY (the recurring "ahi se quedó"). A visible,
+        // empty, enabled field that's gating a DISABLED Continuar is itself
+        // a strong "the user must type here" signal, and the prompt copy is
+        // generic (doesn't use the question), so we fall back to it.
         const q = questionTextFor(el);
-        if (!q) continue;
-        return { el, question: q };
+        if (q) return { el, question: q };
+        if (!fallback) fallback = { el, question: "" };
       }
+      if (fallback) return fallback;
     } catch (_) { /* ignore */ }
     return null;
   }
