@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-07-manual-marker";
+  const EAMX_LAPIEZA_VERSION = "2026-06-07-manual-marker-coverfix";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -8985,8 +8985,6 @@
   // salary.
   function detectManualEntryBlocker() {
     try {
-      let cover = null;
-      try { cover = findExpressCoverLetterField(); } catch (_) {}
       const advRx = /continuar|siguiente|next|enviar|finaliz/i;
       const blocked = Array.from(document.querySelectorAll("button")).some((b) => {
         if (!isVisible(b)) return false;
@@ -8995,20 +8993,23 @@
         return b.disabled || b.getAttribute("aria-disabled") === "true" || /\bdisabled\b/i.test(cls);
       });
       if (!blocked) return null; // nothing is gating progress → not a blocker
+      // We deliberately DON'T exclude the "cover letter" field here. The old
+      // code skipped `el === findExpressCoverLetterField()`, but that helper's
+      // "largest textarea" fallback matches ANY single textarea — so on a
+      // one-field step (e.g. Konfío's "16/19 ¿De qué volumen es tu cartera?")
+      // the manual field got tagged as the cover and skipped → returned null →
+      // SILENT stall (the recurring "ahi se quedó"). ("cartera" even matches
+      // the cover regex's bare /carta/.) Instead, the watcher applies a GRACE
+      // before marking: a cover/Q&A field the AI is about to fill gets a value
+      // before the grace elapses (never marked); a field STILL empty + blocking
+      // after the grace is genuinely the user's to fill.
       const fields = Array.from(document.querySelectorAll("textarea, input[type='text']")).filter(isVisible);
       let fallback = null;
       for (const el of fields) {
-        if (el === cover) continue;
         if (el.disabled || el.readOnly) continue;
         if ((el.value || "").trim()) continue; // already has content
         // Prefer a field whose question text we can extract (precise), but
-        // DON'T require it. questionTextFor() misses some LaPieza layouts —
-        // e.g. the quiz-embedded "16/19 ¿De qué volumen…?" free-text on
-        // Konfío returned no text, so the blocker went undetected and the
-        // flow stalled SILENTLY (the recurring "ahi se quedó"). A visible,
-        // empty, enabled field that's gating a DISABLED Continuar is itself
-        // a strong "the user must type here" signal, and the prompt copy is
-        // generic (doesn't use the question), so we fall back to it.
+        // DON'T require it — questionTextFor() misses some LaPieza layouts.
         const q = questionTextFor(el);
         if (q) return { el, question: q };
         if (!fallback) fallback = { el, question: "" };
@@ -9103,20 +9104,24 @@
       try {
         const blocker = detectManualEntryBlocker();
         if (blocker) {
-          // Persistent marker IMMEDIATELY (no grace) so the field never looks
-          // silently stuck. The toast still waits out the grace + dedup below.
-          try { applyManualEntryMarker(blocker.el); } catch (_) {}
           let ref = "";
           try { ref = ensureFieldRef(blocker.el); } catch (_) {}
-          if (ref && !manualEntryPrompted.has(ref)) {
+          if (ref) {
             if (!firstSeen.has(ref)) firstSeen.set(ref, Date.now());
+            // Grace: only mark after the field has been continuously blocking a
+            // few seconds — long enough that the AI would have filled the
+            // cover/Q&A if it was going to (so we never flash on it). A field
+            // STILL empty + blocking after the grace is the user's to fill
+            // (salary, cartera, etc.). promptManualEntryIfBlocked applies the
+            // persistent marker AND the one-time toast (both idempotent).
             if (Date.now() - firstSeen.get(ref) >= GRACE_MS) {
-              promptManualEntryIfBlocked();
+              try { promptManualEntryIfBlocked(); } catch (_) {}
             }
           }
         } else {
-          // Blocker gone (field filled or step advanced) → remove the marker.
+          // Blocker gone (field filled or step advanced) → clear marker + grace.
           try { clearManualEntryMarkers(); } catch (_) {}
+          try { firstSeen.clear(); } catch (_) {}
         }
       } catch (_) { /* ignore */ }
       setTimeout(tick, 1500);
