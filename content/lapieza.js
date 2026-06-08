@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-07-bulk-safety";
+  const EAMX_LAPIEZA_VERSION = "2026-06-07-salary-prefs";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -1862,10 +1862,19 @@
           // The "quiz" container can park on a free-text question we don't
           // auto-fill (e.g. Konfío's "¿De qué volumen es tu cartera activa?"
           // at 16/19): looksLikeQuizStep stays true.
+          //
+          // FIRST: try to auto-answer a SALARY question from the user's saved
+          // expected salary — the one manual field we CAN fill (their number).
+          // If it fills, the quiz advances and we move on (works in bulk too).
+          let salaryFilled = false;
+          try { salaryFilled = fillSavedSalaryIfBlocking(); } catch (_) {}
+          if (salaryFilled) {
+            await new Promise((r) => setTimeout(r, 1500));
+            continue;
+          }
           if (isBulkMode) {
-            // BULK: the absent user can't type it and the quiz never resolves,
-            // so don't spin 90s × many iters — bail fast with a clear error
-            // (NO submit). HITL is handled below (marker/prompt).
+            // BULK: the absent user can't type a NON-salary manual field and the
+            // quiz never resolves — bail fast with a clear error (NO submit).
             let qb = null;
             try { qb = detectManualEntryBlocker(); } catch (_) {}
             if (qb) {
@@ -1879,7 +1888,7 @@
             // HITL: without this the chain would wait 90s then bail SILENTLY
             // (the recurring "ahi se quedó"). The standing watcher can miss it
             // (arming/race), but the chain is reliably running — so prompt +
-            // mark here too (deduped). Never auto-fills.
+            // mark here too (deduped). Never auto-fills (except salary above).
             try { promptManualEntryIfBlocked(); } catch (_) {}
           }
           await new Promise((r) => setTimeout(r, 1500));
@@ -1973,6 +1982,12 @@
             if (!isApplyPage()) break;
             coverEmpty = coverStillEmpty();
           }
+          // Before judging it incomplete, try to auto-answer a SALARY field
+          // from the user's saved expected salary — the one manual field we
+          // CAN fill (their own number). So bulk ANSWERS salary instead of
+          // skipping the vacancy. A non-salary manual field (cartera, etc.)
+          // stays a blocker → abort below.
+          try { if (fillSavedSalaryIfBlocking()) await new Promise((r) => setTimeout(r, 800)); } catch (_) {}
           let blocker = null;
           try { blocker = detectManualEntryBlocker(); } catch (_) {}
           if (!fillOk || coverEmpty || blocker) {
@@ -6649,7 +6664,12 @@
   // Reset all panel filters back to "any" / blank / null. Writes the
   // cleared preference object and lets the storage listener re-render.
   async function onMatchesFiltersClear() {
+    // Clearing MATCHING filters (city/modality/salary range) must NOT wipe the
+    // saved "salario esperado" answer — preserve it (+ any forward-compat
+    // fields) by spreading the previous prefs.
+    const prev = (cachedPreferences && typeof cachedPreferences === "object") ? cachedPreferences : {};
     const cleared = {
+      ...prev,
       modality: "any",
       city: null,
       salaryMin: null,
@@ -9097,6 +9117,41 @@
     return null;
   }
 
+  // ── Saved expected-salary auto-fill ───────────────────────────────────────
+  // Salary is the ONE "manual" field we can safely auto-answer in bulk: the
+  // user sets their expected salary once in Preferences (web), and we type THAT
+  // into a vacancy's "¿expectativa salarial?" field — their own number, never
+  // invented. This lets auto-postular ANSWER salary questions instead of
+  // skipping those vacancies. Matches only genuine salary questions — never
+  // RFC/CURP/phone/portfolio/etc.
+  const SALARY_RX = /sueldo|salari[oa]|salarial|expectativa\s+(?:salarial|econ[oó]mica)|pretensi[oó]n(?:es)?\s+(?:salarial|econ[oó]mica)|remuneraci[oó]n|aspiraci[oó]n\s+salarial|\bsalary\b|salary\s+expectation|expected\s+salary/i;
+  function getSavedExpectedSalary() {
+    try {
+      const p = cachedPreferences;
+      if (p && typeof p.expectedSalary === "string") return p.expectedSalary.trim();
+    } catch (_) {}
+    return "";
+  }
+  // If a blocking manual field is a SALARY question AND the user saved an
+  // expected salary, fill it (React-compatible) so the flow can advance.
+  // Returns true iff it filled something. Conservative: if we can't confirm
+  // the field is salary (no matching label), we DON'T fill — better to skip
+  // than answer the wrong field.
+  function fillSavedSalaryIfBlocking() {
+    try {
+      const val = getSavedExpectedSalary();
+      if (!val) return false;
+      const blocker = detectManualEntryBlocker();
+      if (!blocker || !blocker.el) return false;
+      let q = blocker.question || "";
+      if (!q) { try { q = questionTextFor(blocker.el) || ""; } catch (_) {} }
+      if (!q || !SALARY_RX.test(q)) return false; // only confirmed salary fields
+      fillFieldWithPulse(blocker.el, val);
+      console.log("[EmpleoAutomatico] auto-filled salary field from saved expectedSalary");
+      return true;
+    } catch (_) { return false; }
+  }
+
   // Dedupe so we prompt about a given blocking field ONCE (keyed by its
   // stamped fieldRef). Cleared when leaving the apply context.
   const manualEntryPrompted = new Set();
@@ -9182,6 +9237,12 @@
       try {
         const blocker = detectManualEntryBlocker();
         if (blocker) {
+          // Salary auto-fill from saved prefs FIRST (their own number). If it
+          // fills, next tick sees no blocker and clears — no marker needed.
+          // Covers salary-only vacancies (no quiz/cover step) in both modes.
+          let salaryFilled = false;
+          try { salaryFilled = fillSavedSalaryIfBlocking(); } catch (_) {}
+          if (salaryFilled) { setTimeout(tick, 1500); return; }
           let ref = "";
           try { ref = ensureFieldRef(blocker.el); } catch (_) {}
           if (ref) {

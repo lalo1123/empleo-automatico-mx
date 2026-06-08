@@ -43,6 +43,7 @@ export async function PUT(req: Request) {
         b.salaryMin === null || typeof b.salaryMin === "number" ? b.salaryMin : undefined,
       salaryMax:
         b.salaryMax === null || typeof b.salaryMax === "number" ? b.salaryMax : undefined,
+      expectedSalary: typeof b.expectedSalary === "string" ? b.expectedSalary : undefined,
     });
     return NextResponse.json({ ok: true, ...data });
   } catch (err) {

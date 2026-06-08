@@ -19,6 +19,9 @@ export function PreferencesForm({ initial }: { initial: UserPreferences }) {
   const [salaryMax, setSalaryMax] = useState<string>(
     initial.salaryMax == null ? "" : String(initial.salaryMax)
   );
+  const [expectedSalary, setExpectedSalary] = useState<string>(
+    initial.expectedSalary || ""
+  );
   const [pending, startTransition] = useTransition();
   const [status, setStatus] = useState<
     { tone: "ok" | "err"; text: string } | null
@@ -59,6 +62,7 @@ export function PreferencesForm({ initial }: { initial: UserPreferences }) {
             modality,
             salaryMin: min,
             salaryMax: max,
+            expectedSalary: expectedSalary.trim(),
           }),
         });
         const data = await res.json();
@@ -175,6 +179,30 @@ export function PreferencesForm({ initial }: { initial: UserPreferences }) {
         </div>
       </div>
 
+      {/* Expected salary — the auto-answer typed into "¿expectativa salarial?" */}
+      <div className="mt-6">
+        <label
+          htmlFor="pref-expected-salary"
+          className="text-sm font-semibold text-[color:var(--color-ink)]"
+        >
+          Salario esperado (respuesta automática)
+        </label>
+        <p className="mt-1 text-xs text-[color:var(--color-ink-muted)]">
+          Cuando una vacante pregunta tu expectativa salarial, el auto-postular
+          responde con ESTO — tu número, no inventado. Escríbelo como quieras que
+          aparezca. Si lo dejas vacío, esas vacantes se saltan en automático.
+        </p>
+        <input
+          id="pref-expected-salary"
+          type="text"
+          value={expectedSalary}
+          onChange={(e) => setExpectedSalary(e.target.value.slice(0, 120))}
+          placeholder="Ej. $30,000 MXN brutos mensuales"
+          className="mt-2 w-full rounded-[10px] border border-[color:var(--color-border)] bg-white px-3 py-2 text-sm text-[color:var(--color-ink)] outline-none focus:border-[color:var(--color-brand-500)]"
+          autoComplete="off"
+        />
+      </div>
+
       {status && (
         <div
           role={status.tone === "err" ? "alert" : "status"}
@@ -203,6 +231,7 @@ export function PreferencesForm({ initial }: { initial: UserPreferences }) {
             setModality("any");
             setSalaryMin("");
             setSalaryMax("");
+            setExpectedSalary("");
             setStatus(null);
           }}
           className="rounded-[12px] border border-[color:var(--color-border)] bg-white px-5 py-2.5 text-sm font-semibold text-[color:var(--color-ink)] hover:border-[color:var(--color-brand-400)]"

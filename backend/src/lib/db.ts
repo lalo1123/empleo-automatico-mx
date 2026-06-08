@@ -856,6 +856,7 @@ export function rowToPreferences(row: PreferencesRow): UserPreferences {
     modality: isValidModality(row.modality) ? row.modality : "any",
     salaryMin: row.salary_min,
     salaryMax: row.salary_max,
+    expectedSalary: row.expected_salary || "",
     updatedAt: row.updated_at
   };
 }
@@ -869,6 +870,7 @@ export function defaultPreferences(): UserPreferences {
     modality: "any",
     salaryMin: null,
     salaryMax: null,
+    expectedSalary: "",
     updatedAt: Math.floor(Date.now() / 1000)
   };
 }
@@ -890,6 +892,7 @@ export function upsertPreferences(input: {
   modality?: Modality;
   salaryMin?: number | null;
   salaryMax?: number | null;
+  expectedSalary?: string;
 }): UserPreferences {
   const nowSec = Math.floor(Date.now() / 1000);
   const city = (input.city ?? "").slice(0, 100);
@@ -899,20 +902,22 @@ export function upsertPreferences(input: {
   const modality: Modality = isValidModality(input.modality) ? input.modality : "any";
   const salaryMin = Number.isFinite(input.salaryMin) ? Math.max(0, Math.min(10_000_000, input.salaryMin as number)) : null;
   const salaryMax = Number.isFinite(input.salaryMax) ? Math.max(0, Math.min(10_000_000, input.salaryMax as number)) : null;
+  const expectedSalary = (input.expectedSalary ?? "").trim().slice(0, 120);
 
   getDb()
     .prepare(
-      `INSERT INTO preferences (user_id, city, city_synonyms, modality, salary_min, salary_max, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO preferences (user_id, city, city_synonyms, modality, salary_min, salary_max, expected_salary, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(user_id) DO UPDATE SET
          city = excluded.city,
          city_synonyms = excluded.city_synonyms,
          modality = excluded.modality,
          salary_min = excluded.salary_min,
          salary_max = excluded.salary_max,
+         expected_salary = excluded.expected_salary,
          updated_at = excluded.updated_at`
     )
-    .run(input.userId, city, citySynonymsJson, modality, salaryMin, salaryMax, nowSec);
+    .run(input.userId, city, citySynonymsJson, modality, salaryMin, salaryMax, expectedSalary, nowSec);
 
   return getPreferences(input.userId);
 }

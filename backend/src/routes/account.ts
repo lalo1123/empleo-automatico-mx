@@ -53,7 +53,8 @@ const preferencesSchema = z.object({
   citySynonyms: z.array(z.string().max(80)).max(20).optional().default([]),
   modality: z.enum(["presencial", "remoto", "hibrido", "any"]).optional().default("any"),
   salaryMin: z.number().int().nonnegative().max(10_000_000).optional().nullable(),
-  salaryMax: z.number().int().nonnegative().max(10_000_000).optional().nullable()
+  salaryMax: z.number().int().nonnegative().max(10_000_000).optional().nullable(),
+  expectedSalary: z.string().max(120).optional().default("")
 });
 
 accountRoutes.get("/preferences", authRequired(), emailVerifiedRequired(), async (c) => {

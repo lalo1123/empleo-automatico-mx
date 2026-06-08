@@ -295,6 +295,7 @@ export interface UserPreferences {
   modality: Modality;
   salaryMin: number | null;
   salaryMax: number | null;
+  expectedSalary: string;
   updatedAt: number;
 }
 
@@ -310,6 +311,7 @@ export function putPreferences(
     modality?: Modality;
     salaryMin?: number | null;
     salaryMax?: number | null;
+    expectedSalary?: string;
   }
 ) {
   return apiRequest<{ preferences: UserPreferences }>("/account/preferences", {

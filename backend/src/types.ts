@@ -137,6 +137,7 @@ export interface PreferencesRow {
   modality: Modality;
   salary_min: number | null;
   salary_max: number | null;
+  expected_salary: string;     // free-text answer for "¿expectativa salarial?"
   updated_at: number;          // unix seconds
 }
 
@@ -146,6 +147,7 @@ export interface UserPreferences {
   modality: Modality;
   salaryMin: number | null;
   salaryMax: number | null;
+  expectedSalary: string;      // free-text answer auto-typed into salary fields
   updatedAt: number;           // unix seconds
 }
 
