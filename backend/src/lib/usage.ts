@@ -57,19 +57,36 @@ export function getUsageCount(userId: string, yearMonth: string): number {
  * Returns the current monthly count (pre-increment) on success.
  *
  * The two checks have different user-facing messages so the UI can
- * branch: "limite mensual" vs "limite diario, vuelve mañana".
+ * branch: "límite mensual" vs "límite diario, vuelve mañana".
+ *
+ * `allowAtLimit` is for the 0-unit companion endpoints (CV, answers,
+ * quiz) that extend the single unit already reserved by /generate for
+ * the SAME application: a user whose cover letter consumed their last
+ * unit (count == limit) must still be able to finish that postulación.
+ * The check then only rejects strictly-over (which reserveUsageSlot
+ * makes unreachable), so in practice it admits the boundary case while
+ * still refusing brand-new work for over-quota accounts via the cover
+ * step, which always pays.
  */
-export function assertUnderLimit(userId: string, plan: PlanId): number {
+export function assertUnderLimit(
+  userId: string,
+  plan: PlanId,
+  opts: { allowAtLimit?: boolean } = {}
+): number {
   const planDef = getPlan(plan);
+  const allowAtLimit = opts.allowAtLimit === true;
 
   // Monthly check (existing behavior).
   const yearMonth = currentYearMonth();
   const monthlyCount = dbGetUsageCount(userId, yearMonth);
-  if (planDef.monthlyLimit >= 0 && monthlyCount >= planDef.monthlyLimit) {
+  const monthlyBlocked = allowAtLimit
+    ? monthlyCount > planDef.monthlyLimit
+    : monthlyCount >= planDef.monthlyLimit;
+  if (planDef.monthlyLimit >= 0 && monthlyBlocked) {
     throw new HttpError(
       402,
       "PLAN_LIMIT_EXCEEDED",
-      "Llegaste al limite de tu plan este mes. Mejora tu plan para continuar."
+      "Llegaste al límite de tu plan este mes. Mejora tu plan para continuar."
     );
   }
 
@@ -77,11 +94,14 @@ export function assertUnderLimit(userId: string, plan: PlanId): number {
   if (planDef.dailyLimit > 0) {
     const today = currentDate();
     const dailyCount = dbGetDailyUsageCount(userId, today);
-    if (dailyCount >= planDef.dailyLimit) {
+    const dailyBlocked = allowAtLimit
+      ? dailyCount > planDef.dailyLimit
+      : dailyCount >= planDef.dailyLimit;
+    if (dailyBlocked) {
       throw new HttpError(
         402,
         "DAILY_LIMIT_EXCEEDED",
-        `Llegaste al limite diario de tu plan (${planDef.dailyLimit} postulaciones/dia). Continua mañana — es una proteccion para tu cuenta en los portales.`
+        `Llegaste al límite diario de tu plan (${planDef.dailyLimit} postulaciones/día). Continúa mañana — es una protección para tu cuenta en los portales.`
       );
     }
   }
@@ -131,7 +151,7 @@ export function reserveUsageSlot(userId: string, plan: PlanId): number {
       throw new HttpError(
         402,
         "PLAN_LIMIT_EXCEEDED",
-        "Llegaste al limite de tu plan este mes. Mejora tu plan para continuar."
+        "Llegaste al límite de tu plan este mes. Mejora tu plan para continuar."
       );
     }
     if (planDef.dailyLimit > 0) {
@@ -140,7 +160,7 @@ export function reserveUsageSlot(userId: string, plan: PlanId): number {
         throw new HttpError(
           402,
           "DAILY_LIMIT_EXCEEDED",
-          `Llegaste al limite diario de tu plan (${planDef.dailyLimit} postulaciones/dia). Continua mañana — es una proteccion para tu cuenta en los portales.`
+          `Llegaste al límite diario de tu plan (${planDef.dailyLimit} postulaciones/día). Continúa mañana — es una protección para tu cuenta en los portales.`
         );
       }
     }

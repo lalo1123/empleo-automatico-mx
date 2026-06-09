@@ -210,12 +210,13 @@ applicationsRoutes.post("/generate", authRequired(), emailVerifiedRequired(), as
 
 // /generate-cv produces an ATS-optimized, vacancy-tailored CV in HTML.
 //
-// Quota model: charged as 1 unit (same as cover letter) even though the
-// upstream Gemini cost is roughly 2.5x — we keep the unit price simple and
-// uniform across application artifacts. Free users (3/mes) can mix and match
-// across /generate, /generate-cv and any future application endpoints. If
-// the cost mix shifts dramatically we'll revisit; for now the margin
-// (~98% on Pro) absorbs it comfortably.
+// Quota model: **0 units**. The product sells "N postulaciones al mes" and
+// one postulación uses BOTH a cover letter AND a tailored CV — charging a
+// unit for each meant "3 postulaciones gratis" was really 1.5. The single
+// unit per application is reserved by /generate (cover letter); the CV
+// rides along. Gated with allowAtLimit so the application whose cover
+// consumed the LAST unit can still finish its CV step (the chain order
+// varies: express prewarm fires the cover before the CV step).
 applicationsRoutes.post(
   "/generate-cv",
   authRequired(),
@@ -260,24 +261,20 @@ applicationsRoutes.post(
 
       const env = loadEnv();
       const user = c.get("user");
-      const newCount = reserveUsageSlot(user.id, user.plan);
-      let result;
-      try {
-        result = await generateTailoredCv({
-          apiKey: env.GEMINI_API_KEY,
-          model: env.GEMINI_MODEL,
-          profile,
-          job
-        });
-      } catch (e) {
-        refundUsageSlot(user.id);
-        throw e;
-      }
+      // 0 units — gate only. allowAtLimit lets the postulación whose cover
+      // letter just consumed the final unit still get its tailored CV.
+      const monthlyCount = assertUnderLimit(user.id, user.plan, { allowAtLimit: true });
+      const result = await generateTailoredCv({
+        apiKey: env.GEMINI_API_KEY,
+        model: env.GEMINI_MODEL,
+        profile,
+        job
+      });
       const plan = getPlan(user.plan);
 
       // Log meta only, never content (CVs include PII).
       console.log(
-        `[generate-cv] ok user=${user.id} plan=${user.plan} job=${job.source}:${job.id} usage=${newCount}/${plan.monthlyLimit}`
+        `[generate-cv] ok user=${user.id} plan=${user.plan} job=${job.source}:${job.id} usage=${monthlyCount}/${plan.monthlyLimit}`
       );
 
       return c.json({
@@ -285,7 +282,7 @@ applicationsRoutes.post(
         html: result.html,
         summary: result.summary,
         usage: {
-          current: newCount,
+          current: monthlyCount,
           limit: plan.monthlyLimit
         }
       });
@@ -303,11 +300,10 @@ applicationsRoutes.post(
 //     UX flows (preview, download as HTML) without paying the puppeteer
 //     render cost.
 //   - Returns a binary octet-stream (not JSON), so the shape is different.
-//   - Quota: this endpoint is **0 units** when /generate-cv has already
-//     been called for the same job in the same session (i.e. we just
-//     re-render existing HTML to PDF). For now we just always charge 1
-//     unit and let the extension cache the HTML client-side to avoid
-//     paying twice. The cleaner cache-by-job-id flow is a follow-up.
+//   - Quota: **0 units**, same model as /generate-cv — the application's
+//     single unit is reserved by /generate (cover letter). This also kills
+//     the old double-charge where CV-PDF + cover burned 2 units for one
+//     postulación.
 //
 // The PDF is meant for programmatic upload to portal file inputs (LaPieza
 // "Añadir nuevo CV" being the first wired up). The extension creates a
@@ -341,29 +337,22 @@ applicationsRoutes.post(
 
       const env = loadEnv();
       const user = c.get("user");
-      // Atomic reserve. If either Gemini or the PDF render fails we
-      // refund. Race-safe even with parallel requests at limit-1.
-      const newCount = reserveUsageSlot(user.id, user.plan);
-      let result;
-      let pdfBuf;
-      try {
-        // 1) Generate the tailored HTML CV (same path as /generate-cv).
-        result = await generateTailoredCv({
-          apiKey: env.GEMINI_API_KEY,
-          model: env.GEMINI_MODEL,
-          profile,
-          job
-        });
-        // 2) Render that HTML to a PDF buffer via puppeteer-core.
-        const { htmlToPdf } = await import("../lib/pdf.js");
-        pdfBuf = await htmlToPdf(result.html);
-      } catch (e) {
-        refundUsageSlot(user.id);
-        throw e;
-      }
+      // 0 units — gate only (see route comment). allowAtLimit so the last
+      // paid application can still render its CV PDF.
+      const monthlyCount = assertUnderLimit(user.id, user.plan, { allowAtLimit: true });
+      // 1) Generate the tailored HTML CV (same path as /generate-cv).
+      const result = await generateTailoredCv({
+        apiKey: env.GEMINI_API_KEY,
+        model: env.GEMINI_MODEL,
+        profile,
+        job
+      });
+      // 2) Render that HTML to a PDF buffer via puppeteer-core.
+      const { htmlToPdf } = await import("../lib/pdf.js");
+      const pdfBuf = await htmlToPdf(result.html);
       const plan = getPlan(user.plan);
       console.log(
-        `[generate-cv-pdf] ok user=${user.id} plan=${user.plan} job=${job.source}:${job.id} bytes=${pdfBuf.length} usage=${newCount}/${plan.monthlyLimit}`
+        `[generate-cv-pdf] ok user=${user.id} plan=${user.plan} job=${job.source}:${job.id} bytes=${pdfBuf.length} usage=${monthlyCount}/${plan.monthlyLimit}`
       );
 
       // Return as binary octet-stream. The extension caller uses
@@ -378,7 +367,7 @@ applicationsRoutes.post(
           "Content-Length": String(pdfBuf.length),
           // Surface usage in custom headers so the extension can update
           // its quota indicator without a separate /account round-trip.
-          "X-EAMX-Usage-Current": String(newCount),
+          "X-EAMX-Usage-Current": String(monthlyCount),
           "X-EAMX-Usage-Limit": String(plan.monthlyLimit)
         }
       });
@@ -434,7 +423,9 @@ applicationsRoutes.post(
       const env = loadEnv();
       const user = c.get("user");
       // Gate on quota but DO NOT increment — see route comment above.
-      assertUnderLimit(user.id, user.plan);
+      // allowAtLimit: the unit for THIS application was already reserved by
+      // /generate; a user at exactly limit must be able to finish it.
+      assertUnderLimit(user.id, user.plan, { allowAtLimit: true });
 
       const result = await answerQuestions({
         apiKey: env.GEMINI_API_KEY,
@@ -516,7 +507,9 @@ applicationsRoutes.post(
       const env = loadEnv();
       const user = c.get("user");
       // Gate on quota but DO NOT increment — see route comment above.
-      assertUnderLimit(user.id, user.plan);
+      // allowAtLimit: the unit for THIS application was already reserved by
+      // /generate; a user at exactly limit must be able to finish it.
+      assertUnderLimit(user.id, user.plan, { allowAtLimit: true });
 
       const result = await answerQuiz({
         apiKey: env.GEMINI_API_KEY,
