@@ -210,26 +210,61 @@ export default async function AccountPage({ searchParams }: PageProps) {
     return d.toLocaleDateString("es-MX", { day: "numeric", month: "short" });
   }
 
+  const initial = (
+    user.name?.trim().charAt(0) ||
+    user.email.charAt(0) ||
+    "U"
+  ).toUpperCase();
+
   return (
     <>
       <Nav authed />
-      <main className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
-        <header className="flex flex-col gap-1">
-          <p className="text-xs font-semibold uppercase tracking-widest text-[color:var(--color-brand-600)]">
-            Mi cuenta
-          </p>
-          <h1 className="text-3xl font-bold tracking-tight text-[color:var(--color-ink)]">
-            Hola{user.name ? `, ${user.name}` : ""}
-          </h1>
-          <p className="text-sm text-[color:var(--color-ink-soft)]">
-            {user.email}
-          </p>
-        </header>
+      <div className="min-h-screen bg-[color:var(--color-surface-soft)]">
+        {/* Branded hero band — teal gradient + soft glows give the dashboard
+            real brand presence instead of plain black-on-white. Mirrors the
+            gradient signature used on the marketing home. */}
+        <div className="relative overflow-hidden bg-gradient-to-br from-[#137e7a] via-[#105971] to-[#0d3f57]">
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.12),transparent_55%)]"
+          />
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -bottom-24 -left-16 h-64 w-64 rounded-full bg-[#70d1c6]/25 blur-3xl"
+          />
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -top-20 right-1/4 h-56 w-56 rounded-full bg-[#ff6600]/10 blur-3xl"
+          />
+          <div className="relative mx-auto max-w-6xl px-4 py-10 sm:px-6 sm:py-12">
+            <p className="text-xs font-semibold uppercase tracking-widest text-[#a8e6da]">
+              Mi cuenta
+            </p>
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-4">
+              <div className="flex min-w-0 items-center gap-4">
+                <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-white/10 text-2xl font-bold text-white ring-1 ring-white/25 backdrop-blur">
+                  {initial}
+                </span>
+                <div className="min-w-0">
+                  <h1 className="truncate text-2xl font-bold tracking-tight text-white sm:text-3xl">
+                    Hola{user.name ? `, ${user.name}` : ""}
+                  </h1>
+                  <p className="mt-0.5 truncate text-sm text-[#a8e6da]">
+                    {user.email}
+                  </p>
+                </div>
+              </div>
+              <span className="shrink-0 rounded-full bg-white/10 px-4 py-1.5 text-sm font-semibold text-white ring-1 ring-white/25 backdrop-blur">
+                Plan {plan.name}
+              </span>
+            </div>
+          </div>
+        </div>
 
-        {/* Stats hero — 4 cards showing application activity at a glance.
-            Renders even when stats failed (counts default to 0) so the
-            visual hierarchy stays consistent for new users. */}
-        <section className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <main className="mx-auto max-w-6xl px-4 pb-16 sm:px-6">
+          {/* Stats hero — 4 cards showing application activity at a glance.
+              Pulled up to overlap the gradient band for a layered, modern look. */}
+          <section className="relative -mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <StatHero
             label="Total"
             value={stats.totalAll}
@@ -264,32 +299,40 @@ export default async function AccountPage({ searchParams }: PageProps) {
         {needsVerify && (
           <div
             role="status"
-            className="mt-6 rounded-[12px] border border-amber-300 bg-amber-50 px-4 py-4 text-sm text-amber-900"
+            className="mt-6 flex flex-col gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900 shadow-[var(--shadow-soft)] sm:flex-row sm:items-center sm:justify-between"
           >
-            <p className="font-semibold">Verifica tu correo electrónico</p>
-            <p className="mt-1">
-              Para generar postulaciones o contratar un plan, confirma tu
-              correo. Te enviamos un enlace al registrarte.
-            </p>
-            {verifyUrlFromCookie && (
-              <p className="mt-2 break-all text-xs">
-                Enlace de verificación:{" "}
+            <div className="flex items-start gap-3">
+              <span
+                aria-hidden
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-lg"
+              >
+                ✉️
+              </span>
+              <div>
+                <p className="font-semibold">Verifica tu correo electrónico</p>
+                <p className="mt-0.5 text-amber-800">
+                  Confírmalo para generar postulaciones o contratar un plan.
+                </p>
+              </div>
+            </div>
+            <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+              {verifyUrlFromCookie && (
                 <a
                   href={verifyUrlFromCookie}
-                  className="font-medium underline"
+                  className="inline-flex items-center justify-center rounded-[10px] bg-amber-500 px-4 py-2 text-sm font-semibold text-white shadow-[var(--shadow-soft)] transition hover:bg-amber-600"
                 >
-                  {verifyUrlFromCookie}
+                  Verificar ahora
                 </a>
-              </p>
-            )}
-            <form action={resendVerifyAction} className="mt-3">
-              <button
-                type="submit"
-                className="rounded-[10px] border border-amber-400 bg-white px-3 py-1.5 text-xs font-semibold text-amber-900 hover:bg-amber-100"
-              >
-                Reenviar enlace
-              </button>
-            </form>
+              )}
+              <form action={resendVerifyAction}>
+                <button
+                  type="submit"
+                  className="rounded-[10px] border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-900 transition hover:bg-amber-100"
+                >
+                  Reenviar enlace
+                </button>
+              </form>
+            </div>
           </div>
         )}
 
@@ -669,7 +712,8 @@ export default async function AccountPage({ searchParams }: PageProps) {
             </div>
           </section>
         )}
-      </main>
+        </main>
+      </div>
       <Footer />
     </>
   );
@@ -698,13 +742,13 @@ function StatHero({
   icon: string;
   isText?: boolean;
 }) {
+  // Soft, color-coded chip backgrounds for each stat's icon. The card itself
+  // is plain white so the numbers read crisply against the soft-gray page.
   const toneClasses: Record<string, string> = {
-    brand:
-      "border-[color:var(--color-brand-200)] bg-gradient-to-br from-[color:var(--color-brand-50)] to-white",
-    sky: "border-sky-200 bg-gradient-to-br from-sky-50 to-white",
-    emerald:
-      "border-emerald-200 bg-gradient-to-br from-emerald-50 to-white",
-    amber: "border-amber-200 bg-gradient-to-br from-amber-50 to-white",
+    brand: "bg-[color:var(--color-brand-50)]",
+    sky: "bg-sky-50",
+    emerald: "bg-emerald-50",
+    amber: "bg-amber-50",
   };
   const valueColor: Record<string, string> = {
     brand: "text-[color:var(--color-brand-700)]",
@@ -713,24 +757,25 @@ function StatHero({
     amber: "text-amber-700",
   };
   return (
-    <div
-      className={`rounded-[14px] border p-4 shadow-[var(--shadow-soft)] ${toneClasses[tone]}`}
-    >
-      <div className="flex items-start justify-between">
+    <div className="rounded-2xl border border-[color:var(--color-border)] bg-white p-5 shadow-[var(--shadow-soft)] transition hover:-translate-y-0.5 hover:shadow-[var(--shadow-md)]">
+      <div className="flex items-center gap-3">
+        <span
+          aria-hidden
+          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-lg ${toneClasses[tone]}`}
+        >
+          {icon}
+        </span>
         <p className="text-xs font-semibold uppercase tracking-widest text-[color:var(--color-ink-muted)]">
           {label}
         </p>
-        <span aria-hidden className="text-lg leading-none">
-          {icon}
-        </span>
       </div>
       <div
-        className={`mt-2 ${isText ? "text-xl" : "text-3xl"} font-bold tracking-tight ${valueColor[tone]}`}
+        className={`mt-3 ${isText ? "text-2xl" : "text-4xl"} font-bold tracking-tight ${valueColor[tone]}`}
       >
         {typeof value === "number" ? value.toLocaleString("es-MX") : value}
       </div>
       {sub && (
-        <div className="mt-0.5 text-xs text-[color:var(--color-ink-muted)]">
+        <div className="mt-1 text-xs text-[color:var(--color-ink-muted)]">
           {sub}
         </div>
       )}
