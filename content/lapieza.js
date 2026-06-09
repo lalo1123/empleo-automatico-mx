@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-07-salary-prefs";
+  const EAMX_LAPIEZA_VERSION = "2026-06-09-history-sync";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -63,6 +63,11 @@
     OPEN_GENERATED_CV: "OPEN_GENERATED_CV",
     ANSWER_QUESTIONS: "ANSWER_QUESTIONS",
     ANSWER_QUIZ: "ANSWER_QUIZ",
+    // Server-side history sync. These MUST exist here: sendMsg fires with
+    // type:undefined otherwise and the service worker silently rejects it,
+    // so applications never reach /account/historial.
+    TRACK_APPLICATION: "TRACK_APPLICATION",
+    TRACK_EVENT: "TRACK_EVENT",
     // Pre-flight check used by the matches-panel bulk auto-postular flow
     // to refuse opening 5 background tabs when the user already hit their
     // monthly plan limit. Without this the chain fires N times, all fail
@@ -147,6 +152,8 @@
         OPEN_GENERATED_CV: mod.MESSAGE_TYPES.OPEN_GENERATED_CV,
         ANSWER_QUESTIONS: mod.MESSAGE_TYPES.ANSWER_QUESTIONS,
         ANSWER_QUIZ: mod.MESSAGE_TYPES.ANSWER_QUIZ || "ANSWER_QUIZ",
+        TRACK_APPLICATION: mod.MESSAGE_TYPES.TRACK_APPLICATION || "TRACK_APPLICATION",
+        TRACK_EVENT: mod.MESSAGE_TYPES.TRACK_EVENT || "TRACK_EVENT",
         GET_AUTH_STATUS: mod.MESSAGE_TYPES.GET_AUTH_STATUS || "GET_AUTH_STATUS"
       });
       if (mod && mod.ERROR_CODES) Object.assign(ERR, {
@@ -4435,6 +4442,11 @@
       // would try to show another modal (the idempotency guard catches
       // this, but it still wastes backend calls and burns iterations).
       quickApplyAborted = true;
+      // Bulk tabs: without these two calls the parent progress row stays
+      // stuck on "Generando carta con IA…" forever — the user never learns
+      // the run died for quota, not for a portal glitch.
+      try { reportBulkStatus("plan_limit", { label: "Sin cuota del plan — sube de plan" }); } catch (_) {}
+      try { clearBulkModeFlag(); } catch (_) {}
       // Pretty modal instead of bare toast — user explicitly clicked
       // ⚡ Postular, so a modal is appropriate (they're in the loop).
       // Fire-and-forget: we don't await because the calling code
@@ -9347,6 +9359,12 @@
             onClick: () => openOptionsPage()
           });
         } else if (res && res.error === ERR.PLAN_LIMIT_EXCEEDED) {
+          // Plan-limit is terminal for this run too: abort the outer chain
+          // so a bulk tab doesn't keep polling looksLikeQuizStep() for 90s
+          // and then mislabel the row "Atascado". The row must say WHY.
+          quickApplyAborted = true;
+          reportBulkStatus("plan_limit", { label: "Sin cuota del plan — sube de plan" });
+          clearBulkModeFlag();
           toast("Se acabaron tus respuestas IA del mes. El quiz se detuvo — sube de plan para seguir.", "error", {
             label: "Ver planes",
             onClick: () => openBilling(),

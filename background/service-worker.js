@@ -834,12 +834,26 @@ async function handleTrackEvent(msg) {
     return { ok: false, error: ERROR_CODES.INVALID_INPUT, message: "Step inválido" };
   }
   try {
+    // bootstrap lets the backend auto-create the application row when a
+    // mid-chain event (cover/quiz/…) lands before Finalizar's /track call.
+    // Without forwarding it, early events for unknown vacancies are no-ops
+    // and the historial drawer shows an empty timeline.
+    const bootstrap =
+      msg.bootstrap && typeof msg.bootstrap === "object"
+        ? {
+            url: typeof msg.bootstrap.url === "string" ? msg.bootstrap.url : "",
+            title: typeof msg.bootstrap.title === "string" ? msg.bootstrap.title : "",
+            company: typeof msg.bootstrap.company === "string" ? msg.bootstrap.company : "",
+            location: typeof msg.bootstrap.location === "string" ? msg.bootstrap.location : ""
+          }
+        : undefined;
     const data = await backend.trackEvent({
       source: msg.source,
       vacancyId: msg.vacancyId,
       step: msg.step,
       label: typeof msg.label === "string" ? msg.label : undefined,
-      meta: msg.meta && typeof msg.meta === "object" ? msg.meta : undefined
+      meta: msg.meta && typeof msg.meta === "object" ? msg.meta : undefined,
+      bootstrap
     });
     return { ok: true, appended: !!(data && data.appended) };
   } catch (e) {
