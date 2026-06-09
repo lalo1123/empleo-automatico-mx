@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="es-MX">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Panel de despegue — preview</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --teal-300:#70d1c6; --teal-400:#4fb9ad; --teal-500:#2a9c91; --teal-600:#137e7a;
+    --teal-700:#105971; --teal-800:#0d3f57; --navy:#0f1d2c;
+    --flame:#ff6600; --flame-soft:#ff7a1a;
+    --ink:#0f1d2c; --ink-soft:#1f3447; --ink-mut:#5b6e7e;
+    --paper:#f4f7f8; --card:#ffffff; --line:#e2e8f0;
+    --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{ -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility}
+  body{font-family:Inter,system-ui,sans-serif;background:var(--paper);color:var(--ink)}
+  .wrap{width:100%;max-width:1120px;margin:0 auto;padding:0 24px}
+
+  /* ---- top bar ---- */
+  .bar{height:64px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);background:#fff}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:800;letter-spacing:.06em;font-size:15px}
+  .brand .mk{width:26px;height:26px;display:grid;place-items:center;color:var(--flame)}
+  .brand b{color:var(--teal-700)}
+  .navlinks{display:flex;gap:26px;color:var(--ink-mut);font-size:14px;font-weight:500}
+  .navlinks span:hover{color:var(--ink);cursor:pointer}
+  .avatar{width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,var(--teal-500),var(--teal-700));color:#fff;display:grid;place-items:center;font-weight:700;font-size:14px}
+
+  /* ---- hero (dark launch deck) ---- */
+  .hero{position:relative;overflow:hidden;background:
+      radial-gradient(120% 120% at 85% -10%, rgba(112,209,198,.18), transparent 45%),
+      radial-gradient(90% 90% at 10% 120%, rgba(255,102,0,.10), transparent 50%),
+      linear-gradient(160deg,#103b50 0%, #0c2f44 45%, #0a1c2b 100%);
+    color:#fff}
+  .stars{position:absolute;inset:0;background-image:radial-gradient(rgba(255,255,255,.35) 1px, transparent 1.4px);background-size:34px 34px;opacity:.10;pointer-events:none}
+  .arc{position:absolute;right:-40px;top:-30px;width:560px;height:520px;pointer-events:none;opacity:.9}
+  .hero .wrap{position:relative;display:grid;grid-template-columns:1fr 360px;gap:40px;padding:44px 24px 52px;align-items:center}
+  .eyebrow{display:inline-flex;align-items:center;gap:8px;font-size:11px;font-weight:700;letter-spacing:.22em;color:var(--teal-300);text-transform:uppercase}
+  .eyebrow .dot{width:6px;height:6px;border-radius:50%;background:var(--flame);box-shadow:0 0 12px 2px rgba(255,102,0,.7)}
+  h1.hi{font-size:42px;line-height:1.04;font-weight:800;letter-spacing:-.02em;margin:14px 0 0}
+  h1.hi em{font-style:normal;background:linear-gradient(90deg,#fff,var(--teal-300));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .sub{margin-top:14px;max-width:430px;color:#bcd3da;font-size:16px;line-height:1.5}
+  .cta-row{margin-top:26px;display:flex;gap:12px;flex-wrap:wrap}
+  .btn{border:0;cursor:pointer;font-family:inherit;font-weight:700;font-size:14px;border-radius:12px;padding:13px 20px;display:inline-flex;align-items:center;gap:9px}
+  .btn.flame{background:linear-gradient(180deg,var(--flame-soft),var(--flame));color:#fff;box-shadow:0 10px 26px -8px rgba(255,102,0,.65)}
+  .btn.ghost{background:rgba(255,255,255,.08);color:#fff;border:1px solid rgba(255,255,255,.22)}
+  .trust{margin-top:22px;display:flex;gap:18px;color:#8fb0ba;font-size:12.5px;font-weight:500}
+  .trust b{color:#cfe6ea}
+
+  /* launch module */
+  .launch{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);border-radius:20px;padding:22px;backdrop-filter:blur(6px)}
+  .launch .lab{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#9fc0c8;font-weight:700}
+  .ring{position:relative;width:160px;height:160px;margin:14px auto 6px}
+  .ring .num{position:absolute;inset:0;display:grid;place-content:center;text-align:center}
+  .ring .num .big{font-family:var(--mono);font-size:34px;font-weight:700;letter-spacing:-.02em}
+  .ring .num .small{font-size:12px;color:#9fc0c8;margin-top:2px}
+  .launch .note{text-align:center;font-size:13px;color:#cfe6ea;margin-top:4px}
+  .fuelbar{margin-top:16px;height:8px;border-radius:99px;background:rgba(255,255,255,.12);overflow:hidden}
+  .fuelbar i{display:block;height:100%;width:4%;background:linear-gradient(90deg,var(--teal-300),var(--flame));border-radius:99px}
+
+  /* ---- content ---- */
+  main{padding:30px 0 60px}
+  .tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:-34px;position:relative;z-index:2}
+  .tile{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:18px 18px 16px;box-shadow:0 18px 40px -28px rgba(15,29,44,.45)}
+  .tile .top{display:flex;align-items:center;justify-content:space-between}
+  .tile .ic{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;color:var(--teal-700);background:#ecfaf7}
+  .tile .ic.f{color:var(--flame);background:#fff1e6}
+  .tile .ic.v{color:#7c3aed;background:#f1ecfe}
+  .tile .delta{font-size:11px;font-weight:700;font-family:var(--mono);color:var(--ink-mut)}
+  .tile .v{font-family:var(--mono);font-size:32px;font-weight:700;letter-spacing:-.02em;margin-top:12px}
+  .tile .k{font-size:12.5px;color:var(--ink-mut);margin-top:2px}
+  .spark{margin-top:10px;height:26px;width:100%}
+
+  .grid2{display:grid;grid-template-columns:1.35fr 1fr;gap:20px;margin-top:22px}
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:24px}
+  .panel h2{font-size:17px;font-weight:800;letter-spacing:-.01em}
+  .panel .desc{font-size:13px;color:var(--ink-mut);margin-top:3px}
+
+  /* checklist de despegue */
+  .steps{margin-top:18px;display:flex;flex-direction:column;gap:2px}
+  .step{display:flex;align-items:center;gap:14px;padding:13px 12px;border-radius:13px}
+  .step:hover{background:#f7fafb}
+  .step .mark{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font-family:var(--mono);font-weight:700;font-size:13px;flex:none}
+  .step.done .mark{background:var(--teal-600);color:#fff}
+  .step.now .mark{background:#fff;color:var(--flame);border:2px solid var(--flame);box-shadow:0 0 0 4px rgba(255,102,0,.12)}
+  .step.todo .mark{background:#eef3f5;color:var(--ink-mut)}
+  .step .tt{font-weight:600;font-size:14.5px}
+  .step .ss{font-size:12.5px;color:var(--ink-mut);margin-top:1px}
+  .step.done .tt{color:var(--ink-mut);text-decoration:line-through}
+  .step .go{margin-left:auto;font-size:12.5px;font-weight:700;color:var(--flame);white-space:nowrap}
+  .progress-line{margin-top:6px;display:flex;align-items:center;gap:10px}
+  .progress-line .pl{flex:1;height:6px;border-radius:99px;background:#eef3f5;overflow:hidden}
+  .progress-line .pl i{display:block;height:100%;width:25%;background:linear-gradient(90deg,var(--teal-500),var(--teal-700))}
+  .progress-line .pc{font-family:var(--mono);font-size:12px;font-weight:700;color:var(--ink-mut)}
+
+  /* plan card */
+  .plan .row{display:flex;align-items:flex-start;justify-content:space-between}
+  .badge{font-size:11px;font-weight:700;padding:5px 11px;border-radius:99px;background:#ecfaf7;color:var(--teal-700)}
+  .plan .price{font-size:30px;font-weight:800;letter-spacing:-.02em;margin-top:10px}
+  .plan .price small{font-size:13px;color:var(--ink-mut);font-weight:600}
+  .meter{margin-top:16px;background:#f7fafb;border:1px solid var(--line);border-radius:14px;padding:14px}
+  .meter .mk{font-size:12px;color:var(--ink-mut)}
+  .meter .mv{font-family:var(--mono);font-size:20px;font-weight:700;margin-top:4px}
+  .meter .bar{margin-top:10px;height:8px;border-radius:99px;background:#e9eef1;overflow:hidden}
+  .meter .bar i{display:block;height:100%;width:4%;background:linear-gradient(90deg,var(--teal-400),var(--teal-700))}
+  .upg{margin-top:16px;width:100%;justify-content:center}
+  .btn.up{background:var(--navy);color:#fff}
+  .foot-note{margin-top:14px;font-size:11.5px;color:var(--ink-mut)}
+  .tag{position:fixed;left:16px;bottom:14px;background:var(--navy);color:#fff;font-size:11px;font-weight:700;padding:7px 12px;border-radius:99px;opacity:.85;font-family:var(--mono)}
+</style>
+</head>
+<body>
+
+  <!-- top bar -->
+  <div class="bar">
+    <div class="wrap" style="display:flex;align-items:center;justify-content:space-between">
+      <div class="brand">
+        <span class="mk"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 2c3.5 1.8 5 5 5 8.5 0 2.2-.7 4-2 5.5l-3 .8-3-.8c-1.3-1.5-2-3.3-2-5.5C7 7 8.5 3.8 12 2Z" fill="currentColor"/><circle cx="12" cy="9.5" r="1.8" fill="#fff"/><path d="M9.5 17 8 21l3-1.3M14.5 17 16 21l-3-1.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        SKYBR<b>A</b>NDMX
+      </div>
+      <div class="navlinks"><span>Cómo funciona</span><span>Precios</span><span>FAQ</span></div>
+      <div class="avatar">E</div>
+    </div>
+  </div>
+
+  <!-- hero -->
+  <section class="hero">
+    <div class="stars"></div>
+    <svg class="arc" viewBox="0 0 560 520" fill="none">
+      <path d="M40 480 C 220 470, 430 360, 520 90" stroke="url(#g)" stroke-width="2.5" stroke-dasharray="2 9" stroke-linecap="round"/>
+      <circle cx="520" cy="90" r="5" fill="#ff6600"/>
+      <circle cx="520" cy="90" r="13" fill="#ff6600" opacity=".18"/>
+      <defs><linearGradient id="g" x1="40" y1="480" x2="520" y2="90" gradientUnits="userSpaceOnUse"><stop stop-color="#70d1c6" stop-opacity="0"/><stop offset="1" stop-color="#70d1c6"/></linearGradient></defs>
+    </svg>
+    <div class="wrap">
+      <div>
+        <span class="eyebrow"><span class="dot"></span> Panel de despegue</span>
+        <h1 class="hi">Bienvenido a bordo,<br><em>Eduardo.</em></h1>
+        <p class="sub">Tu próximo empleo está a unas cuantas postulaciones de despegar. Enciende motores y deja que la IA postule por ti.</p>
+        <div class="cta-row">
+          <button class="btn flame"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 2c3.5 1.8 5 5 5 8.5 0 2.2-.7 4-2 5.5l-3 .8-3-.8c-1.3-1.5-2-3.3-2-5.5C7 7 8.5 3.8 12 2Z" fill="#fff"/><circle cx="12" cy="9.5" r="1.8" fill="#ff6600"/></svg> Lanzar mi primera postulación</button>
+          <button class="btn ghost">Ver cómo funciona</button>
+        </div>
+        <div class="trust">
+          <span>🔒 Tú das el último clic</span>
+          <span>·</span>
+          <span><b>+6</b> portales conectados</span>
+          <span>·</span>
+          <span>Cartas con IA <b>personalizadas</b></span>
+        </div>
+      </div>
+
+      <div class="launch">
+        <div class="lab">Postulaciones · Junio</div>
+        <div class="ring">
+          <svg width="160" height="160" viewBox="0 0 160 160">
+            <circle cx="80" cy="80" r="64" fill="none" stroke="rgba(255,255,255,.12)" stroke-width="12"/>
+            <circle cx="80" cy="80" r="64" fill="none" stroke="#ff6600" stroke-width="12" stroke-linecap="round"
+              stroke-dasharray="402" stroke-dashoffset="392" transform="rotate(-90 80 80)"/>
+          </svg>
+          <div class="num"><div class="big">0<span style="color:#6f939c">/3</span></div><div class="small">este mes</div></div>
+        </div>
+        <div class="note">Despega hoy 🚀 Te quedan <b>3</b> gratis este mes.</div>
+        <div class="fuelbar"><i></i></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- content -->
+  <main>
+    <div class="wrap">
+
+      <!-- metric tiles -->
+      <div class="tiles">
+        <div class="tile">
+          <div class="top"><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5m0 14h16M8 16l4-5 3 3 5-7" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="delta">— total</span></div>
+          <div class="v">0</div><div class="k">Postulaciones enviadas</div>
+          <svg class="spark" viewBox="0 0 200 26" preserveAspectRatio="none"><path d="M0 22 H200" stroke="#e2e8f0" stroke-width="1.5" stroke-dasharray="3 4"/></svg>
+        </div>
+        <div class="tile">
+          <div class="top"><span class="ic f"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="delta">esta semana</span></div>
+          <div class="v">0</div><div class="k">Cartas generadas</div>
+          <svg class="spark" viewBox="0 0 200 26" preserveAspectRatio="none"><path d="M0 22 H200" stroke="#e2e8f0" stroke-width="1.5" stroke-dasharray="3 4"/></svg>
+        </div>
+        <div class="tile">
+          <div class="top"><span class="ic v"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12a10 10 0 1 1-5-8.7" stroke-linecap="round"/><path d="m9 11 3 3 6-7" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="delta">respuestas</span></div>
+          <div class="v">—</div><div class="k">Tasa de respuesta</div>
+          <svg class="spark" viewBox="0 0 200 26" preserveAspectRatio="none"><path d="M0 22 H200" stroke="#e2e8f0" stroke-width="1.5" stroke-dasharray="3 4"/></svg>
+        </div>
+      </div>
+
+      <div class="grid2">
+        <!-- checklist de despegue -->
+        <div class="panel">
+          <h2>Lista de despegue</h2>
+          <p class="desc">Completa estos pasos para que tu primera postulación salga perfecta.</p>
+          <div class="progress-line"><div class="pl"><i></i></div><div class="pc">1/4</div></div>
+          <div class="steps">
+            <div class="step done"><span class="mark">✓</span><div><div class="tt">Crea tu cuenta</div><div class="ss">Listo — bienvenido a bordo.</div></div></div>
+            <div class="step now"><span class="mark">2</span><div><div class="tt">Verifica tu correo</div><div class="ss">Un clic para activar tu cuenta.</div></div><span class="go">Verificar →</span></div>
+            <div class="step todo"><span class="mark">3</span><div><div class="tt">Define tu salario esperado</div><div class="ss">La IA responde con tu número, no inventado.</div></div><span class="go">Configurar →</span></div>
+            <div class="step todo"><span class="mark">4</span><div><div class="tt">Lanza tu primera postulación</div><div class="ss">Abre un portal y deja que despegue.</div></div><span class="go">Empezar →</span></div>
+          </div>
+        </div>
+
+        <!-- plan card -->
+        <div class="panel plan">
+          <div class="row">
+            <div>
+              <div style="font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-mut);font-weight:700">Tu plan</div>
+              <div class="price">Gratis <small>· sin tarjeta</small></div>
+            </div>
+            <span class="badge">Activo</span>
+          </div>
+          <div class="meter">
+            <div class="mk">Postulaciones este mes</div>
+            <div class="mv">0 <span style="color:var(--ink-mut);font-size:13px">/ 3</span></div>
+            <div class="bar"><i></i></div>
+          </div>
+          <button class="btn up upg">Subir a Pro — postula sin límites →</button>
+          <div class="foot-note">01 jun 2026 — 01 jul 2026 · Renueva automático</div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <div class="tag">PREVIEW · dirección "Despegue"</div>
+</body>
+</html>

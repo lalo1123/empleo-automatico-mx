@@ -33,6 +33,9 @@ export interface Usage {
 export interface AccountResponse {
   user: AuthUser;
   usage: Usage;
+  // The backend bundles preferences into /v1/account to save a round-trip;
+  // the dashboard uses it for the launch-checklist state (salario esperado).
+  preferences?: UserPreferences;
 }
 
 export interface ApiError {
