@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import {
+  PERSONAL_ANSWER_KEYS,
   type Modality,
   type PersonalAnswerKey,
   type PersonalAnswers,
@@ -18,18 +19,20 @@ const MODALITIES: { id: Modality; label: string; sub: string; icon: string }[] =
 // Personal screening questions the AI never invents — the auto-postular
 // answers them with YOUR saved text. Keys must match backend
 // PERSONAL_ANSWER_KEYS and the extension's PERSONAL_ANSWER_PATTERNS.
+// Recruiter-voice questions — each renders as a chat exchange the user
+// pre-answers once. Portafolio + LinkedIn render separately (they carry
+// URL normalization + a helper button).
 const PERSONAL_FIELDS: {
   key: PersonalAnswerKey;
-  icon: string;
   label: string;
   placeholder: string;
 }[] = [
-  { key: "vehiculo", icon: "🚗", label: "¿Vehículo propio?", placeholder: "Ej. Sí, cuento con vehículo propio" },
-  { key: "licencia", icon: "🪪", label: "¿Licencia de conducir?", placeholder: "Ej. Sí, licencia vigente" },
-  { key: "viajar", icon: "✈️", label: "¿Disponibilidad para viajar?", placeholder: "Ej. Sí, sin problema" },
-  { key: "reubicarse", icon: "📦", label: "¿Cambio de residencia?", placeholder: "Ej. No por el momento" },
-  { key: "ingles", icon: "🌐", label: "Nivel de inglés", placeholder: "Ej. Intermedio-avanzado (B2)" },
-  { key: "inicio", icon: "📅", label: "¿Cuándo puedes empezar?", placeholder: "Ej. Disponibilidad inmediata" },
+  { key: "vehiculo", label: "¿Cuentas con vehículo propio? 🚗", placeholder: "Ej. Sí, cuento con vehículo propio" },
+  { key: "licencia", label: "¿Tienes licencia de conducir vigente?", placeholder: "Ej. Sí, licencia vigente" },
+  { key: "viajar", label: "¿Tienes disponibilidad para viajar? ✈️", placeholder: "Ej. Sí, sin problema" },
+  { key: "reubicarse", label: "¿Te abrirías a un cambio de residencia?", placeholder: "Ej. No por el momento" },
+  { key: "ingles", label: "¿Cuál es tu nivel de inglés?", placeholder: "Ej. Intermedio-avanzado (B2)" },
+  { key: "inicio", label: "¿Cuándo podrías empezar? 📅", placeholder: "Ej. Disponibilidad inmediata" },
 ];
 
 // Canonicalize a LinkedIn handle or URL into https://www.linkedin.com/in/…
@@ -59,11 +62,13 @@ function SectionCard({
   icon,
   title,
   sub,
+  aside,
   children,
 }: {
   icon: string;
   title: string;
   sub: string;
+  aside?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -75,7 +80,7 @@ function SectionCard({
         >
           {icon}
         </span>
-        <div>
+        <div className="min-w-0 flex-1">
           <h2 className="text-lg font-extrabold tracking-tight text-[color:var(--color-ink)]">
             {title}
           </h2>
@@ -83,9 +88,82 @@ function SectionCard({
             {sub}
           </p>
         </div>
+        {aside && <div className="shrink-0">{aside}</div>}
       </header>
       <div className="mt-5">{children}</div>
     </section>
+  );
+}
+
+/**
+ * One exchange of the pre-answered interview: the recruiter's question as a
+ * gray chat bubble (left) and the user's editable answer as a "sent" bubble
+ * (right). Filled answers render as solid brand-gradient messages; empty
+ * ones are dashed ghost bubbles inviting the user to reply. This previews
+ * EXACTLY what the product does: answer the recruiter with your words.
+ */
+function ChatAnswer({
+  id,
+  question,
+  value,
+  placeholder,
+  onChange,
+  onBlur,
+  after,
+}: {
+  id: string;
+  question: string;
+  value: string;
+  placeholder: string;
+  onChange: (v: string) => void;
+  onBlur?: (v: string) => void;
+  after?: React.ReactNode;
+}) {
+  const filled = value.trim().length > 0;
+  return (
+    <div className="flex flex-col gap-1.5 sm:flex-row sm:items-start sm:gap-3">
+      {/* recruiter bubble */}
+      <div className="flex items-start gap-2 sm:w-[46%] sm:shrink-0">
+        <span
+          aria-hidden
+          className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-[#0f1d2c] text-[13px]"
+        >
+          🧑‍💼
+        </span>
+        <label
+          htmlFor={id}
+          className="cursor-pointer rounded-2xl rounded-tl-[4px] bg-[#eef3f5] px-3.5 py-2 text-[13px] font-medium leading-snug text-[color:var(--color-ink-soft)]"
+        >
+          {question}
+        </label>
+      </div>
+      {/* your reply bubble */}
+      <div className="min-w-0 flex-1 pl-9 sm:pl-0">
+        <div
+          className={
+            filled
+              ? "rounded-2xl rounded-br-[4px] bg-[linear-gradient(135deg,#137e7a,#0d4f63)] shadow-[0_8px_18px_-10px_rgba(16,89,113,0.6)] transition"
+              : "rounded-2xl rounded-br-[4px] border-2 border-dashed border-[#cfdde2] bg-white transition focus-within:border-[color:var(--color-brand-400)]"
+          }
+        >
+          <input
+            id={id}
+            type="text"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            onBlur={onBlur ? (e) => onBlur(e.target.value) : undefined}
+            placeholder={placeholder}
+            autoComplete="off"
+            className={
+              filled
+                ? "w-full bg-transparent px-3.5 py-2 text-sm font-semibold text-white outline-none placeholder:text-white/60"
+                : "w-full bg-transparent px-3.5 py-2 text-sm text-[color:var(--color-ink)] outline-none placeholder:text-[color:var(--color-ink-muted)]"
+            }
+          />
+        </div>
+        {after}
+      </div>
+    </div>
   );
 }
 
@@ -110,6 +188,12 @@ export function PreferencesForm({ initial }: { initial: UserPreferences }) {
   const [status, setStatus] = useState<
     { tone: "ok" | "err"; text: string } | null
   >(null);
+
+  // Progress chip for the interview card: salario + the 8 personal answers.
+  const TOTAL_ANSWERS = 1 + PERSONAL_ANSWER_KEYS.length;
+  const answeredCount =
+    (expectedSalary.trim() ? 1 : 0) +
+    PERSONAL_ANSWER_KEYS.filter((k) => (personalAnswers[k] || "").trim()).length;
 
   const parseSalary = (raw: string): number | null => {
     const cleaned = raw.replace(/[^\d]/g, "");
@@ -268,115 +352,77 @@ export function PreferencesForm({ initial }: { initial: UserPreferences }) {
         </div>
       </SectionCard>
 
-      {/* ============ Card 2: Respuestas automáticas ============ */}
+      {/* ============ Card 2: La entrevista, ya contestada ============ */}
       <SectionCard
-        icon="💬"
-        title="Respuestas automáticas"
-        sub="Las vacantes preguntan estos datos y la IA nunca los inventa: responde con TU respuesta tal cual. Los vacíos se marcan para ti (individual) o esa vacante se salta (automático)."
-      >
-        {/* Salario esperado — destacado */}
-        <div className="rounded-xl border border-[color:var(--color-brand-200)] bg-gradient-to-br from-[color:var(--color-brand-50)] to-white p-4">
-          <label
-            htmlFor="pref-expected-salary"
-            className="flex items-center gap-2 text-sm font-semibold text-[color:var(--color-ink)]"
+        icon="🎙️"
+        title="La entrevista, ya contestada"
+        sub="Esto es literalmente lo que la IA responderá por ti — con tus palabras, nunca inventado. Contesta como si chatearas con el reclutador: una vez y para siempre. Lo que dejes vacío se salta en automático."
+        aside={
+          <span
+            className={`rounded-full px-3 py-1 text-[11px] font-bold tabular-nums ${
+              answeredCount === TOTAL_ANSWERS
+                ? "bg-[#ecfaf7] text-[color:var(--color-brand-700)]"
+                : "bg-[#fff1e6] text-[#c2410c]"
+            }`}
           >
-            <span aria-hidden>💰</span> Salario esperado
-          </label>
-          <p className="mt-0.5 text-xs text-[color:var(--color-ink-muted)]">
-            Tu número, escrito como quieras que aparezca en la postulación.
-          </p>
-          <input
+            {answeredCount}/{TOTAL_ANSWERS} listas
+          </span>
+        }
+      >
+        <div className="space-y-4 rounded-2xl bg-[#f7fafb] p-4 sm:p-5">
+          <ChatAnswer
             id="pref-expected-salary"
-            type="text"
+            question="Hola 👋 ¿Cuál es tu expectativa salarial?"
             value={expectedSalary}
-            onChange={(e) => setExpectedSalary(e.target.value.slice(0, 120))}
-            placeholder="Ej. $30,000 MXN brutos mensuales"
-            className={`mt-2 ${inputCls}`}
-            autoComplete="off"
+            placeholder="Escribe tu respuesta…"
+            onChange={(v) => setExpectedSalary(v.slice(0, 120))}
           />
-        </div>
-
-        <div className="mt-5 grid gap-x-4 gap-y-4 sm:grid-cols-2">
           {PERSONAL_FIELDS.map((f) => (
-            <div key={f.key}>
-              <label
-                htmlFor={`pref-pa-${f.key}`}
-                className="flex items-center gap-1.5 text-[13px] font-semibold text-[color:var(--color-ink)]"
-              >
-                <span aria-hidden>{f.icon}</span> {f.label}
-              </label>
-              <input
-                id={`pref-pa-${f.key}`}
-                type="text"
-                value={personalAnswers[f.key] || ""}
-                onChange={(e) => setAnswer(f.key, e.target.value)}
-                placeholder={f.placeholder}
-                className={`mt-1.5 ${inputCls}`}
-                autoComplete="off"
-              />
-            </div>
+            <ChatAnswer
+              key={f.key}
+              id={`pref-pa-${f.key}`}
+              question={f.label}
+              value={personalAnswers[f.key] || ""}
+              placeholder={f.placeholder}
+              onChange={(v) => setAnswer(f.key, v)}
+            />
           ))}
-
-          {/* Portafolio — URL normalizada al salir del campo */}
-          <div>
-            <label
-              htmlFor="pref-pa-portafolio"
-              className="flex items-center gap-1.5 text-[13px] font-semibold text-[color:var(--color-ink)]"
-            >
-              <span aria-hidden>🎨</span> Link de portafolio
-            </label>
-            <input
-              id="pref-pa-portafolio"
-              type="text"
-              value={personalAnswers.portafolio || ""}
-              onChange={(e) => setAnswer("portafolio", e.target.value)}
-              onBlur={(e) => setAnswer("portafolio", normalizeUrl(e.target.value))}
-              placeholder="Ej. tuportafolio.com"
-              className={`mt-1.5 ${inputCls}`}
-              autoComplete="off"
-            />
-          </div>
-
-          {/* LinkedIn — botón "abrir mi perfil" + normalización de lo pegado */}
-          <div>
-            <label
-              htmlFor="pref-pa-linkedin"
-              className="flex items-center justify-between gap-2 text-[13px] font-semibold text-[color:var(--color-ink)]"
-            >
-              <span className="flex items-center gap-1.5">
-                <span
-                  aria-hidden
-                  className="grid h-4 w-4 place-items-center rounded-[3px] bg-[#0a66c2] text-[10px] font-black leading-none text-white"
+          <ChatAnswer
+            id="pref-pa-portafolio"
+            question="¿Nos compartes tu portafolio?"
+            value={personalAnswers.portafolio || ""}
+            placeholder="tuportafolio.com (lo completamos)"
+            onChange={(v) => setAnswer("portafolio", v)}
+            onBlur={(v) => setAnswer("portafolio", normalizeUrl(v))}
+          />
+          <ChatAnswer
+            id="pref-pa-linkedin"
+            question="¿Tu perfil de LinkedIn?"
+            value={personalAnswers.linkedin || ""}
+            placeholder="Pega tu link o solo tu usuario"
+            onChange={(v) => setAnswer("linkedin", v)}
+            onBlur={(v) => setAnswer("linkedin", normalizeLinkedIn(v))}
+            after={
+              <div className="mt-1.5 flex items-center gap-2 text-[11px] text-[color:var(--color-ink-muted)]">
+                <a
+                  href="https://www.linkedin.com/in/me/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 whitespace-nowrap rounded-md bg-[#0a66c2] px-2 py-1 text-[11px] font-bold text-white hover:brightness-110"
+                  title="Abre tu propio perfil en LinkedIn para copiar el link"
                 >
-                  in
-                </span>
-                Perfil de LinkedIn
-              </span>
-              <a
-                href="https://www.linkedin.com/in/me/"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="whitespace-nowrap text-xs font-bold text-[#0a66c2] hover:underline"
-                title="Abre tu propio perfil en LinkedIn para copiar el link"
-              >
-                Abrir mi perfil ↗
-              </a>
-            </label>
-            <input
-              id="pref-pa-linkedin"
-              type="text"
-              value={personalAnswers.linkedin || ""}
-              onChange={(e) => setAnswer("linkedin", e.target.value)}
-              onBlur={(e) => setAnswer("linkedin", normalizeLinkedIn(e.target.value))}
-              placeholder="Pega tu link o solo tu usuario"
-              className={`mt-1.5 ${inputCls}`}
-              autoComplete="off"
-            />
-            <p className="mt-1 text-[11px] text-[color:var(--color-ink-muted)]">
-              Tip: con sesión en LinkedIn, “Abrir mi perfil” te lleva directo —
-              copia la URL y pégala aquí. Acepta solo tu usuario (lo completamos).
-            </p>
-          </div>
+                  <span
+                    aria-hidden
+                    className="grid h-3.5 w-3.5 place-items-center rounded-[2px] bg-white text-[9px] font-black leading-none text-[#0a66c2]"
+                  >
+                    in
+                  </span>
+                  Abrir mi perfil ↗
+                </a>
+                <span>te lleva directo con tu sesión — copia la URL y pégala.</span>
+              </div>
+            }
+          />
         </div>
       </SectionCard>
 
