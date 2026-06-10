@@ -289,8 +289,23 @@ export function getApplicationsStats(token: string) {
   return apiRequest<{ stats: ApplicationsStats }>("/applications/stats", { token });
 }
 
-// Preferences (city / modality / salary range)
+// Preferences (city / modality / salary range / auto-answers)
 export type Modality = "presencial" | "remoto" | "hibrido" | "any";
+
+/** Whitelisted personal auto-answer keys — keep in sync with
+ *  backend/src/types.ts PERSONAL_ANSWER_KEYS. */
+export const PERSONAL_ANSWER_KEYS = [
+  "vehiculo",
+  "licencia",
+  "viajar",
+  "reubicarse",
+  "ingles",
+  "inicio",
+  "portafolio",
+  "linkedin",
+] as const;
+export type PersonalAnswerKey = (typeof PERSONAL_ANSWER_KEYS)[number];
+export type PersonalAnswers = Partial<Record<PersonalAnswerKey, string>>;
 
 export interface UserPreferences {
   city: string;
@@ -299,6 +314,7 @@ export interface UserPreferences {
   salaryMin: number | null;
   salaryMax: number | null;
   expectedSalary: string;
+  personalAnswers: PersonalAnswers;
   updatedAt: number;
 }
 
@@ -315,6 +331,7 @@ export function putPreferences(
     salaryMin?: number | null;
     salaryMax?: number | null;
     expectedSalary?: string;
+    personalAnswers?: PersonalAnswers;
   }
 ) {
   return apiRequest<{ preferences: UserPreferences }>("/account/preferences", {

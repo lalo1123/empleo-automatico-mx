@@ -1,13 +1,36 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { putPreferences, type Modality, type UserPreferences } from "@/lib/api";
+import {
+  type Modality,
+  type PersonalAnswerKey,
+  type PersonalAnswers,
+  type UserPreferences,
+} from "@/lib/api";
 
 const MODALITIES: { id: Modality; label: string; sub: string }[] = [
   { id: "any", label: "Cualquiera", sub: "Sin filtro de modalidad" },
   { id: "remoto", label: "Remoto", sub: "100% desde casa" },
   { id: "hibrido", label: "Híbrido", sub: "Algunos días en oficina" },
   { id: "presencial", label: "Presencial", sub: "Todos los días en oficina" },
+];
+
+// Personal screening questions the AI never invents — the auto-postular
+// answers them with YOUR saved text. Keys must match backend
+// PERSONAL_ANSWER_KEYS and the extension's PERSONAL_ANSWER_PATTERNS.
+const PERSONAL_FIELDS: {
+  key: PersonalAnswerKey;
+  label: string;
+  placeholder: string;
+}[] = [
+  { key: "vehiculo", label: "¿Vehículo propio?", placeholder: "Ej. Sí, cuento con vehículo propio" },
+  { key: "licencia", label: "¿Licencia de conducir?", placeholder: "Ej. Sí, licencia vigente" },
+  { key: "viajar", label: "¿Disponibilidad para viajar?", placeholder: "Ej. Sí, sin problema" },
+  { key: "reubicarse", label: "¿Cambio de residencia?", placeholder: "Ej. No por el momento" },
+  { key: "ingles", label: "Nivel de inglés", placeholder: "Ej. Intermedio-avanzado (B2)" },
+  { key: "inicio", label: "¿Cuándo puedes empezar?", placeholder: "Ej. Disponibilidad inmediata" },
+  { key: "portafolio", label: "Link de portafolio", placeholder: "Ej. https://tuportafolio.com" },
+  { key: "linkedin", label: "Perfil de LinkedIn", placeholder: "Ej. https://linkedin.com/in/tu-nombre" },
 ];
 
 export function PreferencesForm({ initial }: { initial: UserPreferences }) {
@@ -22,6 +45,11 @@ export function PreferencesForm({ initial }: { initial: UserPreferences }) {
   const [expectedSalary, setExpectedSalary] = useState<string>(
     initial.expectedSalary || ""
   );
+  const [personalAnswers, setPersonalAnswers] = useState<PersonalAnswers>(
+    initial.personalAnswers || {}
+  );
+  const setAnswer = (key: PersonalAnswerKey, value: string) =>
+    setPersonalAnswers((prev) => ({ ...prev, [key]: value.slice(0, 200) }));
   const [pending, startTransition] = useTransition();
   const [status, setStatus] = useState<
     { tone: "ok" | "err"; text: string } | null
@@ -63,6 +91,7 @@ export function PreferencesForm({ initial }: { initial: UserPreferences }) {
             salaryMin: min,
             salaryMax: max,
             expectedSalary: expectedSalary.trim(),
+            personalAnswers,
           }),
         });
         const data = await res.json();
@@ -203,6 +232,40 @@ export function PreferencesForm({ initial }: { initial: UserPreferences }) {
         />
       </div>
 
+      {/* Personal auto-answers — the screening questions the AI never invents */}
+      <div className="mt-6">
+        <span className="text-sm font-semibold text-[color:var(--color-ink)]">
+          Respuestas automáticas personales
+        </span>
+        <p className="mt-1 text-xs text-[color:var(--color-ink-muted)]">
+          Las vacantes suelen preguntar estos datos y la IA nunca los inventa.
+          Si los guardas aquí, el auto-postular responde con TU respuesta tal
+          cual. Los que dejes vacíos: en modo individual te los marca para que
+          los escribas tú; en automático esa vacante se salta.
+        </p>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          {PERSONAL_FIELDS.map((f) => (
+            <div key={f.key}>
+              <label
+                htmlFor={`pref-pa-${f.key}`}
+                className="text-xs font-medium text-[color:var(--color-ink-soft)]"
+              >
+                {f.label}
+              </label>
+              <input
+                id={`pref-pa-${f.key}`}
+                type="text"
+                value={personalAnswers[f.key] || ""}
+                onChange={(e) => setAnswer(f.key, e.target.value)}
+                placeholder={f.placeholder}
+                className="mt-1 w-full rounded-[10px] border border-[color:var(--color-border)] bg-white px-3 py-2 text-sm text-[color:var(--color-ink)] outline-none focus:border-[color:var(--color-brand-500)]"
+                autoComplete="off"
+              />
+            </div>
+          ))}
+        </div>
+      </div>
+
       {status && (
         <div
           role={status.tone === "err" ? "alert" : "status"}
@@ -232,6 +295,7 @@ export function PreferencesForm({ initial }: { initial: UserPreferences }) {
             setSalaryMin("");
             setSalaryMax("");
             setExpectedSalary("");
+            setPersonalAnswers({});
             setStatus(null);
           }}
           className="rounded-[12px] border border-[color:var(--color-border)] bg-white px-5 py-2.5 text-sm font-semibold text-[color:var(--color-ink)] hover:border-[color:var(--color-brand-400)]"

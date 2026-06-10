@@ -54,7 +54,11 @@ const preferencesSchema = z.object({
   modality: z.enum(["presencial", "remoto", "hibrido", "any"]).optional().default("any"),
   salaryMin: z.number().int().nonnegative().max(10_000_000).optional().nullable(),
   salaryMax: z.number().int().nonnegative().max(10_000_000).optional().nullable(),
-  expectedSalary: z.string().max(120).optional().default("")
+  expectedSalary: z.string().max(120).optional().default(""),
+  // Personal auto-answers (vehículo, licencia, viajar, …). Free-form map at
+  // the edge; unknown keys are dropped and values trimmed/capped by
+  // sanitizePersonalAnswers inside db.upsertPreferences.
+  personalAnswers: z.record(z.string().max(200)).optional().default({})
 });
 
 accountRoutes.get("/preferences", authRequired(), emailVerifiedRequired(), async (c) => {

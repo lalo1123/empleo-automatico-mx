@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-09-history-sync";
+  const EAMX_LAPIEZA_VERSION = "2026-06-09-personal-answers";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -1633,6 +1633,10 @@
     // (via quickApplyAborted) cancels the countdown.
     const isBulkMode = await readBulkModeFlag();
     console.log("[EmpleoAutomatico] chain inner: bulk mode =", isBulkMode);
+    // Set when the loop exits via a blocker/stuck error path — the post-loop
+    // safety net must NOT interpret leftover page text as a submit then
+    // (reviewer-caught: our own manual-entry badge contains "ya quedó listo").
+    let loopEndedInBlockerError = false;
 
     // TERMINAL-STATE DETECTORS: before doing any work, check if this
     // vacancy is "already applied" or "closed" — both states mean the
@@ -1670,6 +1674,7 @@
       console.log("[EmpleoAutomatico] chain inner: VACANCY CLOSED — bailing");
       reportBulkStatus("closed");
       quickApplyAborted = true;
+      try { await markVacancyClosed((lastJob && lastJob.id) || idFromUrl(location.href)); } catch (_) {}
       clearBulkModeFlag();
       return;
     }
@@ -2008,6 +2013,7 @@
                 : "No se pudo completar — no enviado"
             });
             try { clearBulkModeFlag(); } catch (_) {}
+            loopEndedInBlockerError = true;
             break;
           }
         }
@@ -2072,6 +2078,7 @@
             { durationMs: 7000 }
           );
           reportBulkStatus("error", { label: "Atascado — revisa la pestaña" });
+          loopEndedInBlockerError = true;
           break;
         }
       } else {
@@ -2079,25 +2086,55 @@
       }
       lastDomSignature = sig;
     }
-    // SAFETY NET (bulk): if the loop ran its full course without finalizing,
-    // aborting, or erroring — a rare stuck state (e.g. a quiz the AI never
-    // resolved over many iters) — don't leave a hands-off bulk row spinning
-    // forever. A real submit lands on LaPieza's confirmation ("ha recibido tu
-    // postulación" / "ya quedó" / "explorar más vacantes") or navigates off the
-    // apply form; if NONE of those is true, surface a clear error. No submit
-    // happened, so this never hides a real send.
-    if (isBulkMode && !quickApplyAborted) {
+    // SAFETY NET (post-loop): two jobs.
+    //
+    // 1) RECORD quiz-final submits (BOTH modes). On vacancies whose last
+    //    step is the quiz, answering the final question submits via that
+    //    step's own "Continuar" — no Finalizar button ever renders, so
+    //    attachFinalizeApplyTracker never fires. Live bug: SoftwareOne
+    //    submitted this way and neither the daily-cap ledger nor the
+    //    applied-queue learned about it (panel said 1/20 after 2 sends,
+    //    and the next bulk re-opened the vacancy). LaPieza's confirmation
+    //    copy is the reliable signal.
+    //
+    // 2) RESOLVE stuck bulk rows: if the loop ran out without finalizing,
+    //    aborting, erroring or submitting, surface a clear error instead
+    //    of leaving the hands-off row spinning forever.
+    if (!quickApplyAborted) {
       try {
         await new Promise((r) => setTimeout(r, 2000));
-        const bodyTxt = (document.body.innerText || "").toLowerCase();
-        const looksSubmitted =
-          !isApplyPage() ||
-          detectAlreadyAppliedState() ||
-          /recibido tu postulaci|ya qued[oó]|explorar m[aá]s vacantes|postulaci[oó]n enviada/i.test(bodyTxt);
-        if (!looksSubmitted) {
-          console.warn("[EmpleoAutomatico] chain: loop ended without a clear finalize — reporting stuck (no submit)");
-          reportBulkStatus("error", { label: "No terminó — revisa la pestaña" });
-          clearBulkModeFlag();
+        // Sample page text WITHOUT our own injected UI: the manual-entry
+        // badge and its toast both contain "ya quedó listo", which would
+        // read as LaPieza's "¡Listo, ya quedó!" confirmation and record a
+        // phantom submission (reviewer-caught blocker). Clone + strip.
+        let bodyTxt = "";
+        try {
+          const clone = document.body.cloneNode(true);
+          clone.querySelectorAll('[class*="eamx"]').forEach((n) => { try { n.remove(); } catch (_) {} });
+          bodyTxt = (clone.textContent || "").toLowerCase();
+        } catch (_) {
+          bodyTxt = (document.body.innerText || "").toLowerCase();
+        }
+        // "ya quedó" must NOT be followed by "listo" (our badge copy);
+        // LaPieza's own copy is "¡Listo, ya quedó!" / "ha recibido tu
+        // postulación" — both still match.
+        const confirmedSubmit =
+          !loopEndedInBlockerError &&
+          /recibido tu postulaci|ya qued[oó](?!\s+listo)|postulaci[oó]n enviada/i.test(bodyTxt);
+        if (confirmedSubmit) {
+          // recordSubmission dedupes per id, so this is a no-op when the
+          // Finalizar click tracker already recorded it.
+          try { await recordSubmission("Postulada desde la extensión (quiz final)"); } catch (_) {}
+        } else if (isBulkMode && !loopEndedInBlockerError) {
+          const looksSubmitted =
+            !isApplyPage() ||
+            detectAlreadyAppliedState() ||
+            /explorar m[aá]s vacantes/i.test(bodyTxt);
+          if (!looksSubmitted) {
+            console.warn("[EmpleoAutomatico] chain: loop ended without a clear finalize — reporting stuck (no submit)");
+            reportBulkStatus("error", { label: "No terminó — revisa la pestaña" });
+            clearBulkModeFlag();
+          }
         }
       } catch (_) { /* ignore */ }
     }
@@ -2252,57 +2289,69 @@
   // double-attaching across observer ticks if the chain re-detects the
   // same button.
 
+  // Shared submission recorder. Fired by the Finalizar click tracker AND by
+  // the quiz-final safety net (vacancies whose LAST step is the quiz submit
+  // on the final "Continuar" — no separate Finalizar ever renders, so the
+  // click tracker never fires; live bug: SoftwareOne submitted that way and
+  // neither the daily-cap ledger nor the applied-queue learned about it, so
+  // the next bulk re-opened it). Deduped per vacancy id.
+  const submissionRecorded = new Set();
+  async function recordSubmission(reasonLabel) {
+    const job = lastJob || {};
+    const url = location.href;
+    const id = (job && job.id) || idFromUrl(url);
+    if (id && submissionRecorded.has(String(id))) return;
+    if (id) submissionRecorded.add(String(id));
+    // Tell the parent matches panel this row is done — so the row shows
+    // "✓ Postulación enviada" instead of staying stuck.
+    try { reportBulkStatus("submitted"); } catch (_) {}
+    // 1) Local queue (for the matches panel + bulk filter + daily caps).
+    try {
+      if (queueModule && typeof queueModule.upsertApplied === "function" && id) {
+        await queueModule.upsertApplied({
+          id,
+          source: SOURCE,
+          url,
+          title: job.title || "",
+          company: job.company || "",
+          location: job.location || "",
+          savedAt: Date.now(),
+          matchScore: 0,
+          reasons: [reasonLabel || "Postulada desde la extensión"]
+        });
+        console.log("[EmpleoAutomatico] vacancy marked applied:", id);
+      }
+    } catch (err) {
+      console.warn("[EmpleoAutomatico] applied-tracker (local) failed", err);
+    }
+    // 2) Server-side sync for /account/historial. Best-effort —
+    //    if it fails we already have the row in the local queue.
+    if (id) {
+      try {
+        await sendMsg({
+          type: MSG.TRACK_APPLICATION,
+          source: SOURCE,
+          vacancyId: id,
+          url,
+          title: job.title || "",
+          company: job.company || "",
+          location: job.location || "",
+          matchScore: 0,
+          status: "applied",
+          sourceTs: Date.now(),
+          reasons: [reasonLabel || "Postulada desde la extensión"]
+        });
+      } catch (err) {
+        console.warn("[EmpleoAutomatico] applied-tracker (backend) failed", err);
+      }
+    }
+  }
+
   function attachFinalizeApplyTracker(btn) {
     if (!btn || btn.dataset.eamxFinalizeTracked === "true") return;
     btn.dataset.eamxFinalizeTracked = "true";
     const handler = async () => {
-      // Tell the parent matches panel this row is done — so the row
-      // shows "✓ Postulación enviada" with a green check instead of
-      // staying stuck on "✓ Listo — dale Finalizar".
-      try { reportBulkStatus("submitted"); } catch (_) {}
-      const job = lastJob || {};
-      const url = location.href;
-      const id = idFromUrl(url);
-      // 1) Local queue (for the matches panel + bulk filter).
-      try {
-        if (queueModule && typeof queueModule.upsertApplied === "function" && id) {
-          await queueModule.upsertApplied({
-            id,
-            source: SOURCE,
-            url,
-            title: job.title || "",
-            company: job.company || "",
-            location: job.location || "",
-            savedAt: Date.now(),
-            matchScore: 0,
-            reasons: ["Postulada desde la extensión"]
-          });
-          console.log("[EmpleoAutomatico] vacancy marked applied:", id);
-        }
-      } catch (err) {
-        console.warn("[EmpleoAutomatico] applied-tracker (local) failed", err);
-      }
-      // 2) Server-side sync for /account/historial. Best-effort —
-      //    if it fails we already have the row in the local queue.
-      if (id) {
-        try {
-          await sendMsg({
-            type: MSG.TRACK_APPLICATION,
-            source: SOURCE,
-            vacancyId: id,
-            url,
-            title: job.title || "",
-            company: job.company || "",
-            location: job.location || "",
-            matchScore: 0,
-            status: "applied",
-            sourceTs: Date.now(),
-            reasons: ["Postulada desde la extensión"]
-          });
-        } catch (err) {
-          console.warn("[EmpleoAutomatico] applied-tracker (backend) failed", err);
-        }
-      }
+      await recordSubmission("Postulada desde la extensión");
     };
     // Capture phase so we run BEFORE LaPieza's handler navigates away
     // (the page may unmount our content script after submission). Listener
@@ -3274,17 +3323,16 @@
     // never even open /apply/ for these.
     if (detectVacancyClosedState()) {
       toast("Esta vacante está cerrada — no se puede postular.", "info", { durationMs: 5000 });
-      // Mark this URL as "tried but closed" via the queue so the
-      // matches panel can flag it if the user visits the listing
-      // later. Best-effort.
+      // Persist so the bulk top-N filter skips this id on future runs
+      // (live bug: a 377-day-old CERRADA kept ranking #1 and re-opening).
+      try { await markVacancyClosed(idFromUrl(location.href)); } catch (_) {}
+      // Bulk tabs land HERE (on /vacante/), not on /apply — without this
+      // report the parent progress row spun on "Postulando…" forever
+      // (live: Prismatic row never resolved).
       try {
-        const id = idFromUrl(location.href);
-        if (id && queueModule && typeof queueModule.upsertApplied === "function") {
-          // We use upsertApplied with a closed-reason so the badge
-          // shows "✓" but the reasons indicate it was closed, not
-          // actually submitted.
-          // NB: we DON'T mark as applied here — closed != applied.
-          // Just leave it; future runs will detect closed again.
+        if (await readBulkModeFlag()) {
+          reportBulkStatus("closed");
+          clearBulkModeFlag();
         }
       } catch (_) {}
       return;
@@ -3307,6 +3355,14 @@
             matchScore: 0,
             reasons: ["Detectada como ya postulada desde /vacante/"]
           });
+        }
+      } catch (_) {}
+      // Resolve the parent bulk row (live: SoftwareOne row stuck on
+      // "Postulando…" because this path never reported).
+      try {
+        if (await readBulkModeFlag()) {
+          reportBulkStatus("already_applied");
+          clearBulkModeFlag();
         }
       } catch (_) {}
       return;
@@ -3365,17 +3421,38 @@
       quickApplyEscHandler = null;
     };
     const watchStartedAt = Date.now();
-    const watchLocationModal = () => {
+    const watchLocationModal = async () => {
       if (quickApplyAborted) { cleanupEsc(); return; }
       if (isApplyPage()) { cleanupEsc(); return; } // advanced; /apply handler takes over
       const continueBtn = findLaPiezaLocationContinueCTA();
       if (continueBtn) {
+        // Click but DON'T stop watching: on some vacancies LaPieza's modal
+        // ignores clicks entirely (live: Hr Agency — real mouse clicks,
+        // synthetic events AND a direct React onClick all no-oped). The
+        // next tick verifies it actually closed; if it's still up at the
+        // deadline we resolve the run instead of hanging forever.
         try { continueBtn.click(); } catch (_) {}
+      }
+      if (Date.now() - watchStartedAt > 30000) {
         cleanupEsc();
+        if (continueBtn) {
+          // Modal still up after ~30s of repeated clicks — dead on
+          // LaPieza's side. Tell the human + resolve the bulk row.
+          toast(
+            "El aviso de ubicación de LaPieza no responde a clics. Dale clic tú o prueba otra vacante.",
+            "info",
+            { durationMs: 9000 }
+          );
+          try {
+            if (await readBulkModeFlag()) {
+              reportBulkStatus("error", { label: "Aviso de ubicación no responde — no enviado" });
+              clearBulkModeFlag();
+            }
+          } catch (_) {}
+        }
         return;
       }
-      if (Date.now() - watchStartedAt > 30000) { cleanupEsc(); return; } // give up
-      setTimeout(watchLocationModal, 300);
+      setTimeout(watchLocationModal, 600);
     };
     setTimeout(watchLocationModal, 250);
   }
@@ -6735,10 +6812,34 @@
       }
     } catch (_) { /* ignore — fall back to no filtering */ }
 
+    // Closed-vacancy memory: ids the chain detected as CERRADA on a
+    // previous open. Live bug: a 377-day-old closed posting kept ranking
+    // top and burned a bulk slot on every run because nothing persisted
+    // the detection.
+    let closedIds = new Set();
+    try { closedIds = await getClosedIdSet(); } catch (_) {}
+
+    // Collapse duplicate postings (same title+company under different
+    // vacancy ids — live case: EL CRISOL "REPRESENTANTE DE VENTAS" ×3
+    // ate 3 of the top-5 slots). Keep the highest-scored one (list is
+    // already sorted by score desc).
+    const seenPosting = new Set();
+
     const candidates = (matchesCurrentTopN || [])
       .filter((m) => m && m.jobLite && m.jobLite.url)
       // Persisted-queue filter
       .filter((m) => !appliedIds.has(String(m.jobLite.id)))
+      // Closed-on-page memory filter
+      .filter((m) => !closedIds.has(String(m.jobLite.id)))
+      // Duplicate-posting collapse
+      .filter((m) => {
+        const key = (((m.jobLite.title || "") + "|" + (m.jobLite.company || ""))
+          .toLowerCase().replace(/\s+/g, " ").trim());
+        if (key === "|" || key === "") return true; // can't key it — keep
+        if (seenPosting.has(key)) return false;
+        seenPosting.add(key);
+        return true;
+      })
       // In-memory flag filter: the auto-marker from
       // renderMatchesPanelContent upserts to queueModule
       // fire-and-forget; if the user clicks Auto-postular before that
@@ -9129,14 +9230,36 @@
     return null;
   }
 
-  // ── Saved expected-salary auto-fill ───────────────────────────────────────
-  // Salary is the ONE "manual" field we can safely auto-answer in bulk: the
-  // user sets their expected salary once in Preferences (web), and we type THAT
-  // into a vacancy's "¿expectativa salarial?" field — their own number, never
-  // invented. This lets auto-postular ANSWER salary questions instead of
-  // skipping those vacancies. Matches only genuine salary questions — never
-  // RFC/CURP/phone/portfolio/etc.
+  // ── Saved auto-answers (salary + personal screening questions) ───────────
+  // These are the "manual" fields we can safely auto-answer in bulk: the user
+  // saves their OWN answers once in Preferences (web) — expected salary plus
+  // the classic screening questions (vehículo, licencia, viajar, inglés…) —
+  // and we type THAT text into the matching field. Their words, never
+  // invented. This lets auto-postular ANSWER these instead of skipping the
+  // vacancy. Matching is conservative: only fields whose question text
+  // matches a pattern — never RFC/CURP/phone/etc.
   const SALARY_RX = /sueldo|salari[oa]|salarial|expectativa\s+(?:salarial|econ[oó]mica)|pretensi[oó]n(?:es)?\s+(?:salarial|econ[oó]mica)|remuneraci[oó]n|aspiraci[oó]n\s+salarial|\bsalary\b|salary\s+expectation|expected\s+salary/i;
+  // Keys must match backend PERSONAL_ANSWER_KEYS + the web Preferences form.
+  // Order matters: first pattern whose regex matches the question wins.
+  const PERSONAL_ANSWER_PATTERNS = [
+    { key: "vehiculo", rx: /veh[ií]culo\s+propio|auto(?:m[oó]vil)?\s+propio|coche\s+propio|carro\s+propio|(?:cuentas?|cuenta|tienes|dispones?)\s+con\s+(?:veh[ií]culo|auto(?:m[oó]vil)?|coche|carro)|own\s+(?:car|vehicle)/i },
+    { key: "licencia", rx: /licencia\s+(?:de\s+)?(?:conducir|manejo|manejar|chofer)|driver'?s?\s+licen[cs]e/i },
+    // "viajar" allows interleaved words (e.g. "disponibilidad INMEDIATA para
+    // viajar") and is ordered BEFORE "inicio" so travel questions never fall
+    // through to the start-date answer.
+    { key: "viajar", rx: /disponibilidad\s+(?:\w+\s+)?para\s+viajar|dispuest[oa]\s+a\s+viajar|disponible\s+para\s+viajar|viajar\s+(?:por|dentro|al)\s|willing(?:ness)?\s+to\s+travel/i },
+    // "cambio de residencia" requires a willingness word nearby so a
+    // background-check style "¿has tenido cambio de residencia?" doesn't match.
+    { key: "reubicarse", rx: /reubicaci[oó]n|reubicar(?:te|se)?|(?:disponibilidad|dispuest[oa]s?|posibilidad|abiert[oa])[^.?\n]{0,30}cambio\s+de\s+residencia|mudar(?:te|se)|radicar\s+en|cambiar(?:te)?\s+de\s+ciudad|relocat(?:e|ion)/i },
+    { key: "ingles", rx: /nivel\s+de\s+ingl[eé]s|ingl[eé]s\s+(?:hablado|escrito|conversacional|avanzado|intermedio)|dominio\s+del?\s+ingl[eé]s|english\s+level|level\s+of\s+english/i },
+    { key: "inicio", rx: /disponibilidad\s+para\s+(?:iniciar|incorporar|empezar|comenzar)|fecha\s+de\s+(?:inicio|incorporaci[oó]n)|cu[aá]ndo\s+(?:puedes|podr[ií]as)\s+(?:empezar|iniciar|incorporarte|comenzar)|incorporaci[oó]n\s+inmediata|disponibilidad\s+inmediata|start\s+date|when\s+can\s+you\s+start/i },
+    // No bare "github": technical screens ask for exercise/repo links where
+    // pasting a portfolio URL would be wrong.
+    { key: "portafolio", rx: /portafolio|portfolio|behance|dribbble|(?:link|url|enlace)\s+(?:de\s+)?github/i },
+    // Require profile/url intent — a "¿nos encontraste por LinkedIn?" style
+    // question must not get the profile URL pasted in.
+    { key: "linkedin", rx: /(?:perfil|url|link|enlace|cuenta)\s+(?:de\s+)?linked\s?in|linked\s?in\s+(?:profile|url)|tu\s+linked\s?in/i }
+  ];
   function getSavedExpectedSalary() {
     try {
       const p = cachedPreferences;
@@ -9144,22 +9267,74 @@
     } catch (_) {}
     return "";
   }
-  // If a blocking manual field is a SALARY question AND the user saved an
-  // expected salary, fill it (React-compatible) so the flow can advance.
-  // Returns true iff it filled something. Conservative: if we can't confirm
-  // the field is salary (no matching label), we DON'T fill — better to skip
-  // than answer the wrong field.
+
+  // ── Closed-vacancy memory ─────────────────────────────────────────────────
+  // Ids whose page showed CERRADA. Persisted so the bulk top-N filter and
+  // future chains skip them instead of re-opening dead postings run after
+  // run. Capped FIFO so it can't grow unbounded.
+  const CLOSED_IDS_KEY = "eamx:lapieza:closed-ids";
+  const CLOSED_IDS_MAX = 300;
+  function getClosedIdSet() {
+    return new Promise((resolve) => {
+      try {
+        if (!chrome?.storage?.local) { resolve(new Set()); return; }
+        chrome.storage.local.get([CLOSED_IDS_KEY], (r) => {
+          const arr = r && Array.isArray(r[CLOSED_IDS_KEY]) ? r[CLOSED_IDS_KEY] : [];
+          resolve(new Set(arr.map(String)));
+        });
+      } catch (_) { resolve(new Set()); }
+    });
+  }
+  async function markVacancyClosed(id) {
+    if (!id) return;
+    try {
+      const set = await getClosedIdSet();
+      if (set.has(String(id))) return;
+      const arr = Array.from(set);
+      arr.push(String(id));
+      while (arr.length > CLOSED_IDS_MAX) arr.shift();
+      await new Promise((resolve) => {
+        try { chrome.storage.local.set({ [CLOSED_IDS_KEY]: arr }, () => resolve()); }
+        catch (_) { resolve(); }
+      });
+    } catch (_) { /* best-effort */ }
+  }
+  // Resolve the user's saved answer for a question text, or "" when we
+  // either don't recognize the question or the user hasn't saved an answer
+  // for it. Salary first (its own preference field), then the personal map.
+  function resolveSavedAnswer(questionText) {
+    const q = (questionText || "").trim();
+    if (!q) return "";
+    try {
+      if (SALARY_RX.test(q)) return getSavedExpectedSalary();
+      const map = (cachedPreferences && typeof cachedPreferences.personalAnswers === "object" && cachedPreferences.personalAnswers) || null;
+      if (!map) return "";
+      for (const { key, rx } of PERSONAL_ANSWER_PATTERNS) {
+        if (rx.test(q)) {
+          const v = map[key];
+          return typeof v === "string" ? v.trim() : "";
+        }
+      }
+    } catch (_) {}
+    return "";
+  }
+  // If a blocking manual field matches a question the user SAVED an answer
+  // for (salary or personal), fill it (React-compatible) so the flow can
+  // advance. Returns true iff it filled something. Conservative: if we can't
+  // confirm what the field asks (no matching label), we DON'T fill — better
+  // to skip than answer the wrong field. Name kept from the salary-only era;
+  // all three call sites (chain quiz-wait, bulk gate, watcher) get the
+  // personal answers for free.
   function fillSavedSalaryIfBlocking() {
     try {
-      const val = getSavedExpectedSalary();
-      if (!val) return false;
       const blocker = detectManualEntryBlocker();
       if (!blocker || !blocker.el) return false;
       let q = blocker.question || "";
       if (!q) { try { q = questionTextFor(blocker.el) || ""; } catch (_) {} }
-      if (!q || !SALARY_RX.test(q)) return false; // only confirmed salary fields
+      const val = resolveSavedAnswer(q);
+      if (!val) return false;
       fillFieldWithPulse(blocker.el, val);
-      console.log("[EmpleoAutomatico] auto-filled salary field from saved expectedSalary");
+      console.log("[EmpleoAutomatico] auto-filled saved answer for:", q.slice(0, 60));
       return true;
     } catch (_) { return false; }
   }

@@ -138,8 +138,28 @@ export interface PreferencesRow {
   salary_min: number | null;
   salary_max: number | null;
   expected_salary: string;     // free-text answer for "¿expectativa salarial?"
+  personal_answers: string;    // JSON map PersonalAnswerKey -> answer text
   updated_at: number;          // unix seconds
 }
+
+/**
+ * Whitelisted personal-answer keys. Each maps to a question pattern the
+ * extension recognizes on application forms (content/lapieza.js
+ * PERSONAL_ANSWER_PATTERNS). Adding a key = add it here, in the web form,
+ * and a regex in the extension.
+ */
+export const PERSONAL_ANSWER_KEYS = [
+  "vehiculo",      // ¿Cuentas con vehículo propio?
+  "licencia",      // ¿Tienes licencia de conducir?
+  "viajar",        // Disponibilidad para viajar
+  "reubicarse",    // Disponibilidad para cambio de residencia
+  "ingles",        // Nivel de inglés
+  "inicio",        // Disponibilidad para iniciar / incorporación
+  "portafolio",    // Link de portafolio (URL)
+  "linkedin"       // Perfil de LinkedIn (URL)
+] as const;
+export type PersonalAnswerKey = (typeof PERSONAL_ANSWER_KEYS)[number];
+export type PersonalAnswers = Partial<Record<PersonalAnswerKey, string>>;
 
 export interface UserPreferences {
   city: string;
@@ -148,6 +168,7 @@ export interface UserPreferences {
   salaryMin: number | null;
   salaryMax: number | null;
   expectedSalary: string;      // free-text answer auto-typed into salary fields
+  personalAnswers: PersonalAnswers; // auto-typed into matching screening fields
   updatedAt: number;           // unix seconds
 }
 

@@ -781,10 +781,22 @@ if (savePreferencesBtn) {
       return;
     }
 
+    // Spread the PREVIOUS prefs so fields this page doesn't surface
+    // (expectedSalary, personalAnswers, forward-compat keys synced from the
+    // web) survive an Options-page save. Without this, touching city/salary
+    // here wiped the server-synced auto-answers from the local mirror until
+    // the next /account round-trip — and bulk silently skipped vacancies the
+    // user had configured answers for. Mirrors lapieza.js's panel save.
+    const prev = (await readPreferences()) || {};
     const next = {
+      ...prev,
       modality,
       updatedAt: Date.now()
     };
+    // Fields THIS page owns: explicitly clear them when emptied (the spread
+    // would otherwise resurrect the old value).
+    delete next.city; delete next.citySynonyms;
+    delete next.salaryMin; delete next.salaryMax;
     if (city) {
       next.city = city;
       // Compute the synonym list once at save time so the content scripts

@@ -44,6 +44,10 @@ export async function PUT(req: Request) {
       salaryMax:
         b.salaryMax === null || typeof b.salaryMax === "number" ? b.salaryMax : undefined,
       expectedSalary: typeof b.expectedSalary === "string" ? b.expectedSalary : undefined,
+      personalAnswers:
+        b.personalAnswers && typeof b.personalAnswers === "object" && !Array.isArray(b.personalAnswers)
+          ? (b.personalAnswers as Record<string, string>)
+          : undefined,
     });
     return NextResponse.json({ ok: true, ...data });
   } catch (err) {
