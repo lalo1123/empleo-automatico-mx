@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-10-quota-at-click";
+  const EAMX_LAPIEZA_VERSION = "2026-06-10-no-repostings";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -3370,13 +3370,27 @@
       try {
         const id = idFromUrl(location.href);
         if (id && queueModule && typeof queueModule.upsertApplied === "function") {
+          // Title/company matter: the applied-by-title filter keys on them
+          // to catch RE-POSTED ids of the same job. If lastJob isn't
+          // hydrated yet, pull straight from the page DOM.
+          let t = (lastJob && lastJob.title) || "";
+          let comp = (lastJob && lastJob.company) || "";
+          let loc = (lastJob && lastJob.location) || "";
+          if (!t || !comp) {
+            try {
+              const { job } = extractJob();
+              t = t || (job && job.title) || "";
+              comp = comp || (job && job.company) || "";
+              loc = loc || (job && job.location) || "";
+            } catch (_) {}
+          }
           await queueModule.upsertApplied({
             id,
             source: SOURCE,
             url: location.href,
-            title: (lastJob && lastJob.title) || "",
-            company: (lastJob && lastJob.company) || "",
-            location: (lastJob && lastJob.location) || "",
+            title: t,
+            company: comp,
+            location: loc,
             savedAt: Date.now(),
             matchScore: 0,
             reasons: ["Detectada como ya postulada desde /vacante/"]
@@ -5887,9 +5901,22 @@
     if (queueModule && typeof queueModule.appliedIdsForSource === "function") {
       try { appliedIds = await queueModule.appliedIdsForSource(SOURCE); } catch (_) {}
     }
+    // Title+company keys too: LaPieza re-posts the same vacancy under a
+    // NEW id (live: Creditas "Consultor de ventas" came back as top-1
+    // after being detected as applied under another id), so id matching
+    // alone keeps offering jobs the user already applied to.
+    let appliedKeys = new Set();
+    if (queueModule && typeof queueModule.appliedPostingKeysForSource === "function") {
+      try { appliedKeys = await queueModule.appliedPostingKeysForSource(SOURCE); } catch (_) {}
+    }
+    const postingKeyOf = (m) =>
+      ((((m && m.jobLite && m.jobLite.title) || "") + "|" + ((m && m.jobLite && m.jobLite.company) || ""))
+        .toLowerCase().replace(/\s+/g, " ").trim());
     const isAppliedMatch = (m) =>
       !!(m && m.jobLite) &&
-      (m.appliedFromCard === true || appliedIds.has(String(m.jobLite.id || "")));
+      (m.appliedFromCard === true ||
+        appliedIds.has(String(m.jobLite.id || "")) ||
+        (appliedKeys.size > 0 && (() => { const k = postingKeyOf(m); return k !== "|" && k !== "" && appliedKeys.has(k); })()));
 
     // Sync page-detected applications into the queue so the "applied"
     // state persists across navigation. Fire-and-forget.
@@ -6868,10 +6895,16 @@
     // no se marque para autopostular no?" — don't waste a quota unit
     // re-applying to a vacancy that's already been submitted.
     let appliedIds = new Set();
+    let appliedKeys = new Set();
     try {
       await ensureDiscoveryDeps();
       if (queueModule && typeof queueModule.appliedIdsForSource === "function") {
         appliedIds = await queueModule.appliedIdsForSource(SOURCE);
+      }
+      // Re-posted vacancies carry a NEW id — match by title+company too
+      // (live: Creditas/EL CRISOL kept re-entering the bulk top-N).
+      if (queueModule && typeof queueModule.appliedPostingKeysForSource === "function") {
+        appliedKeys = await queueModule.appliedPostingKeysForSource(SOURCE);
       }
     } catch (_) { /* ignore — fall back to no filtering */ }
 
@@ -6894,11 +6927,13 @@
       .filter((m) => !appliedIds.has(String(m.jobLite.id)))
       // Closed-on-page memory filter
       .filter((m) => !closedIds.has(String(m.jobLite.id)))
-      // Duplicate-posting collapse
+      // Duplicate-posting collapse + applied-by-title filter (re-posted
+      // ids of jobs the user already applied to share the same key).
       .filter((m) => {
         const key = (((m.jobLite.title || "") + "|" + (m.jobLite.company || ""))
           .toLowerCase().replace(/\s+/g, " ").trim());
         if (key === "|" || key === "") return true; // can't key it — keep
+        if (appliedKeys.has(key)) return false;
         if (seenPosting.has(key)) return false;
         seenPosting.add(key);
         return true;
