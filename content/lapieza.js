@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-09-personal-answers";
+  const EAMX_LAPIEZA_VERSION = "2026-06-10-panel-polish";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -4810,7 +4810,11 @@
       <div class="eamx-matches-panel__bulk" data-eamx-matches-bulk hidden>
         <button type="button" class="eamx-matches-panel__bulk-btn eamx-matches-panel__bulk-btn--primary" data-action="bulk-apply-top">⚡ Auto-postular top 5 (sin sacarte de aquí)</button>
         <button type="button" class="eamx-matches-panel__bulk-btn" data-action="mark-top-5">⭐ Solo marcar top 5 en mi cola</button>
-        <p class="eamx-matches-panel__bulk-hint"><strong>⚡ Auto-postular</strong> abre cada vacante en una pestaña en segundo plano, corre la cadena (carta + CV + Q&A + quiz) y al terminar la <strong>ENVÍA automáticamente</strong> — son postulaciones reales. Tienes <strong>5 s para cancelar</strong> cada una (Esc, o "Ver pestaña"). <strong>⭐ Marcar</strong> NO envía nada: solo guarda en tu cola para revisar y postular tú después.</p>
+        <div class="eamx-bulk-legend" aria-label="Cómo funciona">
+        <div class="eamx-bulk-legend__row"><span aria-hidden="true">⚡</span><span><strong>Auto-postular</strong> llena y <strong>envía solo</strong> — postulaciones reales, con 5&nbsp;s para cancelar (Esc).</span></div>
+        <div class="eamx-bulk-legend__row"><span aria-hidden="true">⭐</span><span><strong>Marcar</strong> no envía nada: las guarda para que las revises tú.</span></div>
+        <div class="eamx-bulk-legend__row"><span aria-hidden="true">⏭️</span><span>Las ya postuladas, cerradas o con datos que te faltan <strong>se saltan solas</strong>.</span></div>
+      </div>
       </div>
     `;
 
@@ -5923,16 +5927,16 @@
       : "Configura ciudad, modalidad y salario en empleo.skybrandmx.com (nueva pestaña)";
     const stats = `
       <div class="eamx-matches-panel__stats eamx-matches-panel__stats--four">
-        <div class="eamx-matches-panel__stat">
-          <span class="eamx-matches-panel__stat-label">Mejor</span>
+        <div class="eamx-matches-panel__stat" title="El match más alto que encontré para tu CV en esta página">
+          <span class="eamx-matches-panel__stat-label">🏆 Mejor</span>
           <span class="eamx-matches-panel__stat-value eamx-matches-panel__stat-value--${bestLevel}">${bestScore}%</span>
         </div>
-        <div class="eamx-matches-panel__stat">
-          <span class="eamx-matches-panel__stat-label">Promedio</span>
+        <div class="eamx-matches-panel__stat" title="Qué tan afín es esta página a tu CV en promedio">
+          <span class="eamx-matches-panel__stat-label">📊 Promedio</span>
           <span class="eamx-matches-panel__stat-value">${avgScore}%</span>
         </div>
-        <div class="eamx-matches-panel__stat">
-          <span class="eamx-matches-panel__stat-label">Vistas</span>
+        <div class="eamx-matches-panel__stat" title="Vacantes que analicé para armar este top">
+          <span class="eamx-matches-panel__stat-label">👀 Analizadas</span>
           <span class="eamx-matches-panel__stat-value">${widerSearchPool?.size || cards.length}</span>
         </div>
         <button type="button" class="eamx-matches-panel__stat eamx-matches-panel__stat--filters" data-action="toggle-filters" title="${escapeHtml(filtersTitle)}" aria-label="${escapeHtml(filtersTitle)}">
@@ -6254,7 +6258,7 @@
       <div class="eamx-bulk__safety ${dailyTone}" title="${escapeHtml(dailyMsg)}">
         <div class="eamx-bulk__safety-row">
           <span class="eamx-bulk__safety-icon" aria-hidden="true">🛡️</span>
-          <span class="eamx-bulk__safety-label">Hoy en este portal</span>
+          <span class="eamx-bulk__safety-label">Envíos de hoy aquí</span>
           <span class="eamx-bulk__safety-count">${dailyCount} / ${dailyCap}</span>
         </div>
         <div class="eamx-bulk__safety-bar" aria-hidden="true">
@@ -6280,7 +6284,11 @@
         <span class="eamx-bulk-btn__icon" aria-hidden="true">⭐</span>
         <span class="eamx-bulk-btn__label">Solo marcar top <span data-bulk-count>${activeN}</span> en mi cola</span>
       </button>
-      <p class="eamx-matches-panel__bulk-hint"><strong>⚡ Auto-postular</strong> abre cada vacante en una pestaña en segundo plano, corre la cadena (carta + CV + Q&A + quiz) y al terminar la <strong>ENVÍA automáticamente</strong> — son postulaciones reales. Tienes <strong>5 s para cancelar</strong> cada una (Esc, o "Ver pestaña"). <strong>⭐ Marcar</strong> NO envía nada: solo guarda en tu cola para revisar y postular tú después.</p>
+      <div class="eamx-bulk-legend" aria-label="Cómo funciona">
+        <div class="eamx-bulk-legend__row"><span aria-hidden="true">⚡</span><span><strong>Auto-postular</strong> llena y <strong>envía solo</strong> — postulaciones reales, con 5&nbsp;s para cancelar (Esc).</span></div>
+        <div class="eamx-bulk-legend__row"><span aria-hidden="true">⭐</span><span><strong>Marcar</strong> no envía nada: las guarda para que las revises tú.</span></div>
+        <div class="eamx-bulk-legend__row"><span aria-hidden="true">⏭️</span><span>Las ya postuladas, cerradas o con datos que te faltan <strong>se saltan solas</strong>.</span></div>
+      </div>
     `;
   }
 
@@ -6464,9 +6472,11 @@
     // section now, so this mainly guards any future reuse of renderMatchItem.)
     const isApplied = match.appliedFromCard === true ||
       (appliedIds && appliedIds.has(String(jobLite.id || "")));
+    // Chips (CSS adds the ✓ via ::before) — keep to 2 so the row scans
+    // in one glance instead of reading like a log dump.
     const reasonItems = (Array.isArray(reasons) ? reasons : [])
-      .slice(0, 3)
-      .map((r) => `<li>✓ ${escapeHtml(r)}</li>`)
+      .slice(0, 2)
+      .map((r) => `<li>${escapeHtml(r)}</li>`)
       .join("");
     const reasonsBlock = reasonItems
       ? `<ul class="eamx-match-item__reasons">${reasonItems}</ul>`

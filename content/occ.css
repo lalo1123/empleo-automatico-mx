@@ -2306,11 +2306,11 @@
   display: flex;
   align-items: stretch;
   gap: 12px;
-  padding: 14px 14px 14px 12px;
+  padding: 15px 15px 15px 13px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-left: 4px solid var(--eamx-c-brand-300);
-  border-radius: 10px;
+  border-radius: 14px;
   transition: transform 160ms cubic-bezier(0.4, 0, 0.2, 1), background 160ms ease, border-color 160ms ease;
   /* Scroll perf: each card is its own paint context, so hovering or
      repainting one doesn't invalidate the whole list. */
@@ -2396,7 +2396,7 @@
 }
 
 .eamx-match-item__title {
-  font: 600 14px/1.3 inherit;
+  font: 700 15px/1.3 inherit;
   color: #ffffff;
   word-break: break-word;
   flex: 1 1 auto;
@@ -2961,20 +2961,39 @@
   text-decoration: underline;
 }
 
+/* Reasons as compact chips (2026-06-10 visual pass): a column of gray
+   sentences read like debug output; chips scan in a glance. */
 .eamx-match-item__reasons {
   list-style: none;
-  margin: 4px 0 0 0;
+  margin: 6px 0 0 0;
   padding: 0;
   display: flex;
-  flex-direction: column;
-  gap: 3px;
+  flex-wrap: wrap;
+  gap: 5px;
 }
 
 .eamx-match-item__reasons li {
-  font-size: 12px;
-  color: #94a3b8;
-  line-height: 1.4;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font: 600 11px/1.2 inherit;
+  color: #9fd9d2;
+  background: rgba(112, 209, 198, 0.10);
+  border: 1px solid rgba(112, 209, 198, 0.22);
+  border-radius: 999px;
+  padding: 3.5px 9px;
+  max-width: 100%;
 }
+
+.eamx-match-item__reasons li::before {
+  content: "✓";
+  font-weight: 800;
+  color: #70d1c6;
+}
+
+/* Negative/neutral reasons (start with ✗ in the data) keep their own
+   prefix — strip the injected ✓ for those. */
+.eamx-match-item__reasons li[data-neg]::before { content: ""; }
 
 .eamx-match-item__actions {
   display: flex;
@@ -3474,6 +3493,38 @@
   font-size: 11.5px;
   line-height: 1.45;
   color: #94a3b8;
+}
+
+/* Compact 3-row legend (2026-06-10) — replaces the wall-of-text hint.
+   Each row: icon column + one short sentence. Scans in 3 seconds. */
+.eamx-bulk-legend {
+  margin: 10px 2px 0 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+}
+
+.eamx-bulk-legend__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: #94a3b8;
+}
+
+.eamx-bulk-legend__row > span:first-child {
+  flex: 0 0 auto;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.eamx-bulk-legend__row strong {
+  color: #cbd5e1;
 }
 
 /* Safety pill — compact 2-line variant. Anti-bot-detection daily cap
