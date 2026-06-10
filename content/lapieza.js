@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-10-panel-polish";
+  const EAMX_LAPIEZA_VERSION = "2026-06-10-quota-at-click";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -3285,6 +3285,32 @@
   // kicked off BEFORE calling this (so generation overlaps the 3s
   // countdown). Sets the "next-apply" session flag right before clicking
   // Postularme so the apply-side chain knows to auto-fire Express.
+  // QUOTA GATE — shows the plan-limit modal and returns true when the user
+  // has zero remaining monthly quota. Called at every "apply" ENTRY POINT
+  // (panel ⚡ click, /vacante chain, on-page FAB) so the message appears AT
+  // THE CLICK — not 10 seconds later inside the apply chain (user: "si no
+  // tienes más, que te salga mensaje cuando quieras aplicar — no veo que
+  // salga"). Network blips fail open: the apply-chain pre-flight and the
+  // backend 402 handlers still gate downstream.
+  async function blockIfNoQuota() {
+    try {
+      const auth = await sendMsg({ type: MSG.GET_AUTH_STATUS });
+      if (auth && auth.ok && auth.loggedIn && auth.usage) {
+        const limit = Number(auth.usage.limit);
+        const current = Number(auth.usage.current) || 0;
+        if (limit !== -1 && Number.isFinite(limit) && current >= limit) {
+          await showPlanLimitModal({
+            feature: "postulaciones IA",
+            usage: { current, limit },
+            planName: (auth.user && auth.user.plan) || ""
+          });
+          return true;
+        }
+      }
+    } catch (_) { /* fail open — downstream checks still gate */ }
+    return false;
+  }
+
   async function runVacancyAutoChain() {
     // Early CV check — fail FAST and visibly before the 3s countdown
     // gives users false confidence that the chain is running. Without
@@ -3362,6 +3388,18 @@
       try {
         if (await readBulkModeFlag()) {
           reportBulkStatus("already_applied");
+          clearBulkModeFlag();
+        }
+      } catch (_) {}
+      return;
+    }
+
+    // QUOTA PRE-FLIGHT — fail HERE with the modal instead of clicking
+    // "Me quiero postular" and dying later inside the apply chain.
+    if (await blockIfNoQuota()) {
+      try {
+        if (await readBulkModeFlag()) {
+          reportBulkStatus("plan_limit");
           clearBulkModeFlag();
         }
       } catch (_) {}
@@ -3465,6 +3503,8 @@
   // Used by the quick-apply chain to avoid opening a print-to-PDF tab
   // mid-flow when LaPieza already has a "PRINCIPAL" CV pre-selected.
   async function onFabClickExpressApply(opts = {}) {
+    // QUOTA PRE-FLIGHT — the same at-the-click message on this entry point.
+    if (await blockIfNoQuota()) return;
     const { job: extracted, partial } = extractJob();
     let job = extracted;
     const cached = await restoreJobFromSession();
@@ -5018,6 +5058,19 @@
       return;
     }
     if (what === "quick-apply") {
+      // QUOTA GATE AT THE CLICK — when the panel's cached quota says zero
+      // remaining, don't even open the tab: show the plan-limit modal right
+      // here. Synchronous check (cached lastBulkRemaining) so cancelling
+      // the <a target=_blank> doesn't fight the popup blocker. Unknown
+      // quota (null) falls through — downstream pre-flights still gate.
+      if (lastBulkRemaining === 0) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        try {
+          showPlanLimitModal({ feature: "postulaciones IA", planName: lastBulkPlan });
+        } catch (_) {}
+        return;
+      }
       // "⚡ Postular" — open the vacancy in a new tab AND set a session
       // flag so our content script chains the FULL apply flow on arrival:
       //   1. pre-warm cover letter
