@@ -280,63 +280,29 @@
         IMPORTANT: this is a ranking signal, NOT a hard filter — the user
         still sees off-city vacancies, just lower in the list.
       -->
+      <!--
+        READ-ONLY since 2026-06-10: preferences are configured ONCE in the
+        web account (empleo.skybrandmx.com/account/preferences) and synced
+        here automatically (server = canonical truth). The old editable form
+        wrote a local-only copy that the server mirror silently clobbered on
+        the next sync — one source of truth keeps the service simple.
+      -->
       <section class="card is-hidden" id="preferencesCard" aria-labelledby="preferencesHeading">
         <div class="card__head">
-          <div class="card__eyebrow">Para tus listados</div>
+          <div class="card__eyebrow">Sincronizadas desde tu cuenta</div>
           <h2 id="preferencesHeading">&#9881;&#65039; Mis preferencias</h2>
           <p class="card__sub">
-            La extensi&oacute;n usa estas preferencias para ordenar las vacantes que ves. <strong>No filtra &mdash; solo prioriza.</strong>
+            Se configuran <strong>una sola vez en tu cuenta web</strong> y la extensi&oacute;n las sincroniza sola.
+            Se usan para ordenar las vacantes que ves y para responder por ti el salario y las preguntas personales (veh&iacute;culo, licencia, ingl&eacute;s&hellip;).
           </p>
         </div>
 
         <div class="field">
-          <label class="field-label" for="prefCity">Ciudad ideal</label>
-          <input id="prefCity" type="text" autocomplete="address-level2" placeholder="ej. Ciudad de M&eacute;xico, Guadalajara" />
-          <div class="muted">Reconocemos variantes: CDMX, DF, GDL, MTY, etc.</div>
-        </div>
-
-        <div class="field">
-          <label class="field-label">Modalidad preferida</label>
-          <div class="mode-radio" role="radiogroup" aria-label="Modalidad preferida">
-            <label class="mode-option mode-option--compact">
-              <input type="radio" name="prefModality" id="prefModalityPresencial" value="presencial" />
-              <span class="mode-option__body">
-                <span class="mode-option__title"><span aria-hidden="true">&#127970;</span> Presencial</span>
-              </span>
-            </label>
-            <label class="mode-option mode-option--compact">
-              <input type="radio" name="prefModality" id="prefModalityRemoto" value="remoto" />
-              <span class="mode-option__body">
-                <span class="mode-option__title"><span aria-hidden="true">&#127968;</span> Remoto</span>
-              </span>
-            </label>
-            <label class="mode-option mode-option--compact">
-              <input type="radio" name="prefModality" id="prefModalityHibrido" value="hibrido" />
-              <span class="mode-option__body">
-                <span class="mode-option__title"><span aria-hidden="true">&#128338;</span> H&iacute;brido</span>
-              </span>
-            </label>
-            <label class="mode-option mode-option--compact">
-              <input type="radio" name="prefModality" id="prefModalityAny" value="any" checked />
-              <span class="mode-option__body">
-                <span class="mode-option__title"><span aria-hidden="true">&#9989;</span> Sin preferencia</span>
-              </span>
-            </label>
-          </div>
-        </div>
-
-        <div class="field">
-          <label class="field-label">Rango salarial mensual MXN</label>
-          <div class="pref-salary-row">
-            <input id="prefSalaryMin" type="number" min="0" max="1000000" step="1000" placeholder="Min (ej. 25000)" />
-            <span class="pref-salary-sep" aria-hidden="true">&mdash;</span>
-            <input id="prefSalaryMax" type="number" min="0" max="1000000" step="1000" placeholder="Max (ej. 60000)" />
-          </div>
-          <div class="muted">Ambos opcionales. Si la vacante no muestra salario, no afecta el score.</div>
+          <div id="prefsSummary" class="muted">Cargando&hellip;</div>
         </div>
 
         <div class="actions">
-          <button type="button" class="btn btn--primary" id="savePreferences">Guardar preferencias</button>
+          <button type="button" class="btn btn--primary" id="editPreferencesWeb">Editar en mi cuenta &nearr;</button>
           <span id="preferencesStatus" class="status" role="status" aria-live="polite"></span>
         </div>
       </section>

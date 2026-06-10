@@ -106,21 +106,14 @@ const expressModeOnInput = $("expressModeOn");
 const expressModeOffInput = $("expressModeOff");
 const expressModeStatus = $("expressModeStatus");
 
-// Preferences card refs. Stored in chrome.storage.local under
-// STORAGE_KEYS.PREFERENCES — listing-page scanners read this on every
-// scan so it must live in local (not the backend SETTINGS object).
+// Preferences card refs. READ-ONLY view since 2026-06-10: the canonical
+// editor lives in the web account (single source of truth); this card just
+// shows what's synced into chrome.storage.local[STORAGE_KEYS.PREFERENCES].
 const preferencesCard = $("preferencesCard");
-const prefCityInput = $("prefCity");
-const prefSalaryMinInput = $("prefSalaryMin");
-const prefSalaryMaxInput = $("prefSalaryMax");
-const prefModalityInputs = [
-  $("prefModalityPresencial"),
-  $("prefModalityRemoto"),
-  $("prefModalityHibrido"),
-  $("prefModalityAny")
-].filter(Boolean);
-const savePreferencesBtn = $("savePreferences");
+const prefsSummaryEl = $("prefsSummary");
+const editPreferencesWebBtn = $("editPreferencesWeb");
 const preferencesStatus = $("preferencesStatus");
+const WEB_PREFERENCES_URL = "https://empleo.skybrandmx.com/account/preferences";
 
 // Modo Auto card refs. The card is Premium-only — toggling ON requires the
 // disclaimer modal to be accepted once (AUTO_DISCLAIMER_SEEN), and the plan
@@ -742,89 +735,57 @@ function writePreferences(value) {
   });
 }
 
+// READ-ONLY summary render. The canonical editor is the web account
+// (single source of truth — "la sencillez que debe de ser el servicio");
+// the old editable form here wrote a local-only copy that the server
+// mirror silently clobbered on the next /account sync.
 function paintPreferences(prefs) {
+  if (!prefsSummaryEl) return;
   const p = prefs || {};
-  if (prefCityInput) prefCityInput.value = p.city || "";
-  if (prefSalaryMinInput) prefSalaryMinInput.value = Number.isFinite(p.salaryMin) ? String(p.salaryMin) : "";
-  if (prefSalaryMaxInput) prefSalaryMaxInput.value = Number.isFinite(p.salaryMax) ? String(p.salaryMax) : "";
-  const target = p.modality || "any";
-  for (const input of prefModalityInputs) {
-    input.checked = input.value === target;
-  }
-  // If nothing checked (defensive), force "any" — the radios should always
-  // have one selected so a click on Save persists a sensible default.
-  if (!prefModalityInputs.some((i) => i.checked)) {
-    const any = prefModalityInputs.find((i) => i.value === "any");
-    if (any) any.checked = true;
-  }
+  const MOD_LABELS = {
+    presencial: "Presencial",
+    remoto: "Remoto",
+    hibrido: "Híbrido",
+    any: "Sin preferencia"
+  };
+  const money = (n) =>
+    Number.isFinite(n) ? "$" + Number(n).toLocaleString("es-MX") : null;
+  const range =
+    money(p.salaryMin) || money(p.salaryMax)
+      ? `${money(p.salaryMin) || "—"} – ${money(p.salaryMax) || "—"}`
+      : "—";
+  const answersCount =
+    p.personalAnswers && typeof p.personalAnswers === "object"
+      ? Object.values(p.personalAnswers).filter(
+          (v) => typeof v === "string" && v.trim()
+        ).length
+      : 0;
+  const rows = [
+    ["Ciudad ideal", (p.city || "").trim() || "—"],
+    ["Modalidad", MOD_LABELS[p.modality] || "Sin preferencia"],
+    ["Rango salarial", range],
+    ["Salario esperado (respuesta)", (p.expectedSalary || "").trim() || "—"],
+    [
+      "Respuestas personales",
+      answersCount
+        ? `${answersCount} de 8 guardadas ✓`
+        : "Ninguna — configúralas en tu cuenta"
+    ]
+  ];
+  prefsSummaryEl.innerHTML = rows
+    .map(
+      ([k, v]) =>
+        `<div style="margin:4px 0"><strong>${escapeHtml(k)}:</strong> ${escapeHtml(String(v))}</div>`
+    )
+    .join("");
 }
 
-function readSelectedModality() {
-  for (const input of prefModalityInputs) {
-    if (input.checked) return input.value;
-  }
-  return "any";
-}
-
-if (savePreferencesBtn) {
-  savePreferencesBtn.addEventListener("click", async () => {
-    const city = (prefCityInput?.value || "").trim();
-    const salaryMin = readSalaryNumber(prefSalaryMinInput);
-    const salaryMax = readSalaryNumber(prefSalaryMaxInput);
-    const modality = readSelectedModality();
-
-    // Validation. We keep the rules permissive — the user might want to
-    // set just a min, or just a city, etc. The only hard rule is that
-    // when both salary bounds are set, min ≤ max.
-    if (salaryMin != null && salaryMax != null && salaryMin > salaryMax) {
-      setStatus(preferencesStatus, "err", "El salario mínimo no puede ser mayor que el máximo.");
-      return;
-    }
-
-    // Spread the PREVIOUS prefs so fields this page doesn't surface
-    // (expectedSalary, personalAnswers, forward-compat keys synced from the
-    // web) survive an Options-page save. Without this, touching city/salary
-    // here wiped the server-synced auto-answers from the local mirror until
-    // the next /account round-trip — and bulk silently skipped vacancies the
-    // user had configured answers for. Mirrors lapieza.js's panel save.
-    const prev = (await readPreferences()) || {};
-    const next = {
-      ...prev,
-      modality,
-      updatedAt: Date.now()
-    };
-    // Fields THIS page owns: explicitly clear them when emptied (the spread
-    // would otherwise resurrect the old value).
-    delete next.city; delete next.citySynonyms;
-    delete next.salaryMin; delete next.salaryMax;
-    if (city) {
-      next.city = city;
-      // Compute the synonym list once at save time so the content scripts
-      // can do an O(N) substring check per card without re-deriving the
-      // table on every scan.
-      try {
-        next.citySynonyms = expandCitySynonyms(city);
-      } catch (_) {
-        next.citySynonyms = [city.toLowerCase()];
-      }
-    }
-    if (salaryMin != null) next.salaryMin = salaryMin;
-    if (salaryMax != null) next.salaryMax = salaryMax;
-
-    savePreferencesBtn.disabled = true;
+if (editPreferencesWebBtn) {
+  editPreferencesWebBtn.addEventListener("click", () => {
     try {
-      await writePreferences(next);
-      setStatus(preferencesStatus, "ok", "Preferencias guardadas");
-      // Auto-clear after a few seconds so the green tick doesn't linger.
-      setTimeout(() => {
-        if (preferencesStatus && preferencesStatus.textContent === "Preferencias guardadas") {
-          setStatus(preferencesStatus, "", "");
-        }
-      }, 2500);
-    } catch (e) {
-      setStatus(preferencesStatus, "err", e?.message || "No se pudo guardar");
-    } finally {
-      savePreferencesBtn.disabled = false;
+      chrome.tabs.create({ url: WEB_PREFERENCES_URL });
+    } catch (_) {
+      try { window.open(WEB_PREFERENCES_URL, "_blank", "noopener"); } catch (_) {}
     }
   });
 }
@@ -853,9 +814,6 @@ function maybeFocusPreferencesCard() {
   preferencesCard.classList.remove("is-hidden");
   if (location.hash === "#preferences") {
     try { preferencesCard.scrollIntoView({ behavior: "smooth", block: "start" }); } catch (_) {}
-    if (prefCityInput) {
-      try { prefCityInput.focus({ preventScroll: true }); } catch (_) {}
-    }
   }
 }
 
@@ -1482,14 +1440,14 @@ async function init() {
         salaryMin: implicit.salaryMin || null,
         salaryMax: implicit.salaryMax || null
       });
-      // Visual hint: the status line shows the user we filled this in
-      // automatically. They click Save to persist.
+      // Visual hint: these came from the CV, not from saved prefs. The
+      // canonical editor is the web account — point there to persist.
       if (preferencesStatus && (implicit.city || implicit.salaryMin || implicit.modality !== "any")) {
         const bits = [];
         if (implicit.city) bits.push(`ciudad: ${implicit.city}`);
         if (implicit.modality && implicit.modality !== "any") bits.push(`modalidad: ${implicit.modality}`);
         if (implicit.salaryMin || implicit.salaryMax) bits.push("salario");
-        preferencesStatus.textContent = `Detectado de tu CV (${bits.join(" · ")}). Guarda para confirmar.`;
+        preferencesStatus.textContent = `Sugerido de tu CV (${bits.join(" · ")}). Confírmalo en tu cuenta web.`;
         preferencesStatus.className = "status status--info";
       }
     } else {
