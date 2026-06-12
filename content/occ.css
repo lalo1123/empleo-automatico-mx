@@ -3527,6 +3527,15 @@
   color: #cbd5e1;
 }
 
+.eamx-bulk-legend__link {
+  color: #70d1c6;
+  font-weight: 700;
+  text-decoration: underline;
+}
+.eamx-bulk-legend__link:hover {
+  color: #a8e6da;
+}
+
 /* Safety pill — compact 2-line variant. Anti-bot-detection daily cap
    info shown above the bulk selector. Tooltip on hover spells out the
    full per-portal limits; the pill itself stays small to leave more

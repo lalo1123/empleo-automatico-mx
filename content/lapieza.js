@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-10-no-repostings";
+  const EAMX_LAPIEZA_VERSION = "2026-06-11-import-postulaciones";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -3311,6 +3311,114 @@
     return false;
   }
 
+  // ── LaPieza "Mis postulaciones" importer ──────────────────────────────
+  // Ground truth: lapieza.io/profile → Mis vacantes → Postulaciones lists
+  // EVERYTHING the user ever applied to (manual, extensión, otro device).
+  // On every profile visit we passively import the rendered cards
+  // (title+company + status chip) into the local applied-queue, so the
+  // matches panel and the bulk selector can filter even RE-POSTED ids by
+  // title. A MutationObserver keeps importing as LaPieza lazy-renders
+  // more cards while the user scrolls. Backdated appliedAt so imports
+  // never eat today's anti-ban caps.
+  const IMPORT_STATUS_RX = /enviada|vista|en\s+proceso|rechazad|contratad|finalist/i;
+  let importObserver = null;
+  let importedKeysThisPage = new Set();
+  async function importLaPiezaApplicationsOnce() {
+    const cards = Array.from(document.querySelectorAll(
+      '.user-vacancies-list .cards-desktop, .user-vacancies-list [class*="cards"]'
+    ));
+    if (!cards.length) return 0;
+    await ensureDiscoveryDeps();
+    if (!(queueModule && typeof queueModule.upsertApplied === "function")) return 0;
+    let imported = 0;
+    for (const card of cards) {
+      try {
+        const title = (card.querySelector(".vacancy-title")?.textContent || "").trim();
+        const company = (card.querySelector(".vacancy-company")?.textContent || "").trim();
+        const status = (card.querySelector(".MuiChip-label")?.textContent || "").trim();
+        // Saved ("Guardadas") and invitation cards lack an applied-status
+        // chip — only import genuine applications.
+        if (!title || !IMPORT_STATUS_RX.test(status)) continue;
+        const key = (title + "|" + company).toLowerCase().replace(/\s+/g, " ").trim();
+        if (importedKeysThisPage.has(key)) continue;
+        importedKeysThisPage.add(key);
+        const OLD_TS = Date.now() - 7 * 24 * 60 * 60 * 1000;
+        await queueModule.upsertApplied({
+          id: "lapieza-import:" + key.replace(/[^a-z0-9]+/g, "-").slice(0, 80),
+          source: SOURCE,
+          url: "",
+          title,
+          company,
+          savedAt: OLD_TS,
+          appliedAt: OLD_TS,
+          matchScore: 0,
+          reasons: ["Importada de Mis postulaciones de LaPieza"]
+        });
+        imported++;
+      } catch (_) { /* per-card best-effort */ }
+    }
+    if (imported) {
+      console.log("[EmpleoAutomatico] imported", imported, "postulaciones from LaPieza profile");
+      toast(`🔄 ${imported} postulación${imported === 1 ? "" : "es"} de LaPieza sincronizada${imported === 1 ? "" : "s"} — ya no te las volveré a ofrecer.`, "info", { durationMs: 6000 });
+    }
+    return imported;
+  }
+  function maybeStartApplicationsImport() {
+    if (!/\/profile/i.test(location.pathname)) {
+      if (importObserver) { try { importObserver.disconnect(); } catch (_) {} importObserver = null; }
+      importedKeysThisPage = new Set();
+      return;
+    }
+    setTimeout(() => { try { importLaPiezaApplicationsOnce(); } catch (_) {} }, 1200);
+    if (!importObserver) {
+      let pending = null;
+      importObserver = new MutationObserver(() => {
+        clearTimeout(pending);
+        pending = setTimeout(() => { try { importLaPiezaApplicationsOnce(); } catch (_) {} }, 800);
+      });
+      try { importObserver.observe(document.body, { childList: true, subtree: true }); } catch (_) {}
+    }
+  }
+
+  // PASSIVE "ya postulada" memory — fired on every /vacante visit from
+  // detectAndMount (idempotent). Persists the applied state WITH title +
+  // company (DOM-extracted) so the applied-by-title filter can also kill
+  // re-posted ids of the same job. No chain, no quota, no flags needed.
+  let alreadyAppliedPersistedFor = "";
+  async function maybePersistAlreadyApplied() {
+    try {
+      if (!detectAlreadyAppliedState()) return;
+      const id = idFromUrl(location.href);
+      if (!id || alreadyAppliedPersistedFor === id) return;
+      alreadyAppliedPersistedFor = id;
+      await ensureDiscoveryDeps();
+      if (!(queueModule && typeof queueModule.upsertApplied === "function")) return;
+      let t = (lastJob && lastJob.title) || "";
+      let comp = (lastJob && lastJob.company) || "";
+      let loc = (lastJob && lastJob.location) || "";
+      if (!t || !comp) {
+        try {
+          const { job } = extractJob();
+          t = t || (job && job.title) || "";
+          comp = comp || (job && job.company) || "";
+          loc = loc || (job && job.location) || "";
+        } catch (_) {}
+      }
+      await queueModule.upsertApplied({
+        id,
+        source: SOURCE,
+        url: location.href,
+        title: t,
+        company: comp,
+        location: loc,
+        savedAt: Date.now(),
+        matchScore: 0,
+        reasons: ["Detectada como ya postulada al visitar la vacante"]
+      });
+      console.log("[EmpleoAutomatico] passive applied-memory persisted:", id, t);
+    } catch (_) { /* best-effort */ }
+  }
+
   async function runVacancyAutoChain() {
     // Early CV check — fail FAST and visibly before the 3s countdown
     // gives users false confidence that the chain is running. Without
@@ -4868,6 +4976,7 @@
         <div class="eamx-bulk-legend__row"><span aria-hidden="true">⚡</span><span><strong>Auto-postular</strong> llena y <strong>envía solo</strong> — postulaciones reales, con 5&nbsp;s para cancelar (Esc).</span></div>
         <div class="eamx-bulk-legend__row"><span aria-hidden="true">⭐</span><span><strong>Marcar</strong> no envía nada: las guarda para que las revises tú.</span></div>
         <div class="eamx-bulk-legend__row"><span aria-hidden="true">⏭️</span><span>Las ya postuladas, cerradas o con datos que te faltan <strong>se saltan solas</strong>.</span></div>
+        <div class="eamx-bulk-legend__row"><span aria-hidden="true">🔄</span><span>¿Postulaste fuera de la extensión? <a href="https://lapieza.io/profile" target="_blank" rel="noopener" class="eamx-bulk-legend__link">Abre Mis vacantes</a> y las sincronizo solo.</span></div>
       </div>
       </div>
     `;
@@ -6368,6 +6477,7 @@
         <div class="eamx-bulk-legend__row"><span aria-hidden="true">⚡</span><span><strong>Auto-postular</strong> llena y <strong>envía solo</strong> — postulaciones reales, con 5&nbsp;s para cancelar (Esc).</span></div>
         <div class="eamx-bulk-legend__row"><span aria-hidden="true">⭐</span><span><strong>Marcar</strong> no envía nada: las guarda para que las revises tú.</span></div>
         <div class="eamx-bulk-legend__row"><span aria-hidden="true">⏭️</span><span>Las ya postuladas, cerradas o con datos que te faltan <strong>se saltan solas</strong>.</span></div>
+        <div class="eamx-bulk-legend__row"><span aria-hidden="true">🔄</span><span>¿Postulaste fuera de la extensión? <a href="https://lapieza.io/profile" target="_blank" rel="noopener" class="eamx-bulk-legend__link">Abre Mis vacantes</a> y las sincronizo solo.</span></div>
       </div>
     `;
   }
@@ -10402,6 +10512,9 @@
   // =========================================================================
 
   function detectAndMount() {
+    // Profile-page importer (Mis vacantes → Postulaciones). Self-gates on
+    // the /profile route and disconnects its observer when leaving.
+    try { maybeStartApplicationsImport(); } catch (_) {}
     if (isJobDetailPage()) {
       mountFab();
       // Refresh the FAB label whenever we re-evaluate the route (Express ↔
@@ -10425,6 +10538,12 @@
         // Standing location-modal auto-confirm — works for a MANUAL
         // "¡Me quiero postular!" click too, not just ⚡ Postular.
         try { startLocationModalAutoConfirm(); } catch (_) {}
+        // PASSIVE applied-memory: on ANY vacancy visit (no chain, no
+        // quota needed) — if LaPieza shows "Ya te has postulado", persist
+        // it with title+company so the panel/bulk never offer it again.
+        // Live case: Creditas kept re-entering the top because the only
+        // persist path required the chain to run.
+        setTimeout(() => { try { maybePersistAlreadyApplied(); } catch (_) {} }, 1800);
       } else if (fabMode() === "apply") {
         setTimeout(() => maybeAutoFireExpressOnApply(), 600);
         // Always arm the flow assistant on /apply/ — even if the user
