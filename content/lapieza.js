@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-12-bulk-why";
+  const EAMX_LAPIEZA_VERSION = "2026-06-12-stats-aligned";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -6134,15 +6134,15 @@
     const stats = `
       <div class="eamx-matches-panel__stats eamx-matches-panel__stats--four">
         <div class="eamx-matches-panel__stat" title="El match más alto que encontré para tu CV en esta página">
-          <span class="eamx-matches-panel__stat-label">🏆 Mejor</span>
+          <span class="eamx-matches-panel__stat-label">Mejor</span>
           <span class="eamx-matches-panel__stat-value eamx-matches-panel__stat-value--${bestLevel}">${bestScore}%</span>
         </div>
         <div class="eamx-matches-panel__stat" title="Qué tan afín es esta página a tu CV en promedio">
-          <span class="eamx-matches-panel__stat-label">📊 Promedio</span>
+          <span class="eamx-matches-panel__stat-label">Promedio</span>
           <span class="eamx-matches-panel__stat-value">${avgScore}%</span>
         </div>
         <div class="eamx-matches-panel__stat" title="Vacantes que analicé para armar este top">
-          <span class="eamx-matches-panel__stat-label">👀 Analizadas</span>
+          <span class="eamx-matches-panel__stat-label">Analizadas</span>
           <span class="eamx-matches-panel__stat-value">${widerSearchPool?.size || cards.length}</span>
         </div>
         <button type="button" class="eamx-matches-panel__stat eamx-matches-panel__stat--filters" data-action="toggle-filters" title="${escapeHtml(filtersTitle)}" aria-label="${escapeHtml(filtersTitle)}">
@@ -7026,6 +7026,18 @@
 
   async function onMatchesBulkApplyTop(bulkBtn) {
     if (!bulkBtn) return;
+    // EXTENSION-UPDATED GUARD: when the extension reloads (e.g. an update),
+    // this already-loaded content script loses its runtime — chrome.runtime
+    // .id goes undefined and EVERY message (auth, open-tab) fails. Before
+    // the guard the bulk silently tried and showed "No se pudo abrir" on
+    // every row. Tell the user the real cause: reload the page.
+    if (!chrome.runtime || !chrome.runtime.id) {
+      renderBulkNote(
+        '🔄 <strong>La extensión se actualizó.</strong> Recarga esta página (F5) para volver a usar Auto-postular.'
+      );
+      toast("Recarga la página (F5) — la extensión se actualizó.", "info", { durationMs: 7000 });
+      return;
+    }
     // Honor the user's chip selection instead of hardcoding 5. Falls
     // back to 5 if no chip is active (shouldn't happen — renderer
     // always marks one --active).

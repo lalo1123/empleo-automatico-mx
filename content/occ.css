@@ -3292,7 +3292,10 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
+  justify-content: flex-start;
+  gap: 3px;
+  min-height: 42px;
+  text-align: center;
   /* When .eamx-matches-panel__stat is rendered as a <button> (the Filtros
      cell is interactive) we still want the same visuals as the static
      <div> peers — strip the default button chrome. */
@@ -3334,26 +3337,21 @@
   appearance: none;
   font: inherit;
   color: inherit;
-  border: 1px solid rgba(94, 234, 212, 0.32);
-  background: rgba(45, 212, 191, 0.06);
+  /* Plain column like its 3 read-only peers (no box) so the row reads as
+     ALIGNED — the old teal border/background made it look descuadrado.
+     Clickability comes from the teal label + ↗ icon + a hover tint. */
+  border: 0;
+  background: transparent;
   border-radius: 8px;
   padding: 0;
-  /* Match the implicit flex/grid layout of the sibling stat cells —
-     they're divs with no border, so the chip's border eats 1px on
-     each side. Negative inset margin compensates so column widths
-     stay uniform. */
-  margin: -1px;
+  margin: 0;
   transition:
     background 160ms ease,
-    border-color 160ms ease,
-    transform 160ms ease,
-    box-shadow 160ms ease;
+    transform 160ms ease;
 }
 .eamx-matches-panel__stat--filters:hover {
-  background: rgba(45, 212, 191, 0.14);
-  border-color: rgba(94, 234, 212, 0.60);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px -8px rgba(45, 212, 191, 0.50);
+  background: rgba(45, 212, 191, 0.10);
+  border-radius: 8px;
 }
 .eamx-matches-panel__stat--filters:active {
   transform: scale(0.98);
@@ -3378,11 +3376,13 @@
   opacity: 1;
   transform: translate(1px, -1px);
 }
-.eamx-matches-panel__filters-value {
+.eamx-matches-panel__stat-value.eamx-matches-panel__filters-value {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 4px;
+  font-size: 13px;
+  color: #5eead4;
 }
 .eamx-matches-panel__filters-empty {
   font-size: 12px;
@@ -3393,15 +3393,25 @@
 }
 
 .eamx-matches-panel__stat-label {
-  font-size: 10.5px;
+  font-size: 10px;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.05em;
   color: #94a3b8;
+  white-space: nowrap;
+  line-height: 14px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .eamx-matches-panel__stat-value {
-  font: 700 19px/1 var(--eamx-font-mono, ui-monospace, "SF Mono", monospace);
+  font: 700 18px/1 var(--eamx-font-mono, ui-monospace, "SF Mono", monospace);
   color: #f1f5f9;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 /* Slightly tighter font for the Filtros cell so the icon row + "Sin
