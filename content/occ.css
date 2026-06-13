@@ -2944,21 +2944,27 @@
    for vacancies the user applied to outside our chain — easy to miss
    when intentionally browsing, easy to find when wanting to clean up
    the panel. */
+/* Neutral GRAY + underline so it reads as a secondary action ("tap to
+   hide"), not a green "done ✓" status badge. The teal/check styling is
+   what made users think the system already knew it was applied. */
 .eamx-match-item__mark-applied {
-  margin-top: 6px;
+  margin-top: 7px;
   padding: 0;
   background: transparent;
   border: 0;
-  color: rgba(94, 234, 212, 0.65);
+  color: #8295a3;
   font: 600 11px inherit;
   cursor: pointer;
   transition: color 120ms ease;
   text-align: left;
   letter-spacing: 0.01em;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: rgba(130, 149, 163, 0.45);
 }
 .eamx-match-item__mark-applied:hover {
-  color: #5eead4;
-  text-decoration: underline;
+  color: #cbd5e1;
+  text-decoration-color: #cbd5e1;
 }
 
 /* Reasons as compact chips (2026-06-10 visual pass): a column of gray

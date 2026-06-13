@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-12-matches-first";
+  const EAMX_LAPIEZA_VERSION = "2026-06-12-mark-label-clear";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -6720,9 +6720,14 @@
     // Manual "ya apliqué" link — for vacancies the user applied to OUTSIDE
     // our chain (manually, before the tracker existed, or from another
     // device). Hidden once the item is already marked as applied.
+    // ACTION, not status: the old "✓ Ya apliqué" label read like a badge
+    // saying the system already knew it was applied — users saw it and
+    // asked "ya está postulada, ¿por qué sigue saliendo?". Reword + restyle
+    // so it's clearly a button the USER taps to hide a vacancy they applied
+    // to elsewhere.
     const manualMarkApplied = isApplied
       ? ""
-      : `<button type="button" data-action="mark-applied" data-id="${safeId}" class="eamx-match-item__mark-applied" title="Ya apliqué a esta vacante por mi cuenta">✓ Ya apliqué</button>`;
+      : `<button type="button" data-action="mark-applied" data-id="${safeId}" class="eamx-match-item__mark-applied" title="¿Ya postulaste a esta vacante por tu cuenta? Márcala para ocultarla del top.">Ya la postulé — ocultar</button>`;
     const itemClass = isApplied ? "eamx-match-item eamx-match-item--applied" : "eamx-match-item";
     return `
       <li class="${itemClass}">
