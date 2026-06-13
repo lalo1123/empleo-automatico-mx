@@ -2783,6 +2783,26 @@
   font: 11.5px/1.45 inherit;
   color: rgba(226, 232, 240, 0.50);
 }
+/* "Saltadas del top: …" — the persistent porqué line in the progress head. */
+.eamx-bulk-progress__dropped {
+  display: block;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  font: 600 11.5px/1.4 inherit;
+  color: #ffb066;
+}
+/* Persistent note card (bulk opened nothing / daily cap). Amber so it
+   reads as "heads-up", not error. */
+.eamx-bulk-note {
+  border: 1px solid rgba(255, 176, 102, 0.30);
+  background: rgba(255, 176, 102, 0.07);
+}
+.eamx-bulk-note__body {
+  font: 12.5px/1.5 inherit;
+  color: #f0d9c4;
+}
+.eamx-bulk-note__body strong { color: #ffffff; }
 .eamx-bulk-progress__list {
   list-style: none;
   margin: 0;

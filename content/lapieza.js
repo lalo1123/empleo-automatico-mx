@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-12-list-dominant";
+  const EAMX_LAPIEZA_VERSION = "2026-06-12-bulk-why";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -7074,37 +7074,37 @@
     // already sorted by score desc).
     const seenPosting = new Set();
 
+    // Single pass that COUNTS why each candidate was dropped, so we can
+    // tell the user the "porqué" (user: "que salga el porqué al menos") —
+    // not just silently open fewer tabs than they asked for.
+    let cntApplied = 0, cntClosed = 0, cntDup = 0;
     const candidates = (matchesCurrentTopN || [])
       .filter((m) => m && m.jobLite && m.jobLite.url)
-      // Persisted-queue filter
-      .filter((m) => !appliedIds.has(String(m.jobLite.id)))
-      // Closed-on-page memory filter
-      .filter((m) => !closedIds.has(String(m.jobLite.id)))
-      // Duplicate-posting collapse + applied-by-title filter (re-posted
-      // ids of jobs the user already applied to share the same canonical
-      // key — accent/dash-insensitive via queue.js postingKey).
       .filter((m) => {
+        const id = String(m.jobLite.id || "");
         const key = (queueModule && typeof queueModule.postingKey === "function")
           ? queueModule.postingKey(m.jobLite.title, m.jobLite.company)
           : "";
-        if (!key) return true; // can't key it — keep
-        if (appliedKeys.has(key)) return false;
-        if (seenPosting.has(key)) return false;
-        seenPosting.add(key);
+        // Already applied — page-detected this session, by id, or by the
+        // canonical title+company key (catches re-posted ids).
+        if (m.appliedFromCard || appliedIds.has(id) || (key && appliedKeys.has(key))) { cntApplied++; return false; }
+        // Closed — remembered from a prior open or flagged on the listing.
+        if (m.closedFromCard || closedIds.has(id)) { cntClosed++; return false; }
+        // Duplicate re-post of one we're already keeping this run.
+        if (key) {
+          if (seenPosting.has(key)) { cntDup++; return false; }
+          seenPosting.add(key);
+        }
         return true;
-      })
-      // In-memory flag filter: the auto-marker from
-      // renderMatchesPanelContent upserts to queueModule
-      // fire-and-forget; if the user clicks Auto-postular before that
-      // write lands, the persisted set might not include these IDs
-      // yet. Filtering on the flag avoids re-applying to a vacancy
-      // detected this same session.
-      .filter((m) => !m.appliedFromCard)
-      // Closed-from-listing flag: should never reach here because
-      // scored already drops them, but defend in case some path
-      // bypasses that (e.g. manual injection into matchesCurrentTopN).
-      .filter((m) => !m.closedFromCard);
-    const skipped = (matchesCurrentTopN || []).length - candidates.length;
+      });
+    const skipped = cntApplied + cntClosed + cntDup;
+    // Human breakdown of what got filtered out — shown persistently (toasts
+    // vanish before the user reads them).
+    const dropBits = [];
+    if (cntApplied) dropBits.push(`${cntApplied} ya postulada${cntApplied > 1 ? "s" : ""}`);
+    if (cntClosed) dropBits.push(`${cntClosed} cerrada${cntClosed > 1 ? "s" : ""}`);
+    if (cntDup) dropBits.push(`${cntDup} repetida${cntDup > 1 ? "s" : ""}`);
+    const dropSummary = dropBits.join(" · ");
 
     // DAILY CAP GATE — two layers of green-zone protection:
     //   1) PER-PORTAL: LinkedIn/Indeed 15, LaPieza/OCC/CT/Bumeran 20
@@ -7133,19 +7133,11 @@
 
     if (dailyRemaining === 0) {
       // Distinguish WHICH cap was hit so the user gets the right message.
-      if (perPortalRemaining === 0) {
-        toast(
-          `Llegaste al cap diario seguro en este portal (${dailyCap}). Vuelve mañana para no arriesgar tu cuenta.`,
-          "info",
-          { durationMs: 9000 }
-        );
-      } else {
-        toast(
-          `Llegaste al cap diario seguro entre todos los portales (${totalCap}). Vuelve mañana — protege tu cuenta de detección de bot.`,
-          "info",
-          { durationMs: 9000 }
-        );
-      }
+      const capMsg = perPortalRemaining === 0
+        ? `Llegaste al cap diario seguro en este portal (${dailyCap}). Vuelve mañana para no arriesgar tu cuenta.`
+        : `Llegaste al cap diario seguro entre todos los portales (${totalCap}). Vuelve mañana — protege tu cuenta de detección de bot.`;
+      renderBulkNote(`🛡️ <strong>Auto-postular en pausa.</strong> ${escapeHtml(capMsg)}`);
+      toast(capMsg, "info", { durationMs: 9000 });
       return;
     }
 
@@ -7165,14 +7157,12 @@
     }
 
     if (!topN.length) {
-      const msg = skipped > 0
-        ? `Todas las del top ya están postuladas (${skipped} vacantes). Espera el siguiente scan o amplía búsqueda.`
-        : "No hay vacantes para postular.";
-      toast(msg, "info", { durationMs: 5000 });
+      const why = dropSummary
+        ? `Del top que revisé: <strong>${escapeHtml(dropSummary)}</strong> — no quedó ninguna nueva.`
+        : "No hay vacantes nuevas en esta página.";
+      renderBulkNote(`<strong>No abrí ninguna pestaña.</strong> ${why}<br>Amplía la búsqueda (botón de filtros) o espera el próximo scan.`);
+      toast("No hay vacantes nuevas para postular — el porqué está en el panel.", "info", { durationMs: 5000 });
       return;
-    }
-    if (skipped > 0) {
-      toast(`Saltando ${skipped} ya postuladas, abriendo las siguientes ${topN.length}.`, "info", { durationMs: 4000 });
     }
 
     // Pre-flight: refuse to open N background tabs if the user already
@@ -7229,7 +7219,7 @@
     // status of each vacancy in the bulk run without leaving this tab.
     // Persists across the stagger loop AND across the open tabs by
     // listening on chrome.storage.session for per-tab status updates.
-    const progressHost = renderBulkProgressCard(topN);
+    const progressHost = renderBulkProgressCard(topN, dropSummary);
 
     bulkBtn.disabled = true;
     const original = bulkBtn.innerHTML;
@@ -7302,16 +7292,35 @@
   // Render the inline progress card under the bulk buttons. Returns the
   // host element so subsequent updateBulkProgressItem calls can patch
   // individual rows without re-rendering the whole thing.
-  function renderBulkProgressCard(topN) {
+  // Persistent note card (no auto-dismiss) for "porqué" messages — e.g.
+  // bulk opened nothing, or hit a daily cap. Toasts vanish before the user
+  // reads them; this stays until the next render/action.
+  function renderBulkNote(html) {
+    try { matchesPanelEl?.querySelector("[data-eamx-bulk-progress]")?.remove(); } catch (_) {}
+    const host = document.createElement("div");
+    host.className = "eamx-bulk-progress eamx-bulk-note";
+    host.setAttribute("data-eamx-bulk-progress", "");
+    host.innerHTML = `<div class="eamx-bulk-note__body">${html}</div>`;
+    const content = matchesPanelEl?.querySelector("[data-eamx-matches-content]");
+    if (content && content.parentElement) content.parentElement.insertBefore(host, content);
+    else if (matchesPanelEl) matchesPanelEl.appendChild(host);
+    return host;
+  }
+
+  function renderBulkProgressCard(topN, dropSummary) {
     // Remove any prior card (if user clicked bulk twice).
     try { matchesPanelEl?.querySelector("[data-eamx-bulk-progress]")?.remove(); } catch (_) {}
     const host = document.createElement("div");
     host.className = "eamx-bulk-progress";
     host.setAttribute("data-eamx-bulk-progress", "");
+    const droppedLine = dropSummary
+      ? `<span class="eamx-bulk-progress__dropped">Saltadas del top: ${escapeHtml(dropSummary)}</span>`
+      : "";
     host.innerHTML = `
       <div class="eamx-bulk-progress__head">
-        <span class="eamx-bulk-progress__title">⚡ Postulando ${topN.length} vacantes</span>
+        <span class="eamx-bulk-progress__title">⚡ Postulando ${topN.length} vacante${topN.length > 1 ? "s" : ""}</span>
         <span class="eamx-bulk-progress__hint">Cada una abre en su pestaña — dale "Ver" para revisar y Finalizar</span>
+        ${droppedLine}
       </div>
       <ul class="eamx-bulk-progress__list">
         ${topN.map((m, i) => `
