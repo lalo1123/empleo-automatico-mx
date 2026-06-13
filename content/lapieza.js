@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-11-import-postulaciones";
+  const EAMX_LAPIEZA_VERSION = "2026-06-12-canonical-keys";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -3339,8 +3339,10 @@
         // Saved ("Guardadas") and invitation cards lack an applied-status
         // chip — only import genuine applications.
         if (!title || !IMPORT_STATUS_RX.test(status)) continue;
-        const key = (title + "|" + company).toLowerCase().replace(/\s+/g, " ").trim();
-        if (importedKeysThisPage.has(key)) continue;
+        const key = (typeof queueModule.postingKey === "function")
+          ? queueModule.postingKey(title, company)
+          : (title + "|" + company).toLowerCase().replace(/\s+/g, " ").trim();
+        if (!key || importedKeysThisPage.has(key)) continue;
         importedKeysThisPage.add(key);
         const OLD_TS = Date.now() - 7 * 24 * 60 * 60 * 1000;
         await queueModule.upsertApplied({
@@ -6018,9 +6020,14 @@
     if (queueModule && typeof queueModule.appliedPostingKeysForSource === "function") {
       try { appliedKeys = await queueModule.appliedPostingKeysForSource(SOURCE); } catch (_) {}
     }
+    // Canonical key via queue.js postingKey (accent/dash/punct-insensitive
+    // — the en-dash vs hyphen mismatch let Creditas survive the filter).
+    // appliedKeys come from the same module, so when it's unavailable the
+    // filter is a no-op anyway.
     const postingKeyOf = (m) =>
-      ((((m && m.jobLite && m.jobLite.title) || "") + "|" + ((m && m.jobLite && m.jobLite.company) || ""))
-        .toLowerCase().replace(/\s+/g, " ").trim());
+      (queueModule && typeof queueModule.postingKey === "function")
+        ? queueModule.postingKey(m && m.jobLite && m.jobLite.title, m && m.jobLite && m.jobLite.company)
+        : "";
     const isAppliedMatch = (m) =>
       !!(m && m.jobLite) &&
       (m.appliedFromCard === true ||
@@ -7038,11 +7045,13 @@
       // Closed-on-page memory filter
       .filter((m) => !closedIds.has(String(m.jobLite.id)))
       // Duplicate-posting collapse + applied-by-title filter (re-posted
-      // ids of jobs the user already applied to share the same key).
+      // ids of jobs the user already applied to share the same canonical
+      // key — accent/dash-insensitive via queue.js postingKey).
       .filter((m) => {
-        const key = (((m.jobLite.title || "") + "|" + (m.jobLite.company || ""))
-          .toLowerCase().replace(/\s+/g, " ").trim());
-        if (key === "|" || key === "") return true; // can't key it — keep
+        const key = (queueModule && typeof queueModule.postingKey === "function")
+          ? queueModule.postingKey(m.jobLite.title, m.jobLite.company)
+          : "";
+        if (!key) return true; // can't key it — keep
         if (appliedKeys.has(key)) return false;
         if (seenPosting.has(key)) return false;
         seenPosting.add(key);
