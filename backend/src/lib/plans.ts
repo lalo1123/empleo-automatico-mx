@@ -48,12 +48,17 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
   premium: {
     id: "premium",
     name: "Premium",
-    monthlyLimit: 500,    // Spec says "unlimited", protected by soft cap.
-    softCap: 500,
-    // 30/día × 30 días = 900 absolute max, but the monthly soft cap of
-    // 500 binds first. The daily cap stops same-day bursts (e.g. user
-    // running 200 postulaciones in 2h) that would slam the Gemini budget.
-    dailyLimit: 30,
+    // TRULY unlimited monthly (matches the "ilimitado" we sell on the web
+    // + the extension). The honest, marketable brake is the DAILY cap of
+    // 30 — positioned as account protection (anti-ban), our key
+    // differentiator vs AIApply/LazyApply. 30/día naturally bounds cost
+    // (~600-900/mo worst case; Gemini is cheap) without a hidden monthly
+    // ceiling that breaks the "ilimitado" promise. Power users who want
+    // more are monetized via "créditos extra", not a silent cutoff.
+    monthlyLimit: -1,
+    softCap: -1,          // Not enforced anywhere; -1 = no backstop.
+    dailyLimit: 30,       // The real, disclosed limit. Protects the user's
+                          // account from bot-detection AND caps Gemini spend.
     priceMxn: { monthly: 499, yearly: 4990 }
   }
 };
