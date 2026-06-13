@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-12-canonical-keys";
+  const EAMX_LAPIEZA_VERSION = "2026-06-12-import-all-stages";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -3320,7 +3320,15 @@
   // title. A MutationObserver keeps importing as LaPieza lazy-renders
   // more cards while the user scrolls. Backdated appliedAt so imports
   // never eat today's anti-ban caps.
-  const IMPORT_STATUS_RX = /enviada|vista|en\s+proceso|rechazad|contratad|finalist/i;
+  // Cards we must NOT import: the "Guardadas" (saved) and "Invitaciones"
+  // tabs reuse the same card markup. Saved cards have no status chip;
+  // invitation chips say "Invitación". Everything else under
+  // .user-vacancies-list while the Postulaciones tab is active IS an
+  // application — its chip is just the STAGE (Enviada / Vista / En
+  // revisión / Rechazada / Descartada / Contratada / Finalista / …), and
+  // hard-coding that list is what let Creditas slip through. So: import
+  // ANY card that has a vacancy title + company + a non-invitation chip.
+  const IMPORT_SKIP_RX = /invitaci|guardad/i;
   let importObserver = null;
   let importedKeysThisPage = new Set();
   async function importLaPiezaApplicationsOnce() {
@@ -3336,9 +3344,11 @@
         const title = (card.querySelector(".vacancy-title")?.textContent || "").trim();
         const company = (card.querySelector(".vacancy-company")?.textContent || "").trim();
         const status = (card.querySelector(".MuiChip-label")?.textContent || "").trim();
-        // Saved ("Guardadas") and invitation cards lack an applied-status
-        // chip — only import genuine applications.
-        if (!title || !IMPORT_STATUS_RX.test(status)) continue;
+        // Real application = has a title/company AND a status chip that
+        // isn't an invitation marker. (Saved cards have no chip → status
+        // is "" → skipped by the !status guard below.)
+        if (!title || !company) continue;
+        if (!status || IMPORT_SKIP_RX.test(status)) continue;
         const key = (typeof queueModule.postingKey === "function")
           ? queueModule.postingKey(title, company)
           : (title + "|" + company).toLowerCase().replace(/\s+/g, " ").trim();
