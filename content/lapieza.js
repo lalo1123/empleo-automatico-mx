@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-12-stats-aligned";
+  const EAMX_LAPIEZA_VERSION = "2026-06-12-detect-ya-postulado";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -3016,7 +3016,13 @@
   // enviada", short badges like "POSTULADO" / "APLICADO".
   function detectAlreadyAppliedState() {
     const PHRASE_RX = [
-      /\bya\s+(?:te\s+)?(?:postulaste|aplicaste|postulado)\b/i,
+      // LaPieza's real phrase is "Ya te HAS postulado" — the optional
+      // "has" (and "te") between "ya" and the verb is what made the old
+      // regex miss it, so the chain hunted for the apply button and
+      // toasted "No encontré el botón Postularme" on an already-applied
+      // vacancy. Now matches: ya postulaste / ya te postulaste / ya te
+      // has postulado / ya has aplicado / ya aplicado, etc.
+      /\bya\s+(?:te\s+)?(?:has\s+)?(?:postulaste|aplicaste|postulad[oa]|aplicad[oa])\b/i,
       /\bpostulaci[oó]n\s+enviada\b/i,
       /\baplicaci[oó]n\s+enviada\b/i,
       /\bya\s+postulado\s+(?:a|para)\s+esta\b/i,
