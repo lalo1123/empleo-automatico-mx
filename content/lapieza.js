@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-12-mark-label-clear";
+  const EAMX_LAPIEZA_VERSION = "2026-06-12-list-dominant";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -6484,29 +6484,37 @@
       </div>
     `;
 
+    // Footer = ONE button by default. Everything else (cantidad, seguridad,
+    // marcar, leyenda) vive colapsado en un <details> para que la LISTA de
+    // vacantes ocupe la pantalla — antes el footer la aplastaba a 0px.
     return `
-      ${safetyPill}
-      <div class="eamx-bulk__selector" role="group" aria-label="Cantidad a postular">
-        <span class="eamx-bulk__selector-label">Cantidad</span>
-        <div class="eamx-bulk__chips">${chipBtns}${moreChip}</div>
-        <span class="eamx-bulk__selector-plan">${escapeHtml(planNoun)}</span>
-      </div>
       <button type="button" class="eamx-matches-panel__bulk-btn eamx-matches-panel__bulk-btn--primary" data-action="bulk-apply-top">
         <span class="eamx-bulk-btn__icon" aria-hidden="true">⚡</span>
         <span class="eamx-bulk-btn__label">Auto-postular top <span data-bulk-count>${activeN}</span></span>
         <span class="eamx-bulk-btn__hint">(sin sacarte de aquí)</span>
       </button>
-      <button type="button" class="eamx-matches-panel__bulk-btn eamx-matches-panel__bulk-btn--ghost" data-action="mark-top-5">
-        <span class="eamx-bulk-btn__icon" aria-hidden="true">⭐</span>
-        <span class="eamx-bulk-btn__label">Solo marcar top <span data-bulk-count>${activeN}</span> en mi cola</span>
-      </button>
-      <details class="eamx-bulk-legend-details">
-        <summary class="eamx-bulk-legend-summary"><span aria-hidden="true">ℹ️</span> Cómo funciona y seguridad</summary>
-        <div class="eamx-bulk-legend" aria-label="Cómo funciona">
-          <div class="eamx-bulk-legend__row"><span aria-hidden="true">⚡</span><span><strong>Auto-postular</strong> llena y <strong>envía solo</strong> — postulaciones reales, con 5&nbsp;s para cancelar (Esc).</span></div>
-          <div class="eamx-bulk-legend__row"><span aria-hidden="true">⭐</span><span><strong>Marcar</strong> no envía nada: las guarda para que las revises tú.</span></div>
-          <div class="eamx-bulk-legend__row"><span aria-hidden="true">⏭️</span><span>Las ya postuladas, cerradas o con datos que te faltan <strong>se saltan solas</strong>.</span></div>
-          <div class="eamx-bulk-legend__row"><span aria-hidden="true">🔄</span><span>¿Postulaste fuera de la extensión? <a href="https://lapieza.io/profile" target="_blank" rel="noopener" class="eamx-bulk-legend__link">Abre Mis vacantes</a> y las sincronizo solo.</span></div>
+      <details class="eamx-bulk-more">
+        <summary class="eamx-bulk-more__summary">
+          <span><span aria-hidden="true">⚙️</span> Cantidad · seguridad · solo marcar</span>
+          <span class="eamx-bulk-more__daily">${dailyCount}/${dailyCap} hoy</span>
+        </summary>
+        <div class="eamx-bulk-more__body">
+          <div class="eamx-bulk__selector" role="group" aria-label="Cantidad a postular">
+            <span class="eamx-bulk__selector-label">Cantidad</span>
+            <div class="eamx-bulk__chips">${chipBtns}${moreChip}</div>
+            <span class="eamx-bulk__selector-plan">${escapeHtml(planNoun)}</span>
+          </div>
+          ${safetyPill}
+          <button type="button" class="eamx-matches-panel__bulk-btn eamx-matches-panel__bulk-btn--ghost" data-action="mark-top-5">
+            <span class="eamx-bulk-btn__icon" aria-hidden="true">⭐</span>
+            <span class="eamx-bulk-btn__label">Solo marcar top <span data-bulk-count>${activeN}</span> en mi cola</span>
+          </button>
+          <div class="eamx-bulk-legend" aria-label="Cómo funciona">
+            <div class="eamx-bulk-legend__row"><span aria-hidden="true">⚡</span><span><strong>Auto-postular</strong> llena y <strong>envía solo</strong> — postulaciones reales, con 5&nbsp;s para cancelar (Esc).</span></div>
+            <div class="eamx-bulk-legend__row"><span aria-hidden="true">⭐</span><span><strong>Marcar</strong> no envía nada: las guarda para que las revises tú.</span></div>
+            <div class="eamx-bulk-legend__row"><span aria-hidden="true">⏭️</span><span>Las ya postuladas, cerradas o con datos que te faltan <strong>se saltan solas</strong>.</span></div>
+            <div class="eamx-bulk-legend__row"><span aria-hidden="true">🔄</span><span>¿Postulaste fuera de la extensión? <a href="https://lapieza.io/profile" target="_blank" rel="noopener" class="eamx-bulk-legend__link">Abre Mis vacantes</a> y las sincronizo solo.</span></div>
+          </div>
         </div>
       </details>
     `;

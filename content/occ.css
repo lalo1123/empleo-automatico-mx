@@ -3203,31 +3203,46 @@
   .eamx-matches-list-head__hint { animation: none; opacity: 0.9; }
 }
 
-/* Collapsed legend — keeps the footer short so the vacancy list dominates. */
-.eamx-bulk-legend-details {
+/* Collapsed "more" block — the footer shows only the primary Auto-postular
+   button by default; cantidad + seguridad + marcar + leyenda live here so
+   the vacancy list dominates the panel instead of being crushed to 0px. */
+.eamx-bulk-more {
   margin: 8px 2px 0 2px;
 }
-.eamx-bulk-legend-summary {
+.eamx-bulk-more__summary {
   list-style: none;
   cursor: pointer;
   font: 600 11.5px/1 inherit;
   color: #9fb3bf;
-  padding: 4px 0;
-  display: inline-flex;
+  padding: 7px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  display: flex;
   align-items: center;
-  gap: 6px;
+  justify-content: space-between;
+  gap: 8px;
   user-select: none;
 }
-.eamx-bulk-legend-summary::-webkit-details-marker { display: none; }
-.eamx-bulk-legend-summary::after {
-  content: "▾";
-  font-size: 10px;
-  transition: transform 160ms ease;
+.eamx-bulk-more__summary::-webkit-details-marker { display: none; }
+.eamx-bulk-more__summary > span:first-child::after {
+  content: " ▾";
+  font-size: 9px;
+  color: #6f8896;
 }
-.eamx-bulk-legend-details[open] .eamx-bulk-legend-summary::after {
-  transform: rotate(180deg);
+.eamx-bulk-more[open] .eamx-bulk-more__summary > span:first-child::after {
+  content: " ▴";
 }
-.eamx-bulk-legend-summary:hover { color: #cbd5e1; }
+.eamx-bulk-more__summary:hover { color: #cbd5e1; border-color: rgba(255,255,255,0.16); }
+.eamx-bulk-more__daily {
+  flex: none;
+  font: 700 11px/1 inherit;
+  color: #8fb0ba;
+  font-variant-numeric: tabular-nums;
+}
+.eamx-bulk-more__body {
+  padding-top: 4px;
+}
 
 /* Stats strip at the top of the matches list — Mejor / Promedio / Vistas.
    Three equal-width cells, monospace digits for alignment, color-coded
@@ -3248,8 +3263,9 @@
    four cells don't push the panel content below the fold. */
 .eamx-matches-panel__stats--four {
   grid-template-columns: 1fr 1fr 1fr 1fr;
-  padding: 10px 8px;
+  padding: 8px 8px;
   gap: 4px;
+  margin: 0 4px 10px 4px;
 }
 
 .eamx-matches-panel__stat {
@@ -3956,9 +3972,9 @@
    (Windows color bg). Hierarchy from typography only: hero number
    + eyebrow label + plan badge + 4px progress track. */
 .eamx-usage {
-  margin: 0 22px 14px;
-  padding: 16px 18px;
-  border-radius: 14px;
+  margin: 0 22px 10px;
+  padding: 10px 14px;
+  border-radius: 12px;
   font-family: inherit;
   display: block;
   width: calc(100% - 44px);
@@ -3992,12 +4008,12 @@ button.eamx-usage:hover {
   min-width: 0;
 }
 .eamx-usage__eyebrow {
-  font-size: 10.5px;
+  font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: rgba(226, 232, 240, 0.5);
-  margin-bottom: 6px;
+  margin-bottom: 2px;
 }
 .eamx-usage__hero {
   display: flex;
@@ -4006,7 +4022,7 @@ button.eamx-usage:hover {
   line-height: 1;
 }
 .eamx-usage__num {
-  font-size: 28px;
+  font-size: 20px;
   font-weight: 700;
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
