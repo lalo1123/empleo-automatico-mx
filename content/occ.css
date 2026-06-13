@@ -3143,13 +3143,85 @@
 /* Bulk action footer --------------------------------------------------- */
 
 .eamx-matches-panel__bulk {
+  position: relative;
   flex-shrink: 0;
-  padding: 14px 22px 18px 22px;
+  padding: 12px 22px 14px 22px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(0, 0, 0, 0.18);
+  background: rgba(0, 0, 0, 0.22);
+}
+
+/* Scroll affordance: a fade rising from the pinned footer signals the
+   match list continues underneath it — so the user knows to scroll.
+   User: "¿cómo sabe que se puede bajar?" */
+.eamx-matches-panel__bulk::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -26px;
+  height: 26px;
+  background: linear-gradient(to top, var(--eamx-c-brand-900), transparent);
+  pointer-events: none;
 }
 
 .eamx-matches-panel__bulk[hidden] { display: none; }
+
+/* List header — makes "Mejores matches" actually look like a scrollable
+   list of vacancies (the star), with an explicit "desliza ↓" cue. */
+.eamx-matches-list-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 2px 4px 8px 4px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.eamx-matches-list-head__title {
+  font: 800 13px/1 inherit;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #ffffff;
+}
+.eamx-matches-list-head__hint {
+  font: 700 11.5px/1 inherit;
+  color: #70d1c6;
+  white-space: nowrap;
+  animation: eamxScrollHintPulse 2.2s ease-in-out infinite;
+}
+@keyframes eamxScrollHintPulse {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .eamx-matches-list-head__hint { animation: none; opacity: 0.9; }
+}
+
+/* Collapsed legend — keeps the footer short so the vacancy list dominates. */
+.eamx-bulk-legend-details {
+  margin: 8px 2px 0 2px;
+}
+.eamx-bulk-legend-summary {
+  list-style: none;
+  cursor: pointer;
+  font: 600 11.5px/1 inherit;
+  color: #9fb3bf;
+  padding: 4px 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  user-select: none;
+}
+.eamx-bulk-legend-summary::-webkit-details-marker { display: none; }
+.eamx-bulk-legend-summary::after {
+  content: "▾";
+  font-size: 10px;
+  transition: transform 160ms ease;
+}
+.eamx-bulk-legend-details[open] .eamx-bulk-legend-summary::after {
+  transform: rotate(180deg);
+}
+.eamx-bulk-legend-summary:hover { color: #cbd5e1; }
 
 /* Stats strip at the top of the matches list — Mejor / Promedio / Vistas.
    Three equal-width cells, monospace digits for alignment, color-coded
@@ -3458,6 +3530,21 @@
   box-shadow: 0 2px 8px rgba(15, 29, 44, 0.4);
 }
 
+/* Ghost variant — the "Solo marcar" secondary, slimmer + quieter so it
+   doesn't add bulk to the footer or compete with Auto-postular. */
+.eamx-matches-panel__bulk-btn--ghost {
+  margin-top: 6px;
+  padding: 8px 14px;
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.03);
+  color: #cbd5e1;
+  font: 600 12px/1 inherit;
+}
+.eamx-matches-panel__bulk-btn--ghost:hover {
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: none;
+}
+
 .eamx-matches-panel__bulk-btn:hover {
   transform: translateY(-1px);
   box-shadow: 0 6px 16px rgba(15, 29, 44, 0.5);
@@ -3498,7 +3585,7 @@
 /* Compact 3-row legend (2026-06-10) — replaces the wall-of-text hint.
    Each row: icon column + one short sentence. Scans in 3 seconds. */
 .eamx-bulk-legend {
-  margin: 10px 2px 0 2px;
+  margin: 8px 0 2px 0;
   display: flex;
   flex-direction: column;
   gap: 6px;

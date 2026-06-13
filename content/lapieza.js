@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-12-import-all-stages";
+  const EAMX_LAPIEZA_VERSION = "2026-06-12-matches-first";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -6242,7 +6242,17 @@
            <div class="eamx-matches-list-loader__hint">La lista se irá ampliando sola conforme aparezcan más matches.</div>
          </div>`
       : "";
-    host.innerHTML = `${usagePill}${stats}${top1Banner}${lowFitNote}<ol class="eamx-matches-list">${list}</ol>${appliedSection}${footer}${scanRunningFooter}`;
+    // The vacancy list is the STAR of this panel ("Mejores matches") — make
+    // it obvious there's a scrollable list, not just plan + autopostular.
+    // User: "¿cómo sabe que se puede bajar?" (= scroll). The top-1 banner is
+    // dropped (it duplicated list item #1) to surface real matches faster.
+    const listHead = topN.length
+      ? `<div class="eamx-matches-list-head">
+           <span class="eamx-matches-list-head__title"><span aria-hidden="true">⚡</span> Vacantes para ti</span>
+           <span class="eamx-matches-list-head__hint">${topN.length} · desliza&nbsp;↓</span>
+         </div>`
+      : "";
+    host.innerHTML = `${usagePill}${stats}${lowFitNote}${listHead}<ol class="eamx-matches-list">${list}</ol>${appliedSection}${footer}${scanRunningFooter}`;
 
     // Regenerate the bulk section with plan-aware chips. The static
     // markup baked into the panel root only knows "top 5"; here we
@@ -6486,16 +6496,19 @@
         <span class="eamx-bulk-btn__label">Auto-postular top <span data-bulk-count>${activeN}</span></span>
         <span class="eamx-bulk-btn__hint">(sin sacarte de aquí)</span>
       </button>
-      <button type="button" class="eamx-matches-panel__bulk-btn" data-action="mark-top-5">
+      <button type="button" class="eamx-matches-panel__bulk-btn eamx-matches-panel__bulk-btn--ghost" data-action="mark-top-5">
         <span class="eamx-bulk-btn__icon" aria-hidden="true">⭐</span>
         <span class="eamx-bulk-btn__label">Solo marcar top <span data-bulk-count>${activeN}</span> en mi cola</span>
       </button>
-      <div class="eamx-bulk-legend" aria-label="Cómo funciona">
-        <div class="eamx-bulk-legend__row"><span aria-hidden="true">⚡</span><span><strong>Auto-postular</strong> llena y <strong>envía solo</strong> — postulaciones reales, con 5&nbsp;s para cancelar (Esc).</span></div>
-        <div class="eamx-bulk-legend__row"><span aria-hidden="true">⭐</span><span><strong>Marcar</strong> no envía nada: las guarda para que las revises tú.</span></div>
-        <div class="eamx-bulk-legend__row"><span aria-hidden="true">⏭️</span><span>Las ya postuladas, cerradas o con datos que te faltan <strong>se saltan solas</strong>.</span></div>
-        <div class="eamx-bulk-legend__row"><span aria-hidden="true">🔄</span><span>¿Postulaste fuera de la extensión? <a href="https://lapieza.io/profile" target="_blank" rel="noopener" class="eamx-bulk-legend__link">Abre Mis vacantes</a> y las sincronizo solo.</span></div>
-      </div>
+      <details class="eamx-bulk-legend-details">
+        <summary class="eamx-bulk-legend-summary"><span aria-hidden="true">ℹ️</span> Cómo funciona y seguridad</summary>
+        <div class="eamx-bulk-legend" aria-label="Cómo funciona">
+          <div class="eamx-bulk-legend__row"><span aria-hidden="true">⚡</span><span><strong>Auto-postular</strong> llena y <strong>envía solo</strong> — postulaciones reales, con 5&nbsp;s para cancelar (Esc).</span></div>
+          <div class="eamx-bulk-legend__row"><span aria-hidden="true">⭐</span><span><strong>Marcar</strong> no envía nada: las guarda para que las revises tú.</span></div>
+          <div class="eamx-bulk-legend__row"><span aria-hidden="true">⏭️</span><span>Las ya postuladas, cerradas o con datos que te faltan <strong>se saltan solas</strong>.</span></div>
+          <div class="eamx-bulk-legend__row"><span aria-hidden="true">🔄</span><span>¿Postulaste fuera de la extensión? <a href="https://lapieza.io/profile" target="_blank" rel="noopener" class="eamx-bulk-legend__link">Abre Mis vacantes</a> y las sincronizo solo.</span></div>
+        </div>
+      </details>
     `;
   }
 
