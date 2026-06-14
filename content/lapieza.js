@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-13-panel-autorefresh-aplicadas";
+  const EAMX_LAPIEZA_VERSION = "2026-06-13-panel-suelta-cerradas";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -1696,15 +1696,36 @@
         if (applyPageHasAnyFormElement()) { foundForm = true; break; }
         // Mid-poll, re-check the terminal-state detectors in case the
         // closed/applied banner painted later than the 600ms warmup.
+        // PERSIST here too (mirrors the warmup siblings at ~1648/1673) —
+        // a banner that paints late is just as terminal, and without the
+        // persist the vacancy never enters the applied queue / closed-ids,
+        // so the matches panel keeps re-offering it in the top.
         if (detectAlreadyAppliedState()) {
           reportBulkStatus("already_applied");
           quickApplyAborted = true;
+          try {
+            const id = idFromUrl(location.href);
+            if (id && queueModule && queueModule.upsertApplied) {
+              await queueModule.upsertApplied({
+                id,
+                source: SOURCE,
+                url: location.href,
+                title: (lastJob && lastJob.title) || "",
+                company: (lastJob && lastJob.company) || "",
+                location: (lastJob && lastJob.location) || "",
+                savedAt: Date.now(),
+                matchScore: 0,
+                reasons: ["Detectada como ya postulada (banner tardío)"]
+              });
+            }
+          } catch (_) {}
           clearBulkModeFlag();
           return;
         }
         if (detectVacancyClosedState()) {
           reportBulkStatus("closed");
           quickApplyAborted = true;
+          try { await markVacancyClosed((lastJob && lastJob.id) || idFromUrl(location.href)); } catch (_) {}
           clearBulkModeFlag();
           return;
         }
@@ -3437,6 +3458,31 @@
     } catch (_) { /* best-effort */ }
   }
 
+  // PASSIVE "cerrada" memory — twin of maybePersistAlreadyApplied. Fired on
+  // every /vacante visit. If the page shows a terminal CLOSED/expired state
+  // (CERRADA badge, "la empresa ha finalizado el proceso de reclutamiento",
+  // etc.) we remember the id so the matches panel + bulk NEVER offer it
+  // again — even if the user only VIEWED the vacancy and never ran the
+  // chain. Before this, closed state was persisted ONLY when the apply
+  // chain ran, so a closed posting the user just browsed kept ranking in
+  // the top (live: Prismatic "Digital Marketing Specialist", 382 días,
+  // CERRADA — "esa ni debería de salir porque está cerrada"). No chain, no
+  // quota, no flags needed.
+  let closedPersistedFor = "";
+  async function maybePersistClosed() {
+    try {
+      if (!detectVacancyClosedState()) return;
+      const id = idFromUrl(location.href);
+      if (!id || closedPersistedFor === id) return;
+      closedPersistedFor = id;
+      // markVacancyClosed writes to CLOSED_IDS_KEY, which the matches panel
+      // both reads (render closed-drop) and listens to (auto-refresh) — so
+      // the open panel sheds this vacancy on its own once we persist.
+      await markVacancyClosed(id);
+      console.log("[EmpleoAutomatico] passive closed-memory persisted:", id);
+    } catch (_) { /* best-effort */ }
+  }
+
   async function runVacancyAutoChain() {
     // Early CV check — fail FAST and visibly before the 3s countdown
     // gives users false confidence that the chain is running. Without
@@ -3562,7 +3608,28 @@
 
     const applyBtn = findLaPiezaApplyCTA();
     if (!applyBtn) {
-      toast("No encontré el botón Postularme. Dale clic tú.", "info");
+      // A MISSING apply CTA is very often a closed/expired posting whose
+      // terminal-state banner our detector didn't match (LaPieza removes the
+      // "Postularme" button on dead vacancies). Re-check closed state here:
+      // if it IS closed, remember it so the panel/bulk stop offering it —
+      // but ONLY persist when detectVacancyClosedState() confirms, so a
+      // transient load failure never permanently blacklists a live vacancy.
+      let closedNow = false;
+      try { closedNow = detectVacancyClosedState(); } catch (_) {}
+      if (closedNow) {
+        try { await markVacancyClosed(idFromUrl(location.href)); } catch (_) {}
+        toast("Esta vacante está cerrada — no se puede postular.", "info", { durationMs: 5000 });
+      } else {
+        toast("No encontré el botón Postularme. Dale clic tú.", "info");
+      }
+      // Unstick the parent bulk row either way — without a status report it
+      // spun on "Postulando…" forever (live: rows that hit this branch).
+      try {
+        if (await readBulkModeFlag()) {
+          reportBulkStatus(closedNow ? "closed" : "no_form");
+          clearBulkModeFlag();
+        }
+      } catch (_) {}
       try {
         if (quickApplyEscHandler) document.removeEventListener("keydown", quickApplyEscHandler, true);
       } catch (_) {}
@@ -5052,7 +5119,17 @@
       if (chrome?.storage?.onChanged) {
         matchesQueueListener = (changes, area) => {
           if (area !== "local") return;
-          if (changes && changes["eamx:queue"]) {
+          if (!changes) return;
+          const queueChanged = !!changes["eamx:queue"];
+          // Closed-vacancy memory lives under its OWN key (CLOSED_IDS_KEY =
+          // "eamx:lapieza:closed-ids"), NOT eamx:queue. When the chain detects
+          // a vacancy CERRADA on open it writes there via markVacancyClosed —
+          // watch it too so the panel auto-drops closed vacancies the same way
+          // it auto-drops applied ones. (Without this, closing a vacancy
+          // wouldn't refresh the panel even though the render now honors
+          // closedIds.)
+          const closedChanged = !!changes[CLOSED_IDS_KEY];
+          if (queueChanged) {
             // 1) Mark buttons (per-card "✓ Marcada" badges).
             repaintMarkButtons();
             // 2) Re-render the safety pill + chip selector so the
@@ -5061,13 +5138,14 @@
             //    Without this, the pill stays stuck at the value it
             //    had when the panel first opened.
             try { refreshBulkSafety(); } catch (_) {}
-            // 3) Re-run the applied/top split so a vacancy that just
-            //    became "ya postulada" (chain detected it on open, the
-            //    user marked it, the importer synced it, or another tab
-            //    applied) DROPS OUT of the top list on its own. This is
-            //    the fix for "se autopostula… carga y ya sale ya
-            //    postulado después, pero sigue en el top": the per-vacancy
-            //    detection now works, but nothing re-split the panel.
+          }
+          if (queueChanged || closedChanged) {
+            // 3) Re-run the applied/closed/top split so a vacancy that just
+            //    became "ya postulada" OR "cerrada" (chain detected it on
+            //    open, the user marked it, the importer synced it, or another
+            //    tab) DROPS OUT of the top list on its own. Fixes both
+            //    "se autopostula… carga y ya sale ya postulado pero sigue en
+            //    el top" AND "esa ni debería de salir porque está cerrada".
             //    Debounced + scroll-preserving (see scheduleMatchesRerender).
             scheduleMatchesRerender();
           }
@@ -6059,8 +6137,41 @@
     // we reuse the cached pool (whose frozen appliedFromCard predates the
     // application). User ask: "de la página no de la extensión… que detecte
     // los postulados".
-    const closedDropped = scored.filter((m) => m.closedFromCard).length;
-    scored = scored.filter((m) => !m.closedFromCard);
+    // Closed/expired vacancies — dropped entirely (can never be applied to,
+    // so they never even get a section — user: "esa ni debería de salir
+    // porque está cerrada").
+    //   PAGE-FIRST: the listing card's own "CERRADA" marker (closedFromCard).
+    //   PERSISTED FALLBACK: closedIds remembers postings the chain detected as
+    //     CERRADA on a PREVIOUS open (live: Prismatic "Digital Marketing
+    //     Specialist", 382 días, "la empresa ha finalizado el proceso de
+    //     reclutamiento"). The listing card does NOT paint CERRADA, so without
+    //     consulting closedIds here the panel kept offering it in the top even
+    //     though the bulk filter (onMatchesBulkApplyTop) already skipped it —
+    //     exactly the asymmetry the user hit. This mirrors how the applied
+    //     split below consults the persisted appliedIds/appliedKeys.
+    let closedIds = new Set();
+    try { closedIds = await getClosedIdSet(); } catch (_) {}
+    const isClosedMatch = (m) =>
+      !!(m && (m.closedFromCard === true ||
+        (m.jobLite && closedIds.has(String(m.jobLite.id || "")))));
+    // PERSIST listing-card CLOSED detections into closedIds (durable memory),
+    // mirroring autoMarkApplied for applied. Without this, a closed vacancy
+    // detected only via the card badge is forgotten the instant LaPieza re-
+    // posts it under a new id or drops the badge → it climbs back into the
+    // top. Only NEW ones (id not already in closedIds) to stay idempotent and
+    // avoid needless writes that would re-trigger the panel's onChanged
+    // re-render (the !closedIds.has guard makes the loop converge after one
+    // cycle, exactly like autoMarkApplied). Fire-and-forget.
+    const autoMarkClosed = scored.filter((m) =>
+      m.closedFromCard && m.jobLite && m.jobLite.id &&
+      !closedIds.has(String(m.jobLite.id)));
+    if (autoMarkClosed.length) {
+      Promise.all(autoMarkClosed.map((m) =>
+        markVacancyClosed(String(m.jobLite.id)).catch(() => {})
+      )).catch(() => {});
+    }
+    const closedDropped = scored.filter(isClosedMatch).length;
+    scored = scored.filter((m) => !isClosedMatch(m));
 
     // Applied IDs from the queue (persisted page-detections + chain
     // applications). Fetched here so the active/applied split can use it.
@@ -10140,6 +10251,14 @@
           // the Marcar buttons so they reflect the new state.
           scheduleListingScan(50);
         }
+        if (changes[CLOSED_IDS_KEY]) {
+          // A vacancy was just remembered as CERRADA (chain or the passive
+          // visit detector, possibly in another tab). Re-scan listing cards
+          // so their overlays reflect the closed state. The matches panel,
+          // if open, is independently covered by matchesQueueListener which
+          // also watches this key.
+          scheduleListingScan(50);
+        }
       });
     } catch (_) { /* ignore */ }
   }
@@ -10668,6 +10787,12 @@
         // Live case: Creditas kept re-entering the top because the only
         // persist path required the chain to run.
         setTimeout(() => { try { maybePersistAlreadyApplied(); } catch (_) {} }, 1800);
+        // PASSIVE closed-memory: same idea for CERRADA/expired postings —
+        // remember them on a plain visit so the panel/bulk drop them even if
+        // the user never tried to apply (live: Prismatic CERRADA stayed in
+        // the top). Slightly later tick so terminal-state banners (which
+        // LaPieza renders after the hero) are in the DOM.
+        setTimeout(() => { try { maybePersistClosed(); } catch (_) {} }, 2000);
       } else if (fabMode() === "apply") {
         setTimeout(() => maybeAutoFireExpressOnApply(), 600);
         // Always arm the flow assistant on /apply/ — even if the user
