@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-12-detect-ya-postulado";
+  const EAMX_LAPIEZA_VERSION = "2026-06-13-panel-autorefresh-aplicadas";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -4896,6 +4896,33 @@
   // Tracks the current top-N rendered list so the queue-onChanged listener
   // can re-paint button states without re-running findVacancyCards.
   let matchesCurrentTopN = [];
+  // Debounce handle for the queue-change driven panel re-render. When a
+  // vacancy becomes applied (chain auto-detect on open, manual mark, the
+  // "Mis vacantes" importer, or any other tab), the queue write fires
+  // storage.onChanged here → we re-run the applied/top split so the
+  // freshly-applied vacancy LEAVES the top on its own, no manual reload.
+  // Debounced so a bulk run's rapid-fire Finalizars collapse into one
+  // refresh instead of thrashing the DOM once per row.
+  let matchesRerenderTimer = null;
+
+  // Re-render the matches panel content after a debounce, preserving the
+  // user's scroll position so applied vacancies dropping out of the top
+  // don't yank the list back to the start mid-read.
+  function scheduleMatchesRerender() {
+    if (!matchesPanelEl) return;
+    if (matchesRerenderTimer) clearTimeout(matchesRerenderTimer);
+    matchesRerenderTimer = setTimeout(async () => {
+      matchesRerenderTimer = null;
+      if (!matchesPanelEl) return;
+      const content = matchesPanelEl.querySelector("[data-eamx-matches-content]");
+      const prevScroll = content ? content.scrollTop : 0;
+      try { await renderMatchesPanelContent(); } catch (_) {}
+      try {
+        const c2 = matchesPanelEl?.querySelector("[data-eamx-matches-content]");
+        if (c2) c2.scrollTop = prevScroll;
+      } catch (_) {}
+    }, 600);
+  }
 
   // Wider-search accumulator. LaPieza paginates by REPLACING the cards on
   // each page click — not appending — so a naive "click next 5 times then
@@ -5034,6 +5061,15 @@
             //    Without this, the pill stays stuck at the value it
             //    had when the panel first opened.
             try { refreshBulkSafety(); } catch (_) {}
+            // 3) Re-run the applied/top split so a vacancy that just
+            //    became "ya postulada" (chain detected it on open, the
+            //    user marked it, the importer synced it, or another tab
+            //    applied) DROPS OUT of the top list on its own. This is
+            //    the fix for "se autopostula… carga y ya sale ya
+            //    postulado después, pero sigue en el top": the per-vacancy
+            //    detection now works, but nothing re-split the panel.
+            //    Debounced + scroll-preserving (see scheduleMatchesRerender).
+            scheduleMatchesRerender();
           }
         };
         chrome.storage.onChanged.addListener(matchesQueueListener);
@@ -5052,6 +5088,10 @@
       }
     } catch (_) {}
     matchesQueueListener = null;
+    if (matchesRerenderTimer) {
+      clearTimeout(matchesRerenderTimer);
+      matchesRerenderTimer = null;
+    }
     if (matchesEscHandler) {
       try { document.removeEventListener("keydown", matchesEscHandler, true); } catch (_) {}
       matchesEscHandler = null;
@@ -6052,7 +6092,19 @@
 
     // Sync page-detected applications into the queue so the "applied"
     // state persists across navigation. Fire-and-forget.
-    const autoMarkApplied = scored.filter((m) => m.appliedFromCard && m.jobLite && m.jobLite.id);
+    //
+    // CRITICAL: persist ONLY genuinely-new page-detections (not in the queue
+    // yet). Re-upserting an already-applied item still triggers a storage
+    // write — patchItem writes whenever it TOUCHES a row, even if nothing
+    // changed (queue.js patchItem: `if (!touched) return; writeQueue(next)`).
+    // The matches panel's queue-change listener re-renders on every write, so
+    // re-upserting on each render → write → listener → render → write =
+    // infinite loop. Filtering by !appliedIds.has(id) makes renders idempotent
+    // once the queue is synced (the loop converges after one extra cycle when
+    // a brand-new applied card appears).
+    const autoMarkApplied = scored.filter((m) =>
+      m.appliedFromCard && m.jobLite && m.jobLite.id &&
+      !appliedIds.has(String(m.jobLite.id)));
     if (autoMarkApplied.length && queueModule && typeof queueModule.upsertApplied === "function") {
       Promise.all(autoMarkApplied.map((m) =>
         queueModule.upsertApplied({
