@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-13-salario-autollena-en-apply";
+  const EAMX_LAPIEZA_VERSION = "2026-06-13-salario-sync-fresco";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -10792,6 +10792,25 @@
         // CHANGES, so a value synced before this tab opened needs this read.
         try { loadPreferencesOnce(); } catch (_) {}
         try { loadProfileOnce(); } catch (_) {}
+        // FRESH SYNC: loadPreferencesOnce only reads chrome.storage, which can
+        // be STALE if the user saved their salary/answers on the web AFTER the
+        // last account sync. Storage is written by the service-worker on
+        // GET_AUTH_STATUS, and storage.onChanged only delivers FUTURE writes —
+        // a value saved before this tab opened never arrives that way. So force
+        // ONE fresh /account fetch and apply the returned preferences straight
+        // into cachedPreferences, so the apply flow uses the latest saved
+        // answers (live: salary saved as "65000" on the web but the apply tab
+        // kept prompting). Fire-and-forget; the manual-entry watcher self-heals
+        // on its next tick (~1.5s) once this lands. Guarded so an offline /
+        // logged-out response (no preferences) never clobbers the local cache.
+        try {
+          sendMsg({ type: MSG.GET_AUTH_STATUS }).then((auth) => {
+            if (auth && auth.ok && auth.preferences && typeof auth.preferences === "object") {
+              cachedPreferences = auth.preferences;
+              preferencesLoaded = true;
+            }
+          }).catch(() => {});
+        } catch (_) {}
       }
       // Auto-prewarm hook — when the user clicked "⚡ Postular" in the
       // matches panel, a session flag was set keyed on this vacancy's id.
