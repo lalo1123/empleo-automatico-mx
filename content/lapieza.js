@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-13-salario-sync-fresco";
+  const EAMX_LAPIEZA_VERSION = "2026-06-14-auto-envio-total";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -1520,22 +1520,42 @@
   //                 listener so the parent panel marks the row done.
   // bulkMode=false → stays HITL: highlights the button, attaches the
   //                  tracker, shows "✓ Listo. Dale Finalizar".
+  // Whether to auto-click the final submit (Finalizar) on an INDIVIDUAL
+  // apply (bulk always auto-finalizes). Product decision: "Automático total"
+  // is the default — a single ⚡ Postular fills AND sends, all the way, with
+  // the 5s + Esc grace window as the safety affordance. The user can flip
+  // their account setting "Revisar antes de enviar" (autoSubmit=false) to
+  // keep the old HITL stop at the final button. cachedPreferences.autoSubmit
+  // is synced from the web account; absent/unknown → default ON (true) so the
+  // behavior is auto even before the backend field exists / for users who
+  // never touched the setting.
+  function autoSubmitEnabled() {
+    try {
+      const p = cachedPreferences;
+      if (p && typeof p.autoSubmit === "boolean") return p.autoSubmit;
+    } catch (_) {}
+    return true;
+  }
+
   async function handleReadyToFinalize(finalizeBtn, bulkMode) {
     if (!finalizeBtn) return;
     try { highlightExpressSubmitButton(); } catch (_) {}
     attachFinalizeApplyTracker(finalizeBtn);
     reportBulkStatus("ready");
 
-    if (!bulkMode) {
-      // HITL: the user clicks Finalizar themselves.
+    // Auto-finalize when bulk OR when the account is in "Automático total"
+    // (the default). Only the explicit "Revisar antes de enviar" toggle keeps
+    // the human-in-the-loop stop at the final button.
+    if (!bulkMode && !autoSubmitEnabled()) {
+      // REVIEW MODE: the user clicks Finalizar themselves.
       toast("✓ Listo. Revisa todo y dale Finalizar.", "success", { durationMs: 6000 });
       return;
     }
 
-    // BULK: countdown + auto-click. The grace period lets the user
-    // hit Esc if they want to review before submitting. Status step
-    // = "finalizing" so the row shows a spinning dot, NOT the green
-    // ready check (which would falsely suggest the submit happened).
+    // AUTO (bulk or individual-auto): countdown + auto-click. The grace
+    // period lets the user hit Esc if they want to review before submitting.
+    // Status step = "finalizing" so the row shows a spinning dot, NOT the
+    // green ready check (which would falsely suggest the submit happened).
     toast("⚡ Auto-finalizando en 5s… (Esc cancela)", "info", { durationMs: 4500 });
     for (let i = 5; i > 0; i--) {
       if (quickApplyAborted) {
@@ -2050,14 +2070,17 @@
         if (didProductiveWork) {
           const submitLike = findApplyFlowContinueBtn();
           if (submitLike) {
-            if (!isBulkMode) {
+            if (!isBulkMode && !autoSubmitEnabled()) {
+              // REVIEW MODE: user sends the final button themselves.
               try { highlightExpressSubmitButton(); } catch (_) {}
               try { attachFinalizeApplyTracker(submitLike); } catch (_) {}
               reportBulkStatus("ready");
               toast("✓ Listo. Revisa todo y dale tú el último botón para enviar.", "success", { durationMs: 8000 });
               break;
             }
-            await handleReadyToFinalize(submitLike, true);
+            // AUTO (bulk or individual-auto): handleReadyToFinalize runs the
+            // countdown+click (it re-checks autoSubmitEnabled internally).
+            await handleReadyToFinalize(submitLike, isBulkMode);
             break;
           }
         }
@@ -9158,7 +9181,15 @@
       // buttons appear, e.g. sticky + footer).
       if (!FLOW_TIPS_SHOWN.has("final-submit")) {
         FLOW_TIPS_SHOWN.add("final-submit");
-        toast("Listo. Revisa todo y dale Enviar cuando estés conforme. Tú das el último clic.", "success");
+        // Message matches the account mode: in "Automático total" the chain
+        // sends it (this assistant only highlights, never clicks), so don't
+        // tell the user "tú das el clic" — that contradicted the auto-submit.
+        toast(
+          autoSubmitEnabled()
+            ? "✓ Listo. Enviando tu postulación… (Esc cancela)"
+            : "Listo. Revisa todo y dale Enviar cuando estés conforme. Tú das el último clic.",
+          "success"
+        );
       }
     }
   }
@@ -10064,8 +10095,14 @@
       // click it. The user always confirms the application herself.
       const nextText = (nextBtn.textContent || "").trim();
       if (FLOW_FINAL_RX.test(nextText)) {
+        // The quiz loop never clicks the final submit (HITL-safe); the apply
+        // chain does the auto-finalize in "Automático total" mode. Match the
+        // message to the mode so it doesn't say "dale Finalizar tú" while the
+        // chain is about to send it.
         setQuizStickyToast(
-          `✓ Quiz listo. ${answeredOk}/${totalSeen || answeredOk} respondidas. Revisa y dale Finalizar tú.`,
+          autoSubmitEnabled()
+            ? `✓ Quiz listo. ${answeredOk}/${totalSeen || answeredOk} respondidas. Enviando…`
+            : `✓ Quiz listo. ${answeredOk}/${totalSeen || answeredOk} respondidas. Revisa y dale Finalizar tú.`,
           "success"
         );
         setTimeout(() => clearQuizStickyToast(), 6000);
