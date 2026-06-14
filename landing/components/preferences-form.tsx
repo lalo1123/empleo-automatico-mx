@@ -179,6 +179,13 @@ export function PreferencesForm({ initial }: { initial: UserPreferences }) {
   const [expectedSalary, setExpectedSalary] = useState<string>(
     initial.expectedSalary || ""
   );
+  // Auto-submit toggle. Default ON ("Automático total"): the extension fills
+  // AND sends an individual apply. When OFF ("Revisar antes de enviar") it
+  // stops at the final button so the user sends it. `?? true` so existing
+  // accounts (before the field existed) default to auto.
+  const [autoSubmit, setAutoSubmit] = useState<boolean>(
+    initial.autoSubmit ?? true
+  );
   const [personalAnswers, setPersonalAnswers] = useState<PersonalAnswers>(
     initial.personalAnswers || {}
   );
@@ -227,6 +234,7 @@ export function PreferencesForm({ initial }: { initial: UserPreferences }) {
             salaryMin: min,
             salaryMax: max,
             expectedSalary: expectedSalary.trim(),
+            autoSubmit,
             personalAnswers,
           }),
         });
@@ -349,6 +357,64 @@ export function PreferencesForm({ initial }: { initial: UserPreferences }) {
               </div>
             </div>
           </div>
+        </div>
+      </SectionCard>
+
+      {/* ============ Card: Cómo postula la IA (auto-submit) ============ */}
+      <SectionCard
+        icon="⚡"
+        title="Cómo postula la IA"
+        sub="Cuando te postulas a UNA vacante. (El auto-postular en lote siempre envía solo.)"
+      >
+        <div className="grid gap-2 sm:grid-cols-2">
+          {[
+            {
+              val: true,
+              icon: "🚀",
+              label: "Automático total",
+              sub: "Llena y ENVÍA solo. Tú entras, revisas la vacante y le das “Postular con IA”. (5 s para cancelar con Esc.)",
+            },
+            {
+              val: false,
+              icon: "✋",
+              label: "Revisar antes de enviar",
+              sub: "Llena todo y se detiene en el botón final para que tú lo revises y lo envíes.",
+            },
+          ].map((opt) => (
+            <label
+              key={String(opt.val)}
+              className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 text-sm transition ${
+                autoSubmit === opt.val
+                  ? "border-[color:var(--color-brand-500)] bg-[color:var(--color-brand-50)] shadow-[0_0_0_3px_rgba(42,156,145,0.12)]"
+                  : "border-[color:var(--color-border)] bg-white hover:border-[color:var(--color-brand-400)]"
+              }`}
+            >
+              <input
+                type="radio"
+                name="autoSubmit"
+                checked={autoSubmit === opt.val}
+                onChange={() => setAutoSubmit(opt.val)}
+                className="sr-only"
+              />
+              <span aria-hidden className="text-lg">
+                {opt.icon}
+              </span>
+              <span>
+                <span
+                  className={`block font-semibold ${
+                    autoSubmit === opt.val
+                      ? "text-[color:var(--color-brand-700)]"
+                      : "text-[color:var(--color-ink)]"
+                  }`}
+                >
+                  {opt.label}
+                </span>
+                <span className="block text-xs text-[color:var(--color-ink-muted)]">
+                  {opt.sub}
+                </span>
+              </span>
+            </label>
+          ))}
         </div>
       </SectionCard>
 

@@ -55,6 +55,10 @@ const preferencesSchema = z.object({
   salaryMin: z.number().int().nonnegative().max(10_000_000).optional().nullable(),
   salaryMax: z.number().int().nonnegative().max(10_000_000).optional().nullable(),
   expectedSalary: z.string().max(120).optional().default(""),
+  // Auto-submit toggle. true (default) = "Automático total": an individual
+  // ⚡ Postular fills AND sends. false = "Revisar antes de enviar": the
+  // extension stops at the final submit button so the user sends it.
+  autoSubmit: z.boolean().optional().default(true),
   // Personal auto-answers (vehículo, licencia, viajar, …). Free-form map at
   // the edge; unknown keys are dropped and values trimmed/capped by
   // sanitizePersonalAnswers inside db.upsertPreferences.

@@ -314,6 +314,7 @@ export interface UserPreferences {
   salaryMin: number | null;
   salaryMax: number | null;
   expectedSalary: string;
+  autoSubmit: boolean;
   personalAnswers: PersonalAnswers;
   updatedAt: number;
 }
@@ -331,6 +332,7 @@ export function putPreferences(
     salaryMin?: number | null;
     salaryMax?: number | null;
     expectedSalary?: string;
+    autoSubmit?: boolean;
     personalAnswers?: PersonalAnswers;
   }
 ) {

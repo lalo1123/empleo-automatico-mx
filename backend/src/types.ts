@@ -138,6 +138,7 @@ export interface PreferencesRow {
   salary_min: number | null;
   salary_max: number | null;
   expected_salary: string;     // free-text answer for "¿expectativa salarial?"
+  auto_submit: number;         // 1 = auto-send individual applies, 0 = HITL review
   personal_answers: string;    // JSON map PersonalAnswerKey -> answer text
   updated_at: number;          // unix seconds
 }
@@ -168,6 +169,7 @@ export interface UserPreferences {
   salaryMin: number | null;
   salaryMax: number | null;
   expectedSalary: string;      // free-text answer auto-typed into salary fields
+  autoSubmit: boolean;         // true = auto-send individual applies; false = review-first
   personalAnswers: PersonalAnswers; // auto-typed into matching screening fields
   updatedAt: number;           // unix seconds
 }
