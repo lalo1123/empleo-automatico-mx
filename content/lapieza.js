@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-13-panel-suelta-cerradas";
+  const EAMX_LAPIEZA_VERSION = "2026-06-13-salario-autollena-en-apply";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -3498,6 +3498,12 @@
     // null. Without this, users with a perfectly-loaded CV in the welcome
     // page were getting the "Para usar la cadena necesitas tu CV" toast.
     try { await loadProfileOnce(); } catch (_) { /* fall through to gate */ }
+    // Same lazy-load gap as the profile: preferences (salary + personal
+    // answers) are loaded by default only on listing paths, so the chain's
+    // saved-answer auto-fill (resolveSavedAnswer → cachedPreferences) read a
+    // null cache on a direct /vacante visit. Force-load so salary/personal
+    // free-text fields fill from the account instead of prompting the user.
+    try { await loadPreferencesOnce(); } catch (_) { /* best-effort */ }
     if (!cachedProfile) {
       toast(
         "Para usar la cadena necesitas tu CV cargado en la extensión. Te lleva 30s.",
@@ -10769,6 +10775,23 @@
       // but it now returns true on listings too, so add an explicit gate.
       if (fabMode() !== "listing") {
         setTimeout(() => { maybeShowQueuedReminder(); }, 1200);
+        // PRELOAD account preferences + profile for the APPLY FLOW. They were
+        // loaded ONLY on listing paths (see the isListingPath branch below),
+        // so on a direct /vacante or /apply tab cachedPreferences stayed null
+        // — which silently killed EVERY saved auto-answer in the apply flow:
+        // the "¿Cuál es tu expectativa salarial?" step showed "esta la
+        // respondes tú" instead of filling the saved number, and free-text
+        // personal answers (vehículo, licencia…) never filled either. The
+        // whole field path is consistent on `expectedSalary` (web form →
+        // backend col expected_salary→expectedSalary → service-worker sync
+        // writes eamx:preferences verbatim → getSavedExpectedSalary reads
+        // cachedPreferences.expectedSalary); the ONLY break was this tab never
+        // reading it. loadPreferencesOnce/loadProfileOnce are idempotent + a
+        // single storage read each; chrome.storage.local is shared across
+        // tabs so the synced value is here. watchProfileChanges only fires on
+        // CHANGES, so a value synced before this tab opened needs this read.
+        try { loadPreferencesOnce(); } catch (_) {}
+        try { loadProfileOnce(); } catch (_) {}
       }
       // Auto-prewarm hook — when the user clicked "⚡ Postular" in the
       // matches panel, a session flag was set keyed on this vacancy's id.
