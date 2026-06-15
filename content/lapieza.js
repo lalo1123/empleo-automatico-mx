@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-15-match-real-auto";
+  const EAMX_LAPIEZA_VERSION = "2026-06-15-match-spinner-progreso";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -10813,6 +10813,7 @@
   // optional action). User: "que me deje ver la postulación… para ver en cuál
   // saco buen match y soy para eso." Informational only; never clicks anything.
   let vacancyMatchCardEl = null;
+  let vacancyMatchSpinnerTimer = null; // cycles the "afinando…" progress copy
   const vacancyMatchDismissedIds = new Set();
   // Cache the AI "match real" per vacancy id so reopening is INSTANT and the
   // number is STABLE (never silently recomputes to a different value). The
@@ -10841,10 +10842,34 @@
   }
 
   function removeVacancyMatchCard() {
+    if (vacancyMatchSpinnerTimer) {
+      try { clearInterval(vacancyMatchSpinnerTimer); } catch (_) {}
+      vacancyMatchSpinnerTimer = null;
+    }
     if (vacancyMatchCardEl) {
       try { vacancyMatchCardEl.remove(); } catch (_) {}
       vacancyMatchCardEl = null;
     }
+  }
+
+  // While the AI is running, rotate the spinner copy so the ~5s reads as
+  // productive progress instead of a stall. Pure perceived-latency win — no
+  // accuracy cost. Self-stops when the spinner element is gone (card repainted).
+  function startVacancyMatchSpinnerCycle() {
+    if (vacancyMatchSpinnerTimer) { try { clearInterval(vacancyMatchSpinnerTimer); } catch (_) {} vacancyMatchSpinnerTimer = null; }
+    const msgs = [
+      "Leyendo la vacante completa…",
+      "Comparando con tu CV…",
+      "Calculando tu match real…",
+      "Buscando cómo subirlo…"
+    ];
+    let i = 0;
+    vacancyMatchSpinnerTimer = setInterval(() => {
+      const el = vacancyMatchCardEl && vacancyMatchCardEl.querySelector("[data-eamx-vmatch-spin-text]");
+      if (!el) { try { clearInterval(vacancyMatchSpinnerTimer); } catch (_) {} vacancyMatchSpinnerTimer = null; return; }
+      i = (i + 1) % msgs.length;
+      el.textContent = msgs[i];
+    }, 1600);
   }
 
   // Level → brand-aligned color + human label.
@@ -10944,6 +10969,10 @@
       document.documentElement.appendChild(card);
     }
     vacancyMatchCardEl = card;
+    // Animate the "afinando…" copy while the AI is running (no-op otherwise).
+    if (card.querySelector("[data-eamx-vmatch-spin-text]")) {
+      try { startVacancyMatchSpinnerCycle(); } catch (_) {}
+    }
   }
 
   // Quick LOCAL score (title-based) shown WHILE the real AI is computing, or as
@@ -10976,7 +11005,7 @@
       bottom = `
         <div style="margin-top:11px;display:flex;align-items:center;gap:9px;background:#f0fdfa;border:1px solid #99f6e4;border-radius:11px;padding:9px 11px;">
           <div style="flex:0 0 auto;width:18px;height:18px;border:2.5px solid #ccfbf1;border-top-color:#0d9488;border-radius:50%;animation:eamx-spin .8s linear infinite;"></div>
-          <div style="font-size:12px;font-weight:700;color:#0f766e;">Afinando tu match real con IA…</div>
+          <div data-eamx-vmatch-spin-text style="font-size:12px;font-weight:700;color:#0f766e;">Leyendo la vacante completa…</div>
         </div>
         <div style="margin-top:7px;font-size:11px;color:#6b7280;line-height:1.4;">Leyendo la vacante completa + tu CV: % real, qué te falta y cómo subirlo. ~5s.</div>
         <style>@keyframes eamx-spin{to{transform:rotate(360deg)}}</style>`;
