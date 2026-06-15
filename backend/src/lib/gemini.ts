@@ -827,3 +827,126 @@ export async function answerQuiz(
 
   return { answerKey: match.key, reason };
 }
+
+// ---------------------------------------------------------------------------
+// Match analysis ("Match real con IA") — accurate, semantic fit score + how
+// to raise it. This is the premium-ish differentiator: not just "apply for
+// you" but "maximize that you get picked".
+// ---------------------------------------------------------------------------
+
+const MATCH_ANALYSIS_SYSTEM =
+  "Eres un reclutador técnico senior en México con 15 años evaluando " +
+  "candidatos. Analizas qué tan bien encaja UN candidato en UNA vacante " +
+  "específica, de forma SEMÁNTICA, honesta y accionable. Recibes la vacante " +
+  "completa (con descripción y requisitos) y el perfil del candidato.\n\n" +
+  "Devuelve SOLO el JSON solicitado, en español MX, con:\n" +
+  "1. score (0-100): la afinidad REAL del candidato con ESTA vacante. NO lo " +
+  "infles ni lo castigues de más. Pondera: experiencia/años relevantes, " +
+  "skills y herramientas que pide la vacante, seniority, dominio de negocio, " +
+  "modalidad/ubicación e idioma. Un fit fuerte real = 75-95; fit decente con " +
+  "huecos = 50-74; fit débil = 20-49; casi nulo = 0-19.\n" +
+  "2. level: 'high' si score>=75, 'mid' si 50-74, 'low' si <50. Debe ser " +
+  "coherente con score.\n" +
+  "3. matches (3-6): fortalezas REALES del CV que cubren requisitos de la " +
+  "vacante. Cada una corta y CITANDO un dato del CV (empresa, herramienta, " +
+  "años o métrica). Ej: 'Lideraste ventas B2B en [empresa] — justo lo que " +
+  "piden'. NO inventes nada que no esté en el CV.\n" +
+  "4. gaps (1-5): requisitos de la vacante que el CV NO demuestra o demuestra " +
+  "débil. Honesto pero no cruel. Ej: 'Piden inglés avanzado; tu CV no lo " +
+  "menciona'.\n" +
+  "5. improveTips (2-4): acciones CONCRETAS para subir el match SIN mentir — " +
+  "una keyword real a destacar, un logro a cuantificar, una sección a " +
+  "reordenar, una certificación que sí tiene y no resaltó. Cada tip empieza " +
+  "con un verbo. NUNCA sugieras inventar experiencia.\n\n" +
+  "Refleja las keywords de la vacante. Nada genérico — si una frase serviría " +
+  "para cualquier candidato/vacante, reescríbela con un hecho específico.";
+
+const MATCH_ANALYSIS_SCHEMA = {
+  type: "object",
+  properties: {
+    score: { type: "integer" },
+    level: { type: "string", enum: ["high", "mid", "low"] },
+    matches: { type: "array", items: { type: "string" } },
+    gaps: { type: "array", items: { type: "string" } },
+    improveTips: { type: "array", items: { type: "string" } }
+  },
+  required: ["score", "level", "matches", "gaps", "improveTips"]
+} as const;
+
+export interface AnalyzeMatchArgs {
+  apiKey: string;
+  model: string;
+  profile: UserProfile;
+  job: JobPosting;
+}
+
+export interface AnalyzeMatchResult {
+  score: number;
+  level: "high" | "mid" | "low";
+  matches: string[];
+  gaps: string[];
+  improveTips: string[];
+}
+
+const levelFromScore = (s: number): "high" | "mid" | "low" =>
+  s >= 75 ? "high" : s >= 50 ? "mid" : "low";
+
+const cleanList = (v: unknown, max: number): string[] =>
+  (Array.isArray(v) ? v : [])
+    .filter((x): x is string => typeof x === "string" && x.trim().length > 0)
+    .map((x) => x.trim())
+    .slice(0, max);
+
+/**
+ * Accurate, semantic match analysis of a candidate against ONE vacancy.
+ * Reuses callGenerate/extractJson like the other AI helpers. Output is
+ * defensively normalized: score clamped 0-100, level re-derived from score
+ * (so it can never contradict the number the user sees), arrays cleaned/capped.
+ */
+export async function analyzeMatch(args: AnalyzeMatchArgs): Promise<AnalyzeMatchResult> {
+  const { apiKey, model, profile, job } = args;
+  if (!apiKey) throw new HttpError(500, "INTERNAL_ERROR", "Configuración del servicio incompleta.");
+  if (!profile) throw new HttpError(400, "VALIDATION_ERROR", "Falta el perfil del candidato.");
+  if (!job) throw new HttpError(400, "VALIDATION_ERROR", "Falta la información de la vacante.");
+
+  const userText =
+    `VACANTE (JSON):\n${JSON.stringify(job, null, 2)}\n\n` +
+    `PERFIL DEL CANDIDATO (JSON):\n${JSON.stringify(profile, null, 2)}\n\n` +
+    `Analiza el match real del candidato con ESTA vacante y devuelve el JSON ` +
+    `con score, level, matches, gaps e improveTips siguiendo las reglas.`;
+
+  const body = {
+    systemInstruction: { parts: [{ text: MATCH_ANALYSIS_SYSTEM }] },
+    contents: [{ role: "user", parts: [{ text: userText }] }],
+    generationConfig: {
+      // Low-ish temp for a consistent, defensible score; a modest thinking
+      // budget lets it reason about WHICH facts match before scoring.
+      temperature: 0.3,
+      maxOutputTokens: 3000,
+      thinkingConfig: { thinkingBudget: 1024 },
+      responseMimeType: "application/json",
+      responseJsonSchema: MATCH_ANALYSIS_SCHEMA
+    }
+  };
+
+  const res = await callGenerate(apiKey, model, body);
+  const out = extractJson<{
+    score?: unknown;
+    level?: unknown;
+    matches?: unknown;
+    gaps?: unknown;
+    improveTips?: unknown;
+  }>(res);
+
+  let score = Number(out.score);
+  if (!Number.isFinite(score)) score = 0;
+  score = Math.max(0, Math.min(100, Math.round(score)));
+
+  return {
+    score,
+    level: levelFromScore(score), // re-derive so level can't contradict score
+    matches: cleanList(out.matches, 6),
+    gaps: cleanList(out.gaps, 5),
+    improveTips: cleanList(out.improveTips, 4)
+  };
+}

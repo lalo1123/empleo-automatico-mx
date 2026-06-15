@@ -535,6 +535,43 @@ export function setDailyUsageCount(userId: string, date: string, count: number):
   return getDailyUsageCount(userId, date);
 }
 
+// MATCH-ANALYSIS DAILY USAGE -------------------------------------------------
+// Separate per-day counter for "Match real con IA" (usage_match_daily). Kept
+// apart from usage_daily so analyzing a vacancy never burns a postulación.
+// See migration 0011_usage_match.sql + plans.ts matchAnalysisDailyLimit.
+
+export function getMatchUsageCount(userId: string, date: string): number {
+  const stmt = getDb().prepare<[string, string], { count: number }>(
+    "SELECT count FROM usage_match_daily WHERE user_id = ? AND date = ? LIMIT 1"
+  );
+  return stmt.get(userId, date)?.count ?? 0;
+}
+
+export function incrementMatchUsage(userId: string, date: string): number {
+  getDb()
+    .prepare(
+      `INSERT INTO usage_match_daily (user_id, date, count)
+       VALUES (?, ?, 1)
+       ON CONFLICT(user_id, date)
+       DO UPDATE SET count = count + 1`
+    )
+    .run(userId, date);
+  return getMatchUsageCount(userId, date);
+}
+
+// Admin-only: force the match counter to an exact value (test MATCH_LIMIT).
+export function setMatchUsageCount(userId: string, date: string, count: number): number {
+  getDb()
+    .prepare(
+      `INSERT INTO usage_match_daily (user_id, date, count)
+       VALUES (?, ?, ?)
+       ON CONFLICT(user_id, date)
+       DO UPDATE SET count = excluded.count`
+    )
+    .run(userId, date, count);
+  return getMatchUsageCount(userId, date);
+}
+
 // APPLICATIONS HISTORY -------------------------------------------------------
 // Synced from the Chrome extension when the user finalizes a postulación
 // (extension calls TRACK_APPLICATION → service worker → backend

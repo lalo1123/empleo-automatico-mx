@@ -22,6 +22,13 @@ export interface PlanDefinition {
    * already caps daily implicitly).
    */
   dailyLimit: number;
+  /**
+   * Daily cap for the "Match real con IA" analysis — a SEPARATE counter from
+   * postulaciones (usage_match_daily). -1 = unlimited. Free gets a taste so
+   * the feature is discoverable + drives upgrades; paid plans get it
+   * unlimited (the analysis is cheap — one Gemini Flash call).
+   */
+  matchAnalysisDailyLimit: number;
   priceMxn: {
     monthly: number;
     yearly: number;
@@ -35,6 +42,7 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     monthlyLimit: 3,
     softCap: 3,
     dailyLimit: -1,
+    matchAnalysisDailyLimit: 3,   // taste of the feature; drives upgrades
     priceMxn: { monthly: 0, yearly: 0 }
   },
   pro: {
@@ -43,6 +51,7 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     monthlyLimit: 100,
     softCap: 100,
     dailyLimit: -1,   // monthlyLimit/100 effectively caps daily
+    matchAnalysisDailyLimit: -1,  // unlimited match analysis
     priceMxn: { monthly: 299, yearly: 2990 }
   },
   premium: {
@@ -59,6 +68,7 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     softCap: -1,          // Not enforced anywhere; -1 = no backstop.
     dailyLimit: 30,       // The real, disclosed limit. Protects the user's
                           // account from bot-detection AND caps Gemini spend.
+    matchAnalysisDailyLimit: -1,  // unlimited match analysis
     priceMxn: { monthly: 499, yearly: 4990 }
   }
 };

@@ -14,6 +14,8 @@ import {
   incrementUsage as dbIncrementUsage,
   getDailyUsageCount as dbGetDailyUsageCount,
   incrementDailyUsage as dbIncrementDailyUsage,
+  getMatchUsageCount as dbGetMatchUsageCount,
+  incrementMatchUsage as dbIncrementMatchUsage,
   getDb
 } from "./db.js";
 import type { PlanId } from "../types.js";
@@ -191,5 +193,54 @@ export function refundUsageSlot(userId: string): void {
          WHERE user_id = ? AND date = ?`
       ).run(userId, date);
     })();
+  } catch (_) { /* swallow — best-effort */ }
+}
+
+// ---------------------------------------------------------------------------
+// "Match real con IA" — its OWN daily slot, fully separate from postulaciones.
+// Reserve→call→refund-on-fail, same race-safe pattern as reserveUsageSlot but
+// against usage_match_daily + plans.matchAnalysisDailyLimit. Never touches the
+// monthly/daily postulaciones counters.
+// ---------------------------------------------------------------------------
+
+/** Today's count of AI match analyses for a user. */
+export function getMatchUsageToday(userId: string): number {
+  return dbGetMatchUsageCount(userId, currentDate());
+}
+
+/**
+ * Atomically reserve one match-analysis slot. Throws 402 MATCH_LIMIT_EXCEEDED
+ * if the user is at/over their plan's matchAnalysisDailyLimit (>=0). Returns
+ * the new count after increment. Call refundMatchSlot on a downstream failure.
+ */
+export function reserveMatchSlot(userId: string, plan: PlanId): number {
+  const limit = getPlan(plan).matchAnalysisDailyLimit;
+  const date = currentDate();
+  const db = getDb();
+  const tx = db.transaction(() => {
+    if (limit >= 0) {
+      const used = dbGetMatchUsageCount(userId, date);
+      if (used >= limit) {
+        throw new HttpError(
+          402,
+          "MATCH_LIMIT_EXCEEDED",
+          `Llegaste a tus ${limit} análisis de match con IA de hoy. Vuelve mañana o mejora tu plan para análisis ilimitados.`
+        );
+      }
+    }
+    return dbIncrementMatchUsage(userId, date);
+  });
+  return tx();
+}
+
+/** Decrement the match counter when the Gemini call failed. Best-effort. */
+export function refundMatchSlot(userId: string): void {
+  const date = currentDate();
+  const db = getDb();
+  try {
+    db.prepare(
+      `UPDATE usage_match_daily SET count = MAX(0, count - 1)
+       WHERE user_id = ? AND date = ?`
+    ).run(userId, date);
   } catch (_) { /* swallow — best-effort */ }
 }

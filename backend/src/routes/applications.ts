@@ -67,7 +67,7 @@ const languageSchema = z.object({
   level: z.enum(["básico", "intermedio", "avanzado", "nativo"])
 });
 
-const profileSchema = z.object({
+export const profileSchema = z.object({
   version: z.literal(1).optional(),
   updatedAt: z.string().optional(),
   personal: personalSchema,
@@ -79,7 +79,7 @@ const profileSchema = z.object({
   rawText: z.string().optional()
 });
 
-const jobSchema = z.object({
+export const jobSchema = z.object({
   source: z.enum(["occ", "computrabajo", "linkedin", "bumeran", "indeed", "lapieza"]),
   url: z.string(),
   id: z.string(),

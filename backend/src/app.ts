@@ -9,11 +9,12 @@ import { sendError } from "./lib/errors.js";
 import { authRoutes } from "./routes/auth.js";
 import { accountRoutes } from "./routes/account.js";
 import { applicationsRoutes } from "./routes/applications.js";
+import { matchRoutes } from "./routes/match.js";
 import { billingRoutes } from "./routes/billing.js";
 import { webhookRoutes } from "./routes/webhooks.js";
 import { adminRoutes } from "./routes/admin.js";
 
-const VERSION = "0.2.5";
+const VERSION = "0.3.0";
 
 export function createApp(): Hono<AppContext> {
   // Ensure env is loaded / validated at app construction time.
@@ -39,6 +40,7 @@ export function createApp(): Hono<AppContext> {
   v1.route("/auth", authRoutes);
   v1.route("/account", accountRoutes);
   v1.route("/applications", applicationsRoutes);
+  v1.route("/match", matchRoutes);
   v1.route("/billing", billingRoutes);
   v1.route("/webhooks", webhookRoutes);
   v1.route("/admin", adminRoutes);
