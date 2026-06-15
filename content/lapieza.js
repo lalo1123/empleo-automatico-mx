@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-15-match-spinner-progreso";
+  const EAMX_LAPIEZA_VERSION = "2026-06-15-match-bonito-salario-finaliza";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -9917,11 +9917,40 @@
         const blocker = detectManualEntryBlocker();
         if (blocker) {
           // Salary auto-fill from saved prefs FIRST (their own number). If it
-          // fills, next tick sees no blocker and clears — no marker needed.
-          // Covers salary-only vacancies (no quiz/cover step) in both modes.
+          // fills AND the account is in "Automático total" (autoSubmit), we must
+          // ALSO advance the step — the watcher is the ONLY live actor on a
+          // STANDALONE salary step ("1/1 ¿Cuál es tu expectativa salarial?"):
+          // the chain's 20-iteration loop has already exited by the time it
+          // renders, and fillFieldWithPulse only writes the value, it never
+          // clicks. Without this the flow sat filled-but-stuck and Finalizar was
+          // never reached (user: "se pone el salario pero de ahí no le da a
+          // Finalizar"). So: fill → (auto) click Continuar; if the next visible
+          // button IS the final submit, route through handleReadyToFinalize (5s
+          // + Esc countdown, tracker, autoSubmit re-check). "Revisar antes de
+          // enviar" (autoSubmit off) stays HITL: it fills and waits for the user.
           let salaryFilled = false;
           try { salaryFilled = fillSavedSalaryIfBlocking(); } catch (_) {}
-          if (salaryFilled) { setTimeout(tick, 1500); return; }
+          if (salaryFilled) {
+            if (autoSubmitEnabled()) {
+              // Give LaPieza a beat to enable the previously-disabled button
+              // after our input/change events, then advance.
+              setTimeout(() => {
+                try {
+                  const finalizeBtn = findApplyFlowFinalizeBtn();
+                  const continueBtn = findApplyFlowContinueBtn();
+                  if (finalizeBtn && !continueBtn) {
+                    handleReadyToFinalize(finalizeBtn, false); // last step → auto-submit
+                  } else if (continueBtn) {
+                    programmaticClick(continueBtn); // advance; a later tick handles Finalizar
+                  }
+                } catch (_) { /* ignore */ }
+                setTimeout(tick, 1500);
+              }, 600);
+              return;
+            }
+            setTimeout(tick, 1500);
+            return;
+          }
           let ref = "";
           try { ref = ensureFieldRef(blocker.el); } catch (_) {}
           if (ref) {
@@ -11030,33 +11059,62 @@
     `;
   }
 
-  // Accurate AI result: score + matches (✓) + gaps (⚠) + how to improve (⤴) +
-  // the "Generar CV optimizado" CTA. This is the differentiator.
+  // Accurate AI result — designed to feel premium: animated score ring,
+  // staggered-reveal rows, gradient "cómo subir" panel, shimmer "IA" badge.
   function aiMatchInner(res) {
     const v = vacancyMatchVisual(res.level);
-    const matchChips = vmChips(res.matches, "#16a34a", "#ecfdf5", "✓");
-    const gapChips = vmChips(res.gaps, "#b45309", "#fffbeb", "⚠");
+    const score = Math.max(0, Math.min(100, Number(res.score) || 0));
+    const R = 30, C = +(2 * Math.PI * R).toFixed(1);
+    const target = +(C * (1 - score / 100)).toFixed(1);
+    const rid = "eamxvmr" + Math.floor(Math.random() * 1e9);
+    const matches = (res.matches || []).slice(0, 6);
+    const gaps = (res.gaps || []).slice(0, 5);
     const tips = (res.improveTips || []).slice(0, 4);
+    let d = 0; // running animation-delay index for the stagger
+    const row = (text, color, bg, icon) => {
+      const delay = 120 + d * 70; d += 1;
+      return `<div style="display:flex;gap:9px;align-items:flex-start;background:${bg};border-radius:11px;padding:9px 11px;margin-top:7px;font-size:12px;line-height:1.42;color:#1f2937;opacity:0;animation:eamx-vm-in .5s cubic-bezier(.22,1,.36,1) ${delay}ms forwards;">
+        <span style="flex:0 0 auto;color:${color};font-weight:900;font-size:13px;">${icon}</span><span>${escapeHtml(String(text))}</span>
+      </div>`;
+    };
+    const matchRows = matches.map((m) => row(m, "#15803d", "#f0fdf4", "✓")).join("");
+    const gapRows = gaps.map((g) => row(g, "#b45309", "#fffbeb", "⚠")).join("");
     const tipsBlock = tips.length ? `
-      <div style="margin-top:11px;background:#f0fdfa;border:1px solid #99f6e4;border-radius:11px;padding:9px 11px;">
-        <div style="font-size:11px;font-weight:800;color:#0f766e;letter-spacing:.02em;">⤴ Cómo subir tu match</div>
-        <ul style="margin:6px 0 0;padding-left:16px;font-size:11.5px;color:#134e4a;line-height:1.45;">
-          ${tips.map((t) => `<li style="margin-bottom:3px;">${escapeHtml(String(t))}</li>`).join("")}
+      <div style="margin-top:13px;border-radius:14px;padding:12px 13px;background:linear-gradient(135deg,#0d9488,#0f766e);color:#fff;box-shadow:0 6px 18px rgba(13,148,136,.28);opacity:0;animation:eamx-vm-in .55s cubic-bezier(.22,1,.36,1) ${120 + d * 70}ms forwards;">
+        <div style="font-size:11.5px;font-weight:800;letter-spacing:.02em;display:flex;align-items:center;gap:6px;">⤴ Cómo subir tu match</div>
+        <ul style="margin:8px 0 0;padding-left:17px;font-size:12px;line-height:1.5;">
+          ${tips.map((t) => `<li style="margin-bottom:5px;">${escapeHtml(String(t))}</li>`).join("")}
         </ul>
       </div>` : "";
     return `
-      <div style="display:flex;align-items:center;gap:11px;">
-        <div style="flex:0 0 auto;width:58px;height:58px;border-radius:50%;background:${v.bg};color:${v.color};display:flex;align-items:center;justify-content:center;font-weight:800;font-size:18px;">${res.score}%</div>
+      <style>
+        @keyframes ${rid}{from{stroke-dashoffset:${C}}to{stroke-dashoffset:${target}}}
+        @keyframes eamx-vm-in{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:none}}
+        @keyframes eamx-vm-pop{0%{transform:scale(.5);opacity:0}60%{transform:scale(1.12)}100%{transform:scale(1);opacity:1}}
+        @keyframes eamx-vm-shine{0%{background-position:-140% 0}100%{background-position:240% 0}}
+        .eamx-vm-optcv{transition:transform .14s ease, box-shadow .14s ease;}
+        .eamx-vm-optcv:hover{transform:translateY(-2px);box-shadow:0 10px 24px rgba(15,23,42,.28);}
+        .eamx-vm-optcv:active{transform:translateY(0);}
+      </style>
+      <div style="display:flex;align-items:center;gap:14px;">
+        <div style="position:relative;flex:0 0 auto;width:72px;height:72px;">
+          <svg width="72" height="72" viewBox="0 0 72 72" style="transform:rotate(-90deg);display:block;">
+            <circle cx="36" cy="36" r="${R}" fill="none" stroke="#eef2f6" stroke-width="7"/>
+            <circle cx="36" cy="36" r="${R}" fill="none" stroke="${v.color}" stroke-width="7" stroke-linecap="round"
+              stroke-dasharray="${C}" stroke-dashoffset="${target}" style="animation:${rid} 1.1s cubic-bezier(.22,1,.36,1) both;"/>
+          </svg>
+          <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:19px;color:${v.color};animation:eamx-vm-pop .55s .35s both;">${score}%</div>
+        </div>
         <div style="flex:1 1 auto;min-width:0;">
-          <div style="display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;color:#0f766e;background:#ccfbf1;border-radius:999px;padding:2px 7px;">✨ Match real · IA</div>
-          <div style="font-size:16px;font-weight:800;color:${v.color};margin-top:3px;">${escapeHtml(v.label)}</div>
+          <div style="display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#0f766e;background:linear-gradient(90deg,#ccfbf1,#bbf7d0,#ccfbf1);background-size:220% 100%;border-radius:999px;padding:3px 10px;animation:eamx-vm-shine 2.6s linear infinite;">✨ Match real · IA</div>
+          <div style="font-size:20px;font-weight:800;color:${v.color};margin-top:5px;opacity:0;animation:eamx-vm-in .5s .15s forwards;">${escapeHtml(v.label)}</div>
         </div>
       </div>
-      ${matchChips ? `<div style="margin-top:9px;">${matchChips}</div>` : ""}
-      ${gapChips ? `<div style="margin-top:5px;">${gapChips}</div>` : ""}
+      ${matchRows ? `<div style="margin-top:13px;font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#15803d;opacity:0;animation:eamx-vm-in .4s 80ms forwards;">✦ Lo que tienes a favor</div>${matchRows}` : ""}
+      ${gapRows ? `<div style="margin-top:12px;font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#b45309;opacity:0;animation:eamx-vm-in .4s 100ms forwards;">△ Lo que te falta</div>${gapRows}` : ""}
       ${tipsBlock}
-      <button type="button" data-eamx-vmatch-optcv style="margin-top:11px;width:100%;border:0;border-radius:11px;padding:10px 12px;background:#0f172a;color:#fff;font-weight:800;font-size:13px;cursor:pointer;">📄 Generar mi CV optimizado para esta vacante</button>
-      <div style="margin-top:8px;font-size:11px;color:#6b7280;line-height:1.35;">Sube tu match aplicando los tips. Luego dale <strong style="color:#0d9488;">Postular con IA</strong> 👇</div>
+      <button type="button" data-eamx-vmatch-optcv class="eamx-vm-optcv" style="margin-top:14px;width:100%;border:0;border-radius:13px;padding:12px;background:linear-gradient(135deg,#1e293b,#0f172a);color:#fff;font-weight:800;font-size:13px;cursor:pointer;opacity:0;animation:eamx-vm-in .5s ${180 + d * 70}ms forwards;">📄 Generar mi CV optimizado para esta vacante</button>
+      <div style="margin-top:10px;font-size:11px;color:#6b7280;line-height:1.4;text-align:center;">Aplica los tips y sube tu match — luego dale <strong style="color:#0d9488;">Postular con IA</strong> 👇</div>
     `;
   }
 
