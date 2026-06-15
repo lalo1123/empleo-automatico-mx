@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-14-auto-envio-total";
+  const EAMX_LAPIEZA_VERSION = "2026-06-14-tu-match-en-vacante";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -10794,10 +10794,124 @@
   }
 
   // =========================================================================
+  // "Tu match" card on a vacancy DETAIL page
+  // =========================================================================
+  // Lets the user SEE how well a posting fits BEFORE deciding to postular —
+  // entering a vacancy NEVER forces an apply (the FAB "Postular con IA" is the
+  // optional action). User: "que me deje ver la postulación… para ver en cuál
+  // saco buen match y soy para eso." Informational only; never clicks anything.
+  let vacancyMatchCardEl = null;
+  const vacancyMatchDismissedIds = new Set();
+
+  function removeVacancyMatchCard() {
+    if (vacancyMatchCardEl) {
+      try { vacancyMatchCardEl.remove(); } catch (_) {}
+      vacancyMatchCardEl = null;
+    }
+  }
+
+  // Level → brand-aligned color + human label.
+  function vacancyMatchVisual(level) {
+    switch (level) {
+      case "high": return { color: "#16a34a", bg: "#ecfdf5", label: "Alto" };
+      case "mid":  return { color: "#0d9488", bg: "#ecfdfa", label: "Bueno" };
+      case "low":  return { color: "#d97706", bg: "#fffbeb", label: "Medio" };
+      default:      return { color: "#6b7280", bg: "#f3f4f6", label: "Bajo" };
+    }
+  }
+
+  async function renderVacancyMatchCard() {
+    if (fabMode() !== "vacancy") { removeVacancyMatchCard(); return; }
+    let vacId = "";
+    try { vacId = idFromUrl(location.href) || ""; } catch (_) {}
+    if (vacId && vacancyMatchDismissedIds.has(vacId)) return;
+    try { await ensureDiscoveryDeps(); } catch (_) {}
+    if (!matchScoreModule) return;
+    try { await loadProfileOnce(); } catch (_) {}
+    try { await loadPreferencesOnce(); } catch (_) {}
+    // Re-check: SPA nav may have moved us off the vacancy while awaiting.
+    if (fabMode() !== "vacancy") { removeVacancyMatchCard(); return; }
+
+    // Extract the job from the detail DOM (has description + requirements →
+    // full scoring, not the thin listing fallback).
+    let job = null;
+    try { job = extractJob().job; } catch (_) {}
+    if (!job || !job.title || job.title === "(sin título)") return; // not ready
+
+    let inner = "";
+    if (!cachedProfile) {
+      // No CV yet → prompt instead of a misleading 0%.
+      inner = `
+        <div style="font-size:13px;line-height:1.4;color:#374151;">
+          Sube tu CV y te digo <strong>qué tan buen match</strong> eres para esta vacante — antes de postular.
+        </div>
+        <button type="button" data-eamx-vmatch-options style="margin-top:10px;width:100%;border:0;border-radius:10px;padding:9px 12px;background:#0d9488;color:#fff;font-weight:700;font-size:13px;cursor:pointer;">Subir mi CV →</button>
+      `;
+    } else {
+      const effectivePrefs = (typeof matchScoreModule.effectivePreferences === "function")
+        ? matchScoreModule.effectivePreferences(cachedPreferences, cachedProfile)
+        : null;
+      let score = 0, reasons = [];
+      try {
+        const r = matchScoreModule.computeMatchScore(cachedProfile, job, effectivePrefs);
+        score = Math.round(Number(r.score)) || 0;
+        reasons = Array.isArray(r.reasons) ? r.reasons : [];
+      } catch (_) { return; }
+      const level = (typeof matchScoreModule.levelForScore === "function")
+        ? matchScoreModule.levelForScore(score) : "mid";
+      const v = vacancyMatchVisual(level);
+      const chips = reasons.slice(0, 3).map((r) =>
+        `<span style="display:inline-block;background:${v.bg};color:${v.color};border-radius:999px;padding:3px 9px;font-size:11px;font-weight:600;margin:2px 4px 2px 0;">✓ ${escapeHtml(String(r))}</span>`
+      ).join("");
+      inner = `
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div style="flex:0 0 auto;width:52px;height:52px;border-radius:50%;background:${v.bg};color:${v.color};display:flex;align-items:center;justify-content:center;font-weight:800;font-size:16px;">${score}%</div>
+          <div style="flex:1 1 auto;min-width:0;">
+            <div style="font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#6b7280;">Tu match</div>
+            <div style="font-size:15px;font-weight:800;color:${v.color};">${escapeHtml(v.label)}</div>
+          </div>
+        </div>
+        ${chips ? `<div style="margin-top:8px;">${chips}</div>` : ""}
+        <div style="margin-top:9px;font-size:11.5px;color:#6b7280;line-height:1.35;">Tú decides — si te late, dale <strong style="color:#0d9488;">Postular con IA</strong> aquí abajo 👇</div>
+      `;
+    }
+
+    removeVacancyMatchCard();
+    const card = document.createElement("div");
+    card.setAttribute("data-eamx", "vacancy-match");
+    card.style.cssText = [
+      "position:fixed", "right:24px", "bottom:96px", "z-index:2147483599",
+      "width:268px", "max-width:calc(100vw - 32px)", "box-sizing:border-box",
+      "background:#fff", "border:1px solid #e5e7eb", "border-radius:16px",
+      "box-shadow:0 12px 32px rgba(15,23,42,.18)", "padding:14px 14px 13px",
+      "font-family:inherit"
+    ].join(";");
+    card.innerHTML = `
+      <button type="button" data-eamx-vmatch-close aria-label="Cerrar" style="position:absolute;top:8px;right:8px;width:22px;height:22px;border:0;border-radius:50%;background:#f3f4f6;color:#6b7280;font-size:13px;line-height:1;cursor:pointer;">✕</button>
+      ${inner}
+    `;
+    card.addEventListener("click", (ev) => {
+      if (ev.target.closest("[data-eamx-vmatch-close]")) {
+        if (vacId) vacancyMatchDismissedIds.add(vacId);
+        removeVacancyMatchCard();
+        return;
+      }
+      if (ev.target.closest("[data-eamx-vmatch-options]")) {
+        try { chrome.runtime.sendMessage({ type: MSG.OPEN_WELCOME }); } catch (_) {}
+      }
+    });
+    document.documentElement.appendChild(card);
+    vacancyMatchCardEl = card;
+  }
+
+  // =========================================================================
   // SPA nav watching & bootstrap
   // =========================================================================
 
   function detectAndMount() {
+    // Match card only belongs on a vacancy DETAIL page — drop it the moment
+    // we re-evaluate the route as anything else (apply form, listing, left).
+    if (fabMode() !== "vacancy") { try { removeVacancyMatchCard(); } catch (_) {} }
     // Profile-page importer (Mis vacantes → Postulaciones). Self-gates on
     // the /profile route and disconnects its observer when leaving.
     try { maybeStartApplicationsImport(); } catch (_) {}
@@ -10872,6 +10986,10 @@
         // the top). Slightly later tick so terminal-state banners (which
         // LaPieza renders after the hero) are in the DOM.
         setTimeout(() => { try { maybePersistClosed(); } catch (_) {} }, 2000);
+        // MATCH CARD: show "Tu match: X%" ON the vacancy so the user can judge
+        // fit and DECIDE whether to postular — never forced. Later tick so the
+        // JD (JSON-LD/DOM) is rendered and cachedProfile/prefs are loaded.
+        setTimeout(() => { try { renderVacancyMatchCard(); } catch (_) {} }, 2200);
       } else if (fabMode() === "apply") {
         setTimeout(() => maybeAutoFireExpressOnApply(), 600);
         // Always arm the flow assistant on /apply/ — even if the user
