@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-14-tu-match-reintenta";
+  const EAMX_LAPIEZA_VERSION = "2026-06-14-boton-ver-vacante";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -5064,7 +5064,7 @@
         <h2>🎯 Mejores matches en esta página</h2>
         <button type="button" class="eamx-matches-panel__close" aria-label="Cerrar">✕</button>
       </header>
-      <p class="eamx-matches-panel__lead">Top 25 vacantes ordenadas por afinidad con tu CV. Tú decides a cuáles postular.</p>
+      <p class="eamx-matches-panel__lead">Top 25 vacantes ordenadas por afinidad con tu CV. Dale <strong>👁 Ver</strong> para revisarla sin postular, o <strong>⚡ Postular</strong> para que la IA la envíe.</p>
       <div class="eamx-matches-panel__widening" data-eamx-matches-widening hidden>
         <span class="eamx-matches-panel__widening-dot" aria-hidden="true"></span>
         <span class="eamx-matches-panel__widening-text" data-eamx-widening-text>🔍 Buscando más vacantes…</span>
@@ -6923,6 +6923,15 @@
     const applyAction = isApplied
       ? `<a href="${safeUrl}" target="_blank" rel="noopener" class="eamx-match-item__apply eamx-match-item__apply--applied">Abrir vacante</a>`
       : `<a data-action="quick-apply" href="${safeUrl}" target="_blank" rel="noopener" class="eamx-match-item__apply" data-job-id="${safeId}">⚡ Postular →</a>`;
+    // "Ver" — opens the vacancy in READ-ONLY (no data-action → just a plain
+    // link, no quick-apply flag set), so the user can review the posting and
+    // see the "Tu match" card BEFORE deciding to postular. This is the missing
+    // "ver sin postular" path: from the panel the only action used to be
+    // "Postular →" which (in Automático total) opens AND sends. User: "¿dónde?"
+    // — they couldn't reach the vacancy page without applying.
+    const viewAction = isApplied
+      ? ""
+      : `<a href="${safeUrl}" target="_blank" rel="noopener" class="eamx-match-item__view" title="Abrir la vacante para verla y revisar tu match — NO postula" style="display:inline-flex;align-items:center;gap:5px;padding:6px 12px;border-radius:8px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.06);color:#f1f5f9;font:600 12.5px/1 inherit;text-decoration:none;white-space:nowrap;">👁 Ver</a>`;
     // Manual "ya apliqué" link — for vacancies the user applied to OUTSIDE
     // our chain (manually, before the tracker existed, or from another
     // device). Hidden once the item is already marked as applied.
@@ -6951,6 +6960,7 @@
             <button type="button" data-action="mark" data-id="${safeId}" class="eamx-match-item__mark" aria-pressed="false">
               <span aria-hidden="true">⭐</span><span>Marcar</span>
             </button>
+            ${viewAction}
             ${applyAction}
           </div>
           ${manualMarkApplied}
