@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-15-match-anclado-descripcion";
+  const EAMX_LAPIEZA_VERSION = "2026-06-15-match-real-auto";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -10819,6 +10819,26 @@
   // local "match rápido" is recomputed each render (cheap, deterministic).
   const vacancyMatchAICache = new Map();   // vacId -> { score, level, matches, gaps, improveTips }
   const vacancyMatchAILoading = new Set(); // vacIds whose AI call is in flight
+  // Persisted cache (chrome.storage.local) so the REAL AI score survives page
+  // reloads and re-views NEVER re-spend a daily analysis. 7-day TTL.
+  const VMATCH_CACHE_PREFIX = "eamx:matchAI:lapieza:";
+  const VMATCH_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+  function loadAIMatchFromStorage(vacId) {
+    return new Promise((resolve) => {
+      if (!vacId || !chrome?.storage?.local) { resolve(null); return; }
+      try {
+        chrome.storage.local.get([VMATCH_CACHE_PREFIX + vacId], (r) => {
+          const e = r && r[VMATCH_CACHE_PREFIX + vacId];
+          if (e && e.result && (Date.now() - (e.at || 0) < VMATCH_CACHE_TTL_MS)) resolve(e.result);
+          else resolve(null);
+        });
+      } catch (_) { resolve(null); }
+    });
+  }
+  function saveAIMatchToStorage(vacId, result) {
+    if (!vacId || !chrome?.storage?.local) return;
+    try { chrome.storage.local.set({ [VMATCH_CACHE_PREFIX + vacId]: { result, at: Date.now() } }); } catch (_) {}
+  }
 
   function removeVacancyMatchCard() {
     if (vacancyMatchCardEl) {
@@ -10926,10 +10946,14 @@
     vacancyMatchCardEl = card;
   }
 
-  // Quick LOCAL score (title-based, same as the panel) + the CTA to run the
-  // accurate AI analysis. Labeled "MATCH RÁPIDO" so a different AI number reads
-  // as "more precise", not "a bug".
-  function quickMatchInner(job, vacId) {
+  // Quick LOCAL score (title-based) shown WHILE the real AI is computing, or as
+  // a framed estimate when the AI couldn't run (limit/error). state:
+  //   "refining" — AI auto-running now → spinner "Afinando con IA…".
+  //   "limit"    — hit the daily AI cap → upsell to planes.
+  //   "error"    — AI failed → Reintentar.
+  // The headline never says "estimado por título" (that read as cheap/chafa) —
+  // during refining it's just "Tu match" + a spinner so it reads as computing.
+  function quickMatchInner(job, vacId, state) {
     const effectivePrefs = (typeof matchScoreModule.effectivePreferences === "function")
       ? matchScoreModule.effectivePreferences(cachedPreferences, cachedProfile)
       : null;
@@ -10945,17 +10969,35 @@
     const level = (typeof matchScoreModule.levelForScore === "function")
       ? matchScoreModule.levelForScore(score) : "mid";
     const v = vacancyMatchVisual(level);
+    const refining = state === "refining";
+    const eyebrow = refining ? "Tu match" : "Match estimado";
+    let bottom;
+    if (refining) {
+      bottom = `
+        <div style="margin-top:11px;display:flex;align-items:center;gap:9px;background:#f0fdfa;border:1px solid #99f6e4;border-radius:11px;padding:9px 11px;">
+          <div style="flex:0 0 auto;width:18px;height:18px;border:2.5px solid #ccfbf1;border-top-color:#0d9488;border-radius:50%;animation:eamx-spin .8s linear infinite;"></div>
+          <div style="font-size:12px;font-weight:700;color:#0f766e;">Afinando tu match real con IA…</div>
+        </div>
+        <div style="margin-top:7px;font-size:11px;color:#6b7280;line-height:1.4;">Leyendo la vacante completa + tu CV: % real, qué te falta y cómo subirlo. ~5s.</div>
+        <style>@keyframes eamx-spin{to{transform:rotate(360deg)}}</style>`;
+    } else if (state === "limit") {
+      bottom = `
+        <div style="margin-top:11px;font-size:12px;color:#374151;line-height:1.4;">🔒 El <strong>match real con IA</strong>: llegaste a tus análisis de hoy.</div>
+        <a href="https://empleo.skybrandmx.com/account/billing" target="_blank" rel="noopener" style="display:block;margin-top:9px;text-align:center;text-decoration:none;border-radius:11px;padding:10px;background:#0d9488;color:#fff;font-weight:800;font-size:13px;">Análisis ilimitados — ver planes →</a>`;
+    } else {
+      bottom = `
+        <div style="margin-top:11px;font-size:12px;color:#374151;line-height:1.4;">No pude afinar tu match con IA ahora.</div>
+        <button type="button" data-eamx-vmatch-analyze style="margin-top:9px;width:100%;border:0;border-radius:11px;padding:10px 12px;background:#0d9488;color:#fff;font-weight:800;font-size:13px;cursor:pointer;">Reintentar análisis con IA</button>`;
+    }
     return `
       <div style="display:flex;align-items:center;gap:10px;">
-        <div style="flex:0 0 auto;width:50px;height:50px;border-radius:50%;background:${v.bg};color:${v.color};display:flex;align-items:center;justify-content:center;font-weight:800;font-size:15px;">${score}%</div>
+        <div style="flex:0 0 auto;width:52px;height:52px;border-radius:50%;background:${v.bg};color:${v.color};display:flex;align-items:center;justify-content:center;font-weight:800;font-size:16px;">${score}%</div>
         <div style="flex:1 1 auto;min-width:0;">
-          <div style="font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#9ca3af;">Match rápido</div>
-          <div style="font-size:14px;font-weight:800;color:${v.color};">${escapeHtml(v.label)}</div>
-          <div style="font-size:10.5px;color:#9ca3af;">estimado por título</div>
+          <div style="font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#9ca3af;">${eyebrow}</div>
+          <div style="font-size:15px;font-weight:800;color:${v.color};">${escapeHtml(v.label)}</div>
         </div>
       </div>
-      <button type="button" data-eamx-vmatch-analyze style="margin-top:12px;width:100%;border:0;border-radius:11px;padding:11px 12px;background:linear-gradient(135deg,#0d9488,#0f766e);color:#fff;font-weight:800;font-size:13.5px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">🎯 Analizar mi match real (IA)</button>
-      <div style="margin-top:8px;font-size:11.5px;color:#6b7280;line-height:1.4;">Leo la vacante completa + tu CV y te digo el % real, qué te falta y <strong style="color:#0d9488;">cómo subirlo</strong>.</div>
+      ${bottom}
     `;
   }
 
@@ -11000,11 +11042,16 @@
     `;
   }
 
-  async function runVacancyMatchAI(ctx) {
+  // opts.auto = fired automatically on open (keep the quick-score + spinner
+  // already on screen, and fall back to the quick estimate on limit/error
+  // instead of a scary full-card error). Manual (Reintentar) shows a loader.
+  async function runVacancyMatchAI(ctx, opts) {
+    const auto = !!(opts && opts.auto);
     const { vacId, job } = ctx;
     if (vacId && vacancyMatchAILoading.has(vacId)) return;
     if (vacId) vacancyMatchAILoading.add(vacId);
-    paintVacancyMatchCard(loadingInner(), ctx);
+    if (auto) paintVacancyMatchCard(quickMatchInner(job, vacId, "refining"), ctx);
+    else paintVacancyMatchCard(loadingInner(), ctx);
     let res = null;
     try {
       res = await sendMsg({ type: MSG.ANALYZE_MATCH, job });
@@ -11018,14 +11065,9 @@
 
     if (!res || !res.ok) {
       const isLimit = res && res.error === "PLAN_LIMIT_EXCEEDED";
-      const msg = (res && res.message) || "No se pudo analizar tu match. Intenta de nuevo.";
-      paintVacancyMatchCard(`
-        <div style="font-size:13px;font-weight:700;color:#b45309;">${isLimit ? "Llegaste a tu límite de hoy" : "No se pudo analizar"}</div>
-        <div style="margin-top:6px;font-size:12px;color:#374151;line-height:1.4;">${escapeHtml(msg)}</div>
-        ${isLimit
-          ? `<a href="https://empleo.skybrandmx.com/account/billing" target="_blank" rel="noopener" style="display:block;margin-top:10px;text-align:center;text-decoration:none;border-radius:11px;padding:10px;background:#0d9488;color:#fff;font-weight:800;font-size:13px;">Ver planes — análisis ilimitados</a>`
-          : `<button type="button" data-eamx-vmatch-analyze style="margin-top:10px;width:100%;border:0;border-radius:11px;padding:10px;background:#0d9488;color:#fff;font-weight:800;font-size:13px;cursor:pointer;">Reintentar</button>`}
-      `, ctx);
+      // Auto-run failures degrade gracefully to the quick estimate (framed),
+      // never a scary error card the user didn't ask for.
+      paintVacancyMatchCard(quickMatchInner(job, vacId, isLimit ? "limit" : "error"), ctx);
       return;
     }
     const clean = {
@@ -11035,7 +11077,7 @@
       gaps: Array.isArray(res.gaps) ? res.gaps : [],
       improveTips: Array.isArray(res.improveTips) ? res.improveTips : []
     };
-    if (vacId) vacancyMatchAICache.set(vacId, clean);
+    if (vacId) { vacancyMatchAICache.set(vacId, clean); saveAIMatchToStorage(vacId, clean); }
     paintVacancyMatchCard(aiMatchInner(clean), ctx);
   }
 
@@ -11102,16 +11144,32 @@
       return;
     }
 
-    // Cached AI result → show it directly (instant + stable). Else, if an AI
-    // call is in flight for this vacancy, keep the loader; otherwise the quick
-    // score + the "analizar con IA" CTA.
+    // 1) Memory cache → instant + stable (same number every reopen).
     if (vacId && vacancyMatchAICache.has(vacId)) {
       paintVacancyMatchCard(aiMatchInner(vacancyMatchAICache.get(vacId)), ctx);
-    } else if (vacId && vacancyMatchAILoading.has(vacId)) {
-      paintVacancyMatchCard(loadingInner(), ctx);
-    } else {
-      paintVacancyMatchCard(quickMatchInner(job, vacId), ctx);
+      return;
     }
+    // 2) Already analyzing this vacancy → keep the quick score + spinner.
+    if (vacId && vacancyMatchAILoading.has(vacId)) {
+      paintVacancyMatchCard(quickMatchInner(job, vacId, "refining"), ctx);
+      return;
+    }
+    // 3) Persisted cache (survives reloads; re-views never re-spend a daily
+    //    analysis — important now that the AI auto-runs on open).
+    if (vacId) {
+      const stored = await loadAIMatchFromStorage(vacId);
+      if (fabMode() !== "vacancy" || vacancyMatchDismissedIds.has(vacId)) return;
+      if (stored) {
+        vacancyMatchAICache.set(vacId, stored);
+        paintVacancyMatchCard(aiMatchInner(stored), ctx);
+        return;
+      }
+    }
+    // 4) Not analyzed yet → show the quick score immediately (so it's never
+    //    blank) WHILE the REAL AI auto-runs. The result is what the user wants
+    //    to see — not a "chafa" title-based estimate. (User: "debería ser real".)
+    paintVacancyMatchCard(quickMatchInner(job, vacId, "refining"), ctx);
+    runVacancyMatchAI(ctx, { auto: true });
   }
 
   // =========================================================================

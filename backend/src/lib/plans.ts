@@ -42,7 +42,7 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     monthlyLimit: 3,
     softCap: 3,
     dailyLimit: -1,
-    matchAnalysisDailyLimit: 3,   // taste of the feature; drives upgrades
+    matchAnalysisDailyLimit: 10,  // generous taste (auto-runs on open); drives upgrades
     priceMxn: { monthly: 0, yearly: 0 }
   },
   pro: {
