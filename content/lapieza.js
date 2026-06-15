@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-14-match-consistente";
+  const EAMX_LAPIEZA_VERSION = "2026-06-15-match-real-ia";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -61,6 +61,7 @@
     GENERATE_CV: "GENERATE_CV",
     GENERATE_CV_PDF: "GENERATE_CV_PDF",
     OPEN_GENERATED_CV: "OPEN_GENERATED_CV",
+    ANALYZE_MATCH: "ANALYZE_MATCH",
     ANSWER_QUESTIONS: "ANSWER_QUESTIONS",
     ANSWER_QUIZ: "ANSWER_QUIZ",
     // Server-side history sync. These MUST exist here: sendMsg fires with
@@ -150,6 +151,7 @@
         OPEN_BILLING: mod.MESSAGE_TYPES.OPEN_BILLING,
         GENERATE_CV: mod.MESSAGE_TYPES.GENERATE_CV,
         OPEN_GENERATED_CV: mod.MESSAGE_TYPES.OPEN_GENERATED_CV,
+        ANALYZE_MATCH: mod.MESSAGE_TYPES.ANALYZE_MATCH || "ANALYZE_MATCH",
         ANSWER_QUESTIONS: mod.MESSAGE_TYPES.ANSWER_QUESTIONS,
         ANSWER_QUIZ: mod.MESSAGE_TYPES.ANSWER_QUIZ || "ANSWER_QUIZ",
         TRACK_APPLICATION: mod.MESSAGE_TYPES.TRACK_APPLICATION || "TRACK_APPLICATION",
@@ -10812,6 +10814,11 @@
   // saco buen match y soy para eso." Informational only; never clicks anything.
   let vacancyMatchCardEl = null;
   const vacancyMatchDismissedIds = new Set();
+  // Cache the AI "match real" per vacancy id so reopening is INSTANT and the
+  // number is STABLE (never silently recomputes to a different value). The
+  // local "match rápido" is recomputed each render (cheap, deterministic).
+  const vacancyMatchAICache = new Map();   // vacId -> { score, level, matches, gaps, improveTips }
+  const vacancyMatchAILoading = new Set(); // vacIds whose AI call is in flight
 
   function removeVacancyMatchCard() {
     if (vacancyMatchCardEl) {
@@ -10830,6 +10837,190 @@
     }
   }
 
+  function vmChips(items, color, bg, mark) {
+    return (items || []).slice(0, 6).map((x) =>
+      `<span style="display:inline-block;background:${bg};color:${color};border-radius:999px;padding:3px 9px;font-size:11px;font-weight:600;margin:2px 4px 2px 0;line-height:1.3;">${mark} ${escapeHtml(String(x))}</span>`
+    ).join("");
+  }
+
+  // Mount the card shell around `inner` and wire the delegated click handler.
+  // ctx = { vacId, job }.
+  function paintVacancyMatchCard(inner, ctx) {
+    removeVacancyMatchCard();
+    const card = document.createElement("div");
+    card.setAttribute("data-eamx", "vacancy-match");
+    card.style.cssText = [
+      "position:fixed", "right:24px", "bottom:96px", "z-index:2147483599",
+      "width:288px", "max-width:calc(100vw - 32px)",
+      "max-height:calc(100vh - 130px)", "overflow-y:auto", "box-sizing:border-box",
+      "background:#fff", "border:1px solid #e5e7eb", "border-radius:16px",
+      "box-shadow:0 12px 32px rgba(15,23,42,.18)", "padding:14px 14px 13px",
+      "font-family:inherit"
+    ].join(";");
+    card.innerHTML = `
+      <button type="button" data-eamx-vmatch-close aria-label="Cerrar" style="position:absolute;top:8px;right:8px;width:22px;height:22px;border:0;border-radius:50%;background:#f3f4f6;color:#6b7280;font-size:13px;line-height:1;cursor:pointer;z-index:1;">✕</button>
+      ${inner}
+    `;
+    card.addEventListener("click", (ev) => {
+      if (ev.target.closest("[data-eamx-vmatch-close]")) {
+        if (ctx.vacId) vacancyMatchDismissedIds.add(ctx.vacId);
+        removeVacancyMatchCard();
+        return;
+      }
+      if (ev.target.closest("[data-eamx-vmatch-options]")) {
+        try { chrome.runtime.sendMessage({ type: MSG.OPEN_WELCOME }); } catch (_) {}
+        return;
+      }
+      if (ev.target.closest("[data-eamx-vmatch-analyze]")) {
+        runVacancyMatchAI(ctx);
+        return;
+      }
+      if (ev.target.closest("[data-eamx-vmatch-optcv]")) {
+        runVacancyOptimizedCv(ctx);
+        return;
+      }
+    });
+    document.documentElement.appendChild(card);
+    vacancyMatchCardEl = card;
+  }
+
+  // Quick LOCAL score (title-based, same as the panel) + the CTA to run the
+  // accurate AI analysis. Labeled "MATCH RÁPIDO" so a different AI number reads
+  // as "more precise", not "a bug".
+  function quickMatchInner(job, vacId) {
+    const effectivePrefs = (typeof matchScoreModule.effectivePreferences === "function")
+      ? matchScoreModule.effectivePreferences(cachedPreferences, cachedProfile)
+      : null;
+    const jobLite = {
+      id: vacId || "", url: job.url || location.href,
+      title: job.title || "", company: job.company || "", location: job.location || ""
+    };
+    let score = 0;
+    try {
+      const r = matchScoreModule.computeMatchScore(cachedProfile, jobLite, effectivePrefs);
+      score = Math.round(Number(r.score)) || 0;
+    } catch (_) {}
+    const level = (typeof matchScoreModule.levelForScore === "function")
+      ? matchScoreModule.levelForScore(score) : "mid";
+    const v = vacancyMatchVisual(level);
+    return `
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div style="flex:0 0 auto;width:50px;height:50px;border-radius:50%;background:${v.bg};color:${v.color};display:flex;align-items:center;justify-content:center;font-weight:800;font-size:15px;">${score}%</div>
+        <div style="flex:1 1 auto;min-width:0;">
+          <div style="font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#9ca3af;">Match rápido</div>
+          <div style="font-size:14px;font-weight:800;color:${v.color};">${escapeHtml(v.label)}</div>
+          <div style="font-size:10.5px;color:#9ca3af;">estimado por título</div>
+        </div>
+      </div>
+      <button type="button" data-eamx-vmatch-analyze style="margin-top:12px;width:100%;border:0;border-radius:11px;padding:11px 12px;background:linear-gradient(135deg,#0d9488,#0f766e);color:#fff;font-weight:800;font-size:13.5px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">🎯 Analizar mi match real (IA)</button>
+      <div style="margin-top:8px;font-size:11.5px;color:#6b7280;line-height:1.4;">Leo la vacante completa + tu CV y te digo el % real, qué te falta y <strong style="color:#0d9488;">cómo subirlo</strong>.</div>
+    `;
+  }
+
+  // Accurate AI result: score + matches (✓) + gaps (⚠) + how to improve (⤴) +
+  // the "Generar CV optimizado" CTA. This is the differentiator.
+  function aiMatchInner(res) {
+    const v = vacancyMatchVisual(res.level);
+    const matchChips = vmChips(res.matches, "#16a34a", "#ecfdf5", "✓");
+    const gapChips = vmChips(res.gaps, "#b45309", "#fffbeb", "⚠");
+    const tips = (res.improveTips || []).slice(0, 4);
+    const tipsBlock = tips.length ? `
+      <div style="margin-top:11px;background:#f0fdfa;border:1px solid #99f6e4;border-radius:11px;padding:9px 11px;">
+        <div style="font-size:11px;font-weight:800;color:#0f766e;letter-spacing:.02em;">⤴ Cómo subir tu match</div>
+        <ul style="margin:6px 0 0;padding-left:16px;font-size:11.5px;color:#134e4a;line-height:1.45;">
+          ${tips.map((t) => `<li style="margin-bottom:3px;">${escapeHtml(String(t))}</li>`).join("")}
+        </ul>
+      </div>` : "";
+    return `
+      <div style="display:flex;align-items:center;gap:11px;">
+        <div style="flex:0 0 auto;width:58px;height:58px;border-radius:50%;background:${v.bg};color:${v.color};display:flex;align-items:center;justify-content:center;font-weight:800;font-size:18px;">${res.score}%</div>
+        <div style="flex:1 1 auto;min-width:0;">
+          <div style="display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;color:#0f766e;background:#ccfbf1;border-radius:999px;padding:2px 7px;">✨ Match real · IA</div>
+          <div style="font-size:16px;font-weight:800;color:${v.color};margin-top:3px;">${escapeHtml(v.label)}</div>
+        </div>
+      </div>
+      ${matchChips ? `<div style="margin-top:9px;">${matchChips}</div>` : ""}
+      ${gapChips ? `<div style="margin-top:5px;">${gapChips}</div>` : ""}
+      ${tipsBlock}
+      <button type="button" data-eamx-vmatch-optcv style="margin-top:11px;width:100%;border:0;border-radius:11px;padding:10px 12px;background:#0f172a;color:#fff;font-weight:800;font-size:13px;cursor:pointer;">📄 Generar mi CV optimizado para esta vacante</button>
+      <div style="margin-top:8px;font-size:11px;color:#6b7280;line-height:1.35;">Sube tu match aplicando los tips. Luego dale <strong style="color:#0d9488;">Postular con IA</strong> 👇</div>
+    `;
+  }
+
+  function loadingInner() {
+    return `
+      <div style="display:flex;align-items:center;gap:10px;padding:6px 0;">
+        <div style="flex:0 0 auto;width:22px;height:22px;border:3px solid #ccfbf1;border-top-color:#0d9488;border-radius:50%;animation:eamx-spin 0.8s linear infinite;"></div>
+        <div style="font-size:13px;font-weight:700;color:#0f766e;">Analizando tu match con IA…</div>
+      </div>
+      <div style="margin-top:6px;font-size:11.5px;color:#6b7280;">Leyendo la vacante completa y comparándola con tu CV. ~5s.</div>
+      <style>@keyframes eamx-spin{to{transform:rotate(360deg)}}</style>
+    `;
+  }
+
+  async function runVacancyMatchAI(ctx) {
+    const { vacId, job } = ctx;
+    if (vacId && vacancyMatchAILoading.has(vacId)) return;
+    if (vacId) vacancyMatchAILoading.add(vacId);
+    paintVacancyMatchCard(loadingInner(), ctx);
+    let res = null;
+    try {
+      res = await sendMsg({ type: MSG.ANALYZE_MATCH, job });
+    } catch (e) {
+      res = { ok: false, message: (e && e.message) || "No se pudo analizar." };
+    }
+    if (vacId) vacancyMatchAILoading.delete(vacId);
+    // The card may have been dismissed/navigated away while awaiting.
+    if (fabMode() !== "vacancy") return;
+    if (vacId && vacancyMatchDismissedIds.has(vacId)) return;
+
+    if (!res || !res.ok) {
+      const isLimit = res && res.error === "PLAN_LIMIT_EXCEEDED";
+      const msg = (res && res.message) || "No se pudo analizar tu match. Intenta de nuevo.";
+      paintVacancyMatchCard(`
+        <div style="font-size:13px;font-weight:700;color:#b45309;">${isLimit ? "Llegaste a tu límite de hoy" : "No se pudo analizar"}</div>
+        <div style="margin-top:6px;font-size:12px;color:#374151;line-height:1.4;">${escapeHtml(msg)}</div>
+        ${isLimit
+          ? `<a href="https://empleo.skybrandmx.com/account/billing" target="_blank" rel="noopener" style="display:block;margin-top:10px;text-align:center;text-decoration:none;border-radius:11px;padding:10px;background:#0d9488;color:#fff;font-weight:800;font-size:13px;">Ver planes — análisis ilimitados</a>`
+          : `<button type="button" data-eamx-vmatch-analyze style="margin-top:10px;width:100%;border:0;border-radius:11px;padding:10px;background:#0d9488;color:#fff;font-weight:800;font-size:13px;cursor:pointer;">Reintentar</button>`}
+      `, ctx);
+      return;
+    }
+    const clean = {
+      score: typeof res.score === "number" ? res.score : 0,
+      level: res.level || "low",
+      matches: Array.isArray(res.matches) ? res.matches : [],
+      gaps: Array.isArray(res.gaps) ? res.gaps : [],
+      improveTips: Array.isArray(res.improveTips) ? res.improveTips : []
+    };
+    if (vacId) vacancyMatchAICache.set(vacId, clean);
+    paintVacancyMatchCard(aiMatchInner(clean), ctx);
+  }
+
+  async function runVacancyOptimizedCv(ctx) {
+    try { toast("Generando tu CV optimizado para esta vacante…", "info", { durationMs: 4000 }); } catch (_) {}
+    let res = null;
+    try {
+      res = await sendMsg({ type: MSG.GENERATE_CV, job: ctx.job });
+    } catch (e) {
+      try { toast(humanizeError(e), "error"); } catch (_) {}
+      return;
+    }
+    if (!res || !res.ok || !res.html) {
+      const m = (res && res.message) || "No se pudo generar el CV. Intenta de nuevo.";
+      try { toast(m, "error", { durationMs: 6000 }); } catch (_) {}
+      return;
+    }
+    let openRes = null;
+    try { openRes = await sendMsg({ type: MSG.OPEN_GENERATED_CV, html: res.html }); } catch (_) {}
+    if (!openRes || !openRes.ok) {
+      try { openRes = await sendMsg({ type: MSG.OPEN_GENERATED_CV, html: res.html, useDataUrl: true }); } catch (_) {}
+    }
+    if (!openRes || !openRes.ok) {
+      try { toast("Generé tu CV pero no pude abrir la pestaña. Revisa el bloqueador de pop-ups.", "info", { durationMs: 7000 }); } catch (_) {}
+    }
+  }
+
   async function renderVacancyMatchCard(attempt = 0) {
     if (fabMode() !== "vacancy") { removeVacancyMatchCard(); return; }
     let vacId = "";
@@ -10842,101 +11033,43 @@
     // Re-check: SPA nav may have moved us off the vacancy while awaiting.
     if (fabMode() !== "vacancy") { removeVacancyMatchCard(); return; }
 
-    // Extract the job from the detail DOM — we only use its title/company/
-    // location (the description is intentionally NOT fed to the scorer below,
-    // to keep this card's number identical to the panel's).
+    // Extract the FULL job from the detail DOM (title/company/location +
+    // description + requirements). The quick local score uses only the thin
+    // fields; the AI analysis uses the whole thing.
     let job = null;
     try { job = extractJob().job; } catch (_) {}
     if (!job || !job.title || job.title === "(sin título)") {
-      // The JD (JSON-LD / DOM) may not have rendered yet — especially on a
-      // fresh tab or slow load. Retry a few times before giving up instead of
-      // silently never showing the card ("sigue sin salir").
+      // The JD may not have rendered yet (fresh tab / slow load). Retry a few
+      // times before giving up instead of silently never showing the card.
       if (attempt < 6) {
         setTimeout(() => { try { renderVacancyMatchCard(attempt + 1); } catch (_) {} }, 1200);
       }
       return;
     }
 
-    let inner = "";
+    const ctx = { vacId, job };
+
     if (!cachedProfile) {
-      // No CV yet → prompt instead of a misleading 0%.
-      inner = `
+      // No CV yet → prompt instead of a misleading score.
+      paintVacancyMatchCard(`
         <div style="font-size:13px;line-height:1.4;color:#374151;">
-          Sube tu CV y te digo <strong>qué tan buen match</strong> eres para esta vacante — antes de postular.
+          Sube tu CV y te digo <strong>qué tan buen match</strong> eres para esta vacante — y cómo subirlo.
         </div>
         <button type="button" data-eamx-vmatch-options style="margin-top:10px;width:100%;border:0;border-radius:10px;padding:9px 12px;background:#0d9488;color:#fff;font-weight:700;font-size:13px;cursor:pointer;">Subir mi CV →</button>
-      `;
-    } else {
-      const effectivePrefs = (typeof matchScoreModule.effectivePreferences === "function")
-        ? matchScoreModule.effectivePreferences(cachedPreferences, cachedProfile)
-        : null;
-      // Score with a THIN jobLite (title/company/location only — NO
-      // description/requirements) so this card takes the SAME "listing"
-      // scoring path the panel uses (the panel's extractJobLiteFromCard is
-      // also thin). With extractJob's full JD, computeMatchScore switched to
-      // its richer algorithm and the detail card showed a DIFFERENT number
-      // than the panel for the SAME vacancy (user: "¿por qué 10% aquí y 67%
-      // en mejores match?"), plus different/penalty reasons. Consistency with
-      // the panel (the user's reference) matters more than the JD-refined
-      // estimate.
-      const jobLite = {
-        id: vacId || "",
-        url: job.url || location.href,
-        title: job.title || "",
-        company: job.company || "",
-        location: job.location || ""
-      };
-      let score = 0, reasons = [];
-      try {
-        const r = matchScoreModule.computeMatchScore(cachedProfile, jobLite, effectivePrefs);
-        score = Math.round(Number(r.score)) || 0;
-        reasons = Array.isArray(r.reasons) ? r.reasons : [];
-      } catch (_) { return; }
-      const level = (typeof matchScoreModule.levelForScore === "function")
-        ? matchScoreModule.levelForScore(score) : "mid";
-      const v = vacancyMatchVisual(level);
-      const chips = reasons.slice(0, 3).map((r) =>
-        `<span style="display:inline-block;background:${v.bg};color:${v.color};border-radius:999px;padding:3px 9px;font-size:11px;font-weight:600;margin:2px 4px 2px 0;">✓ ${escapeHtml(String(r))}</span>`
-      ).join("");
-      inner = `
-        <div style="display:flex;align-items:center;gap:10px;">
-          <div style="flex:0 0 auto;width:52px;height:52px;border-radius:50%;background:${v.bg};color:${v.color};display:flex;align-items:center;justify-content:center;font-weight:800;font-size:16px;">${score}%</div>
-          <div style="flex:1 1 auto;min-width:0;">
-            <div style="font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#6b7280;">Tu match</div>
-            <div style="font-size:15px;font-weight:800;color:${v.color};">${escapeHtml(v.label)}</div>
-          </div>
-        </div>
-        ${chips ? `<div style="margin-top:8px;">${chips}</div>` : ""}
-        <div style="margin-top:9px;font-size:11.5px;color:#6b7280;line-height:1.35;">Tú decides — si te late, dale <strong style="color:#0d9488;">Postular con IA</strong> aquí abajo 👇</div>
-      `;
+      `, ctx);
+      return;
     }
 
-    removeVacancyMatchCard();
-    const card = document.createElement("div");
-    card.setAttribute("data-eamx", "vacancy-match");
-    card.style.cssText = [
-      "position:fixed", "right:24px", "bottom:96px", "z-index:2147483599",
-      "width:268px", "max-width:calc(100vw - 32px)", "box-sizing:border-box",
-      "background:#fff", "border:1px solid #e5e7eb", "border-radius:16px",
-      "box-shadow:0 12px 32px rgba(15,23,42,.18)", "padding:14px 14px 13px",
-      "font-family:inherit"
-    ].join(";");
-    card.innerHTML = `
-      <button type="button" data-eamx-vmatch-close aria-label="Cerrar" style="position:absolute;top:8px;right:8px;width:22px;height:22px;border:0;border-radius:50%;background:#f3f4f6;color:#6b7280;font-size:13px;line-height:1;cursor:pointer;">✕</button>
-      ${inner}
-    `;
-    card.addEventListener("click", (ev) => {
-      if (ev.target.closest("[data-eamx-vmatch-close]")) {
-        if (vacId) vacancyMatchDismissedIds.add(vacId);
-        removeVacancyMatchCard();
-        return;
-      }
-      if (ev.target.closest("[data-eamx-vmatch-options]")) {
-        try { chrome.runtime.sendMessage({ type: MSG.OPEN_WELCOME }); } catch (_) {}
-      }
-    });
-    document.documentElement.appendChild(card);
-    vacancyMatchCardEl = card;
+    // Cached AI result → show it directly (instant + stable). Else, if an AI
+    // call is in flight for this vacancy, keep the loader; otherwise the quick
+    // score + the "analizar con IA" CTA.
+    if (vacId && vacancyMatchAICache.has(vacId)) {
+      paintVacancyMatchCard(aiMatchInner(vacancyMatchAICache.get(vacId)), ctx);
+    } else if (vacId && vacancyMatchAILoading.has(vacId)) {
+      paintVacancyMatchCard(loadingInner(), ctx);
+    } else {
+      paintVacancyMatchCard(quickMatchInner(job, vacId), ctx);
+    }
   }
 
   // =========================================================================

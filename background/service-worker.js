@@ -308,6 +308,69 @@ async function handleGenerateCv(msg) {
   };
 }
 
+// ANALYZE_MATCH — "Match real con IA". Mirrors handleGenerateCv's pre-flight
+// (auth + profile + normalized job) but hits /match/analyze, which is metered
+// by its OWN daily limit. On the limit, the backend sends a 402 whose MESSAGE
+// is match-specific ("Llegaste a tus N análisis…"); we surface that verbatim.
+async function handleAnalyzeMatch(msg) {
+  const job = msg && msg.job;
+  if (!job) {
+    return { ok: false, error: ERROR_CODES.INVALID_INPUT, message: "Falta información de la vacante" };
+  }
+
+  if (!(await auth.isLoggedIn())) {
+    return {
+      ok: false,
+      error: ERROR_CODES.UNAUTHORIZED,
+      message: "Inicia sesión en Opciones para analizar tu match con IA."
+    };
+  }
+
+  const profile = await storage.getProfile();
+  if (!profile) {
+    return {
+      ok: false,
+      error: ERROR_CODES.INVALID_INPUT,
+      message: "Sube tu CV en Opciones para analizar tu match."
+    };
+  }
+
+  const normalizedJob = {
+    source: job.source || SOURCES.OCC,
+    url: job.url || "",
+    id: job.id || "",
+    title: job.title || "",
+    company: job.company || "",
+    location: job.location || "",
+    salary: job.salary == null ? null : job.salary,
+    modality: job.modality == null ? null : job.modality,
+    description: job.description || "",
+    requirements: Array.isArray(job.requirements) ? job.requirements : [],
+    extractedAt: job.extractedAt || nowISO()
+  };
+
+  let result;
+  try {
+    result = await backend.analyzeMatch({ profile, job: normalizedJob });
+  } catch (e) {
+    if (e instanceof backend.PlanLimitError) {
+      // e.message carries the match-specific daily-limit copy from the server.
+      return { ok: false, error: ERROR_CODES.PLAN_LIMIT_EXCEEDED, message: e.message };
+    }
+    return failFromError(e);
+  }
+
+  return {
+    ok: true,
+    score: typeof result.score === "number" ? result.score : 0,
+    level: result.level || "low",
+    matches: Array.isArray(result.matches) ? result.matches : [],
+    gaps: Array.isArray(result.gaps) ? result.gaps : [],
+    improveTips: Array.isArray(result.improveTips) ? result.improveTips : [],
+    usage: result.usage || null
+  };
+}
+
 // GENERATE_CV_PDF — same pre-flight as GENERATE_CV but returns the PDF
 // binary (base64-encoded for the message-channel round-trip — chrome's
 // runtime.sendMessage can't transfer Uint8Array directly). The content
@@ -956,6 +1019,8 @@ onMessage(async (msg) => {
       return handleAdminSetUsage(msg);
     case MESSAGE_TYPES.GENERATE_CV:
       return handleGenerateCv(msg);
+    case MESSAGE_TYPES.ANALYZE_MATCH:
+      return handleAnalyzeMatch(msg);
     case MESSAGE_TYPES.GENERATE_CV_PDF:
       return handleGenerateCvPdf(msg);
     case MESSAGE_TYPES.OPEN_GENERATED_CV:
