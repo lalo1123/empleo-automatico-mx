@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-14-boton-ver-vacante";
+  const EAMX_LAPIEZA_VERSION = "2026-06-14-match-consistente";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -10842,8 +10842,9 @@
     // Re-check: SPA nav may have moved us off the vacancy while awaiting.
     if (fabMode() !== "vacancy") { removeVacancyMatchCard(); return; }
 
-    // Extract the job from the detail DOM (has description + requirements →
-    // full scoring, not the thin listing fallback).
+    // Extract the job from the detail DOM — we only use its title/company/
+    // location (the description is intentionally NOT fed to the scorer below,
+    // to keep this card's number identical to the panel's).
     let job = null;
     try { job = extractJob().job; } catch (_) {}
     if (!job || !job.title || job.title === "(sin título)") {
@@ -10869,9 +10870,25 @@
       const effectivePrefs = (typeof matchScoreModule.effectivePreferences === "function")
         ? matchScoreModule.effectivePreferences(cachedPreferences, cachedProfile)
         : null;
+      // Score with a THIN jobLite (title/company/location only — NO
+      // description/requirements) so this card takes the SAME "listing"
+      // scoring path the panel uses (the panel's extractJobLiteFromCard is
+      // also thin). With extractJob's full JD, computeMatchScore switched to
+      // its richer algorithm and the detail card showed a DIFFERENT number
+      // than the panel for the SAME vacancy (user: "¿por qué 10% aquí y 67%
+      // en mejores match?"), plus different/penalty reasons. Consistency with
+      // the panel (the user's reference) matters more than the JD-refined
+      // estimate.
+      const jobLite = {
+        id: vacId || "",
+        url: job.url || location.href,
+        title: job.title || "",
+        company: job.company || "",
+        location: job.location || ""
+      };
       let score = 0, reasons = [];
       try {
-        const r = matchScoreModule.computeMatchScore(cachedProfile, job, effectivePrefs);
+        const r = matchScoreModule.computeMatchScore(cachedProfile, jobLite, effectivePrefs);
         score = Math.round(Number(r.score)) || 0;
         reasons = Array.isArray(r.reasons) ? r.reasons : [];
       } catch (_) { return; }
