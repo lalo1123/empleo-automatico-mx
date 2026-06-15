@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-14-tu-match-en-vacante";
+  const EAMX_LAPIEZA_VERSION = "2026-06-14-tu-match-reintenta";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -10820,7 +10820,7 @@
     }
   }
 
-  async function renderVacancyMatchCard() {
+  async function renderVacancyMatchCard(attempt = 0) {
     if (fabMode() !== "vacancy") { removeVacancyMatchCard(); return; }
     let vacId = "";
     try { vacId = idFromUrl(location.href) || ""; } catch (_) {}
@@ -10836,7 +10836,15 @@
     // full scoring, not the thin listing fallback).
     let job = null;
     try { job = extractJob().job; } catch (_) {}
-    if (!job || !job.title || job.title === "(sin título)") return; // not ready
+    if (!job || !job.title || job.title === "(sin título)") {
+      // The JD (JSON-LD / DOM) may not have rendered yet — especially on a
+      // fresh tab or slow load. Retry a few times before giving up instead of
+      // silently never showing the card ("sigue sin salir").
+      if (attempt < 6) {
+        setTimeout(() => { try { renderVacancyMatchCard(attempt + 1); } catch (_) {} }, 1200);
+      }
+      return;
+    }
 
     let inner = "";
     if (!cachedProfile) {
