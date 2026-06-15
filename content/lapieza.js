@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-15-match-real-ia";
+  const EAMX_LAPIEZA_VERSION = "2026-06-15-match-anclado-descripcion";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -10843,22 +10843,54 @@
     ).join("");
   }
 
+  // Find the "Descripción del trabajo" heading so the match card can ANCHOR
+  // above it (flow with the page) instead of floating over the apply sidebar
+  // ("se enganche mejor a la descripción"). Returns the heading node to insert
+  // before, or null → caller falls back to fixed-floating.
+  function findMatchCardAnchor() {
+    try {
+      const els = document.querySelectorAll("h1,h2,h3,h4,h5,strong,b,p,span,div,header");
+      for (const el of els) {
+        if (el.closest(".eamx-fab, .eamx-panel, .eamx-overlay, .eamx-matches-panel, .eamx-toast, [data-eamx]")) continue;
+        const t = (el.textContent || "").trim();
+        if (!t || t.length > 70) continue;
+        if (/^descripci[oó]n\s+del\s+(trabajo|puesto|empleo|cargo)/i.test(t)) {
+          // Prefer a real heading ancestor if `el` is an inner span/emoji.
+          const head = el.closest("h1,h2,h3,h4,h5") || el;
+          if (head && head.parentElement && isVisible(head)) return head;
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  // Inline (anchored) vs floating (fallback) styles. Inline flows with the
+  // page above the description; floating is the safety net if no anchor.
+  const VMATCH_STYLE_INLINE = [
+    "position:relative", "width:100%", "max-width:560px", "box-sizing:border-box",
+    "background:linear-gradient(180deg,#f0fdfa,#ffffff)", "border:1.5px solid #5eead4",
+    "border-radius:14px", "box-shadow:0 6px 20px rgba(13,148,136,.12)",
+    "padding:14px 14px 13px", "margin:0 0 18px", "font-family:inherit"
+  ].join(";");
+  const VMATCH_STYLE_FIXED = [
+    "position:fixed", "right:24px", "bottom:96px", "z-index:2147483599",
+    "width:288px", "max-width:calc(100vw - 32px)",
+    "max-height:calc(100vh - 130px)", "overflow-y:auto", "box-sizing:border-box",
+    "background:#fff", "border:1px solid #e5e7eb", "border-radius:16px",
+    "box-shadow:0 12px 32px rgba(15,23,42,.18)", "padding:14px 14px 13px",
+    "font-family:inherit"
+  ].join(";");
+
   // Mount the card shell around `inner` and wire the delegated click handler.
-  // ctx = { vacId, job }.
+  // ctx = { vacId, job }. Anchors ABOVE the "Descripción del trabajo" heading
+  // when found (so it reads as part of the page, not a sticker over the apply
+  // sidebar); otherwise floats fixed bottom-right.
   function paintVacancyMatchCard(inner, ctx) {
     removeVacancyMatchCard();
     const card = document.createElement("div");
     card.setAttribute("data-eamx", "vacancy-match");
-    card.style.cssText = [
-      "position:fixed", "right:24px", "bottom:96px", "z-index:2147483599",
-      "width:288px", "max-width:calc(100vw - 32px)",
-      "max-height:calc(100vh - 130px)", "overflow-y:auto", "box-sizing:border-box",
-      "background:#fff", "border:1px solid #e5e7eb", "border-radius:16px",
-      "box-shadow:0 12px 32px rgba(15,23,42,.18)", "padding:14px 14px 13px",
-      "font-family:inherit"
-    ].join(";");
     card.innerHTML = `
-      <button type="button" data-eamx-vmatch-close aria-label="Cerrar" style="position:absolute;top:8px;right:8px;width:22px;height:22px;border:0;border-radius:50%;background:#f3f4f6;color:#6b7280;font-size:13px;line-height:1;cursor:pointer;z-index:1;">✕</button>
+      <button type="button" data-eamx-vmatch-close aria-label="Ocultar" style="position:absolute;top:8px;right:8px;width:22px;height:22px;border:0;border-radius:50%;background:#f3f4f6;color:#6b7280;font-size:13px;line-height:1;cursor:pointer;z-index:1;">✕</button>
       ${inner}
     `;
     card.addEventListener("click", (ev) => {
@@ -10880,7 +10912,17 @@
         return;
       }
     });
-    document.documentElement.appendChild(card);
+
+    // Try to anchor inline above the job description; fall back to floating.
+    const anchor = findMatchCardAnchor();
+    if (anchor && anchor.parentElement) {
+      card.style.cssText = VMATCH_STYLE_INLINE;
+      try { anchor.parentElement.insertBefore(card, anchor); } catch (_) {}
+    }
+    if (!card.isConnected) {
+      card.style.cssText = VMATCH_STYLE_FIXED;
+      document.documentElement.appendChild(card);
+    }
     vacancyMatchCardEl = card;
   }
 
