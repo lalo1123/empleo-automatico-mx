@@ -503,6 +503,35 @@
         </div>
       </section>
 
+      <!-- ============ Card 2B: Crear mi CV con IA ============ -->
+      <section class="card" aria-labelledby="aiCvHeading">
+        <div class="card__head">
+          <h2 id="aiCvHeading">&#10024; &iquest;No tienes CV? Cr&eacute;alo con IA</h2>
+          <p class="card__sub">
+            Te hago unas preguntas y la IA arma tu CV profesional completo &mdash; sin
+            documento, sin formato. Solo cu&eacute;ntame de ti.
+          </p>
+        </div>
+
+        <div id="aiCvStartRow" class="actions">
+          <button type="button" class="btn btn--primary" id="aiCvStartBtn">Empezar con IA &rarr;</button>
+          <span id="aiCvStatus" class="status" role="status" aria-live="polite"></span>
+        </div>
+
+        <div id="aiCvChat" class="is-hidden" style="margin-top:16px;">
+          <div id="aiCvMessages" style="display:flex;flex-direction:column;gap:10px;max-height:360px;overflow-y:auto;padding:4px 2px;" role="log" aria-live="polite"></div>
+          <div id="aiCvInputRow" style="display:flex;gap:8px;margin-top:12px;align-items:flex-end;">
+            <textarea id="aiCvInput" rows="2" placeholder="Tu respuesta&hellip;" style="flex:1;resize:vertical;min-height:42px;"></textarea>
+            <button type="button" class="btn btn--primary btn--sm" id="aiCvSendBtn">Enviar</button>
+          </div>
+        </div>
+
+        <div id="aiCvProgress" class="progress is-hidden" role="status" aria-live="polite">
+          <div class="spinner" aria-hidden="true"></div>
+          <span id="aiCvProgressText">Construyendo tu CV con IA&hellip;</span>
+        </div>
+      </section>
+
       <!-- ============ Card 3: Settings ============ -->
       <section class="card" aria-labelledby="settingsHeading">
         <div class="card__head">

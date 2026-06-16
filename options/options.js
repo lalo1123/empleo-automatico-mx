@@ -551,6 +551,107 @@ saveProfileBtn.addEventListener("click", async () => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// Crear mi CV con IA — chat-style onboarding for users with NO CV document.
+// Fixed questions client-side; one backend call (BUILD_PROFILE) at the end
+// turns the answers into the same UserProfile shape an uploaded CV produces.
+// ---------------------------------------------------------------------------
+const aiCvStartBtn = $("aiCvStartBtn");
+const aiCvStatus = $("aiCvStatus");
+const aiCvChat = $("aiCvChat");
+const aiCvMessages = $("aiCvMessages");
+const aiCvInput = $("aiCvInput");
+const aiCvSendBtn = $("aiCvSendBtn");
+const aiCvProgress = $("aiCvProgress");
+const aiCvProgressText = $("aiCvProgressText");
+const aiCvStartRow = $("aiCvStartRow");
+
+const AI_CV_QUESTIONS = [
+  "¡Hola! 👋 Vamos a armar tu CV. Para empezar, ¿cuál es tu nombre completo?",
+  "¿A qué te dedicas o qué tipo de trabajo buscas? (tu puesto o área principal)",
+  "Cuéntame tu experiencia: ¿en qué empresas has trabajado, qué puesto tenías y qué hacías? Pon las que quieras (y los años si los recuerdas).",
+  "¿Qué sabes hacer? Herramientas, habilidades, idiomas… lo que se te ocurra.",
+  "¿Qué estudiaste? (carrera e institución). Y si quieres, déjame tu correo y ciudad para llenar formularios."
+];
+let aiCvIdx = 0;
+const aiCvQA = [];
+
+function aiCvBubble(role, text) {
+  if (!aiCvMessages) return;
+  const wrap = document.createElement("div");
+  const isBot = role === "bot";
+  wrap.style.cssText = `display:flex;justify-content:${isBot ? "flex-start" : "flex-end"};`;
+  const b = document.createElement("div");
+  b.textContent = text;
+  b.style.cssText = isBot
+    ? "max-width:86%;background:#f1f5f9;color:#0f172a;border-radius:14px 14px 14px 4px;padding:9px 12px;font-size:13.5px;line-height:1.45;white-space:pre-wrap;"
+    : "max-width:86%;background:linear-gradient(135deg,#137e7a,#105971);color:#fff;border-radius:14px 14px 4px 14px;padding:9px 12px;font-size:13.5px;line-height:1.45;white-space:pre-wrap;";
+  wrap.appendChild(b);
+  aiCvMessages.appendChild(wrap);
+  aiCvMessages.scrollTop = aiCvMessages.scrollHeight;
+}
+
+function aiCvAskNext() {
+  if (aiCvIdx < AI_CV_QUESTIONS.length) {
+    aiCvBubble("bot", AI_CV_QUESTIONS[aiCvIdx]);
+    if (aiCvInput) aiCvInput.focus();
+  } else {
+    aiCvBuild();
+  }
+}
+
+function aiCvStart() {
+  aiCvIdx = 0;
+  aiCvQA.length = 0;
+  if (aiCvMessages) aiCvMessages.innerHTML = "";
+  if (aiCvStartRow) aiCvStartRow.classList.add("is-hidden");
+  if (aiCvChat) aiCvChat.classList.remove("is-hidden");
+  aiCvAskNext();
+}
+
+function aiCvSend() {
+  if (aiCvIdx >= AI_CV_QUESTIONS.length) return;
+  const val = (aiCvInput?.value || "").trim();
+  if (!val) return;
+  aiCvBubble("user", val);
+  aiCvQA.push({ question: AI_CV_QUESTIONS[aiCvIdx], answer: val });
+  aiCvIdx++;
+  if (aiCvInput) aiCvInput.value = "";
+  aiCvAskNext();
+}
+
+async function aiCvBuild() {
+  aiCvBubble("bot", "¡Perfecto! Dame unos segundos, estoy armando tu CV… ✨");
+  if (aiCvProgress) aiCvProgress.classList.remove("is-hidden");
+  if (aiCvProgressText) aiCvProgressText.textContent = "Construyendo tu CV con IA…";
+  try {
+    const res = await sendMessage({ type: MESSAGE_TYPES.BUILD_PROFILE, qa: aiCvQA });
+    if (!res?.ok) {
+      if (res?.error === ERROR_CODES.UNAUTHORIZED) throw new Error("Inicia sesión primero para crear tu CV.");
+      throw new Error(res?.message || "No se pudo crear el CV. Intenta de nuevo.");
+    }
+    updatePreviewFromProfile(res.profile);
+    aiCvBubble("bot", "✅ ¡Listo! Tu CV quedó armado. Revisa el resumen aquí abajo y dale «Guardar perfil».");
+    setStatus(aiCvStatus, "ok", "CV creado. Revísalo abajo y guárdalo.");
+    try { cvPreview.scrollIntoView({ behavior: "smooth", block: "center" }); } catch (_) {}
+  } catch (e) {
+    aiCvBubble("bot", "⚠️ " + (e.message || "No se pudo crear el CV.") + " Puedes reintentar respondiendo de nuevo.");
+    setStatus(aiCvStatus, "err", e.message || "Error");
+    // Re-arm: step back to the last question so the user can resend.
+    aiCvIdx = Math.max(0, AI_CV_QUESTIONS.length - 1);
+  } finally {
+    if (aiCvProgress) aiCvProgress.classList.add("is-hidden");
+  }
+}
+
+if (aiCvStartBtn) aiCvStartBtn.addEventListener("click", aiCvStart);
+if (aiCvSendBtn) aiCvSendBtn.addEventListener("click", aiCvSend);
+if (aiCvInput) {
+  aiCvInput.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); aiCvSend(); }
+  });
+}
+
 async function refreshExistingBanner() {
   const profile = await sendMessage({ type: MESSAGE_TYPES.GET_PROFILE });
   if (profile?.personal?.fullName) {

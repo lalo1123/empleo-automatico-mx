@@ -114,6 +114,23 @@ async function handleUploadCV(msg) {
   }
 }
 
+// BUILD_PROFILE — create a structured profile from a short chat interview (for
+// users with NO CV). Same store path as handleUploadCV; the options page saves
+// the returned profile identically.
+async function handleBuildProfile(msg) {
+  const qa = msg && msg.qa;
+  if (!Array.isArray(qa) || qa.length === 0) {
+    return { ok: false, error: ERROR_CODES.INVALID_INPUT, message: "Faltan tus respuestas." };
+  }
+  try {
+    const profile = await backend.buildProfile({ qa });
+    await storage.setProfile(profile);
+    return { ok: true, profile };
+  } catch (e) {
+    return failFromError(e);
+  }
+}
+
 // TEST_AUTH replaces the old TEST_API_KEY handler. Returns the account info
 // if the token is valid; the options page uses this to verify login state.
 async function handleTestAuth() {
@@ -983,6 +1000,8 @@ onMessage(async (msg) => {
       return handleSaveProfile(msg);
     case MESSAGE_TYPES.UPLOAD_CV:
       return handleUploadCV(msg);
+    case MESSAGE_TYPES.BUILD_PROFILE:
+      return handleBuildProfile(msg);
     case MESSAGE_TYPES.TEST_AUTH:
       return handleTestAuth();
     case MESSAGE_TYPES.GENERATE_DRAFT:
