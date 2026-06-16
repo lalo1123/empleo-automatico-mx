@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-15-sin-falso-error-finaliza";
+  const EAMX_LAPIEZA_VERSION = "2026-06-15-card-ya-postulaste";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -11133,6 +11133,27 @@
     `;
   }
 
+  // Already-applied state: don't waste a daily AI analysis on a vacancy the
+  // user already postuló. Shows the cached match (if any) for reference.
+  function appliedInner(cached) {
+    const v = cached ? vacancyMatchVisual(cached.level) : null;
+    const matchLine = cached
+      ? `<div style="margin-top:10px;font-size:12px;color:#374151;line-height:1.4;">Tu match con IA fue <strong style="color:${v.color};">${cached.score}% · ${escapeHtml(v.label)}</strong>.</div>`
+      : "";
+    return `
+      <style>@keyframes eamx-vm-in{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:none}}</style>
+      <div style="display:flex;align-items:center;gap:12px;animation:eamx-vm-in .45s both;">
+        <div style="flex:0 0 auto;width:54px;height:54px;border-radius:50%;background:#ecfdf5;color:#16a34a;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:800;">✓</div>
+        <div style="flex:1 1 auto;min-width:0;">
+          <div style="font-size:10.5px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#16a34a;">Ya postulaste</div>
+          <div style="font-size:16px;font-weight:800;color:#15803d;">a esta vacante</div>
+        </div>
+      </div>
+      ${matchLine}
+      <div style="margin-top:10px;font-size:11.5px;color:#6b7280;line-height:1.4;">No la vuelvo a analizar ni a auto-postular — ya quedó. 👍</div>
+    `;
+  }
+
   function loadingInner() {
     return `
       <div style="display:flex;align-items:center;gap:10px;padding:6px 0;">
@@ -11243,6 +11264,26 @@
         </div>
         <button type="button" data-eamx-vmatch-options style="margin-top:10px;width:100%;border:0;border-radius:10px;padding:9px 12px;background:#0d9488;color:#fff;font-weight:700;font-size:13px;cursor:pointer;">Subir mi CV →</button>
       `, ctx);
+      return;
+    }
+
+    // Already applied? Don't spend an AI analysis (or auto-postular) — show a
+    // clean "ya postulaste" state. The page banner (sync) catches it on the
+    // vacancy itself; the persisted queue (async) catches manual marks +
+    // chain-tracked submits + re-posts. Makes the CARD consistent with the
+    // panel/bulk, which already skip applied (user: "¿por qué salió en la
+    // tarjeta? en autopostular dirá que ya se postuló?").
+    let alreadyApplied = false;
+    try { alreadyApplied = detectAlreadyAppliedState(); } catch (_) {}
+    if (!alreadyApplied && vacId && queueModule && typeof queueModule.isApplied === "function") {
+      try { alreadyApplied = await queueModule.isApplied(vacId, SOURCE); } catch (_) {}
+    }
+    if (alreadyApplied) {
+      if (fabMode() !== "vacancy" || (vacId && vacancyMatchDismissedIds.has(vacId))) return;
+      const cached = (vacId && vacancyMatchAICache.get(vacId))
+        || (vacId ? await loadAIMatchFromStorage(vacId) : null);
+      if (fabMode() !== "vacancy") return;
+      paintVacancyMatchCard(appliedInner(cached), ctx);
       return;
     }
 
