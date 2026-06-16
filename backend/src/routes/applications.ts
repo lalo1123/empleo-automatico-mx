@@ -30,7 +30,8 @@ import {
   isValidApplicationStatus,
   isValidApplicationStep,
   listApplications,
-  rowToApplication
+  rowToApplication,
+  saveStoredProfile
 } from "../lib/db.js";
 
 // Zod schemas for inbound bodies. We intentionally keep them loose on
@@ -769,6 +770,8 @@ applicationsRoutes.post("/build-profile", authRequired(), async (c) => {
       model: env.GEMINI_MODEL,
       qa: parsed.data.qa
     });
+    // Persist as the canonical CV (the account is now the source of truth).
+    try { saveStoredProfile(user.id, { version: 1, ...profile, updatedAt: new Date().toISOString() }); } catch (_) {}
     console.log(`[build-profile] ok user=${user.id} qa=${parsed.data.qa.length}`);
     return c.json({ ok: true, profile });
   } catch (err) {
@@ -796,6 +799,8 @@ applicationsRoutes.post("/parse-cv", authRequired(), async (c) => {
       model: env.GEMINI_MODEL,
       rawText: parsed.data.text
     });
+    // Persist as the canonical CV (the account is now the source of truth).
+    try { saveStoredProfile(user.id, { version: 1, ...profile, rawText: parsed.data.text, updatedAt: new Date().toISOString() }); } catch (_) {}
 
     console.log(`[parse-cv] ok user=${user.id}`);
     return c.json({ ok: true, profile });

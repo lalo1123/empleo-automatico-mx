@@ -21,6 +21,7 @@ import type {
   PersonalAnswers,
   PlanId,
   PreferencesRow,
+  ProfileRow,
   SessionRow,
   SubscriptionRow,
   SubscriptionStatus,
@@ -992,4 +993,36 @@ export function upsertPreferences(input: {
     .run(input.userId, city, citySynonymsJson, modality, salaryMin, salaryMax, expectedSalary, autoSubmit, personalAnswersJson, nowSec);
 
   return getPreferences(input.userId);
+}
+
+// PROFILE (CV) ---------------------------------------------------------------
+// One row per user — the canonical CV store (migration 0012). profile_json is
+// the full UserProfile serialized. Mirrors the preferences upsert pattern.
+
+export function getStoredProfile(userId: string): { profile: Record<string, unknown>; updatedAt: number } | null {
+  const row = getDb()
+    .prepare<[string], ProfileRow>("SELECT * FROM profiles WHERE user_id = ? LIMIT 1")
+    .get(userId);
+  if (!row) return null;
+  let profile: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(row.profile_json || "{}");
+    if (parsed && typeof parsed === "object") profile = parsed as Record<string, unknown>;
+  } catch (_) { /* keep {} on corrupt JSON */ }
+  return { profile, updatedAt: row.updated_at };
+}
+
+export function saveStoredProfile(userId: string, profile: unknown): number {
+  const nowSec = Math.floor(Date.now() / 1000);
+  const json = JSON.stringify(profile ?? {});
+  getDb()
+    .prepare(
+      `INSERT INTO profiles (user_id, profile_json, updated_at)
+       VALUES (?, ?, ?)
+       ON CONFLICT(user_id) DO UPDATE SET
+         profile_json = excluded.profile_json,
+         updated_at = excluded.updated_at`
+    )
+    .run(userId, json, nowSec);
+  return nowSec;
 }

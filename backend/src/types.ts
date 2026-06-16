@@ -143,6 +143,13 @@ export interface PreferencesRow {
   updated_at: number;          // unix seconds
 }
 
+/** One row per user — the canonical CV/profile store (migration 0012). */
+export interface ProfileRow {
+  user_id: string;
+  profile_json: string;        // serialized UserProfile
+  updated_at: number;          // unix seconds, server-stamped
+}
+
 /**
  * Whitelisted personal-answer keys. Each maps to a question pattern the
  * extension recognizes on application forms (content/lapieza.js

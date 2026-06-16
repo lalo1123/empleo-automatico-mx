@@ -777,6 +777,22 @@ async function handleGetAuthStatus() {
         });
       } catch (_) {}
     }
+    // Mirror the server-side CV/profile too — the account is now the source of
+    // truth for the CV (a CV created in the web account reaches the extension
+    // this way). Only overwrite the local copy when the server's is NEWER (or
+    // there's no local one), comparing the profile's own updatedAt (ISO), so a
+    // CV the user JUST uploaded/built in the extension isn't clobbered by a
+    // stale server copy.
+    try {
+      if (data && data.profile && data.profile.personal) {
+        const local = await storage.getProfile();
+        const serverTime = Date.parse((data.profile && data.profile.updatedAt) || "") || 0;
+        const localTime = Date.parse((local && local.updatedAt) || "") || 0;
+        if (!local || serverTime > localTime) {
+          await storage.setProfile(data.profile);
+        }
+      }
+    } catch (_) {}
     return {
       ok: true,
       loggedIn: true,
