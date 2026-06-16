@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Nav } from "@/components/nav";
@@ -881,37 +882,48 @@ export default async function AccountPage({ searchParams }: PageProps) {
                 <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[color:var(--color-ink-muted)]">
                   Accesos rápidos
                 </p>
-                <div className="mt-3 grid gap-2">
-                  <Link
-                    href="/account/cv"
-                    className="flex items-center justify-between rounded-[12px] border border-[color:var(--color-border)] px-4 py-3 text-sm font-semibold text-[color:var(--color-ink)] transition hover:border-[color:var(--color-brand-400)] hover:bg-[#f7fafb]"
-                  >
-                    <span>📄 Mi CV (créalo con IA)</span>
-                    <span aria-hidden className="text-[color:var(--color-ink-muted)]">→</span>
-                  </Link>
-                  <Link
-                    href="/account/preferences"
-                    className="flex items-center justify-between rounded-[12px] border border-[color:var(--color-border)] px-4 py-3 text-sm font-semibold text-[color:var(--color-ink)] transition hover:border-[color:var(--color-brand-400)] hover:bg-[#f7fafb]"
-                  >
-                    <span>🎯 Preferencias y salario esperado</span>
-                    <span aria-hidden className="text-[color:var(--color-ink-muted)]">→</span>
-                  </Link>
-                  <Link
-                    href="/account/historial"
-                    className="flex items-center justify-between rounded-[12px] border border-[color:var(--color-border)] px-4 py-3 text-sm font-semibold text-[color:var(--color-ink)] transition hover:border-[color:var(--color-brand-400)] hover:bg-[#f7fafb]"
-                  >
-                    <span>📋 Historial de postulaciones</span>
-                    <span aria-hidden className="text-[color:var(--color-ink-muted)]">→</span>
-                  </Link>
-                  <a
-                    href={CHROME_STORE_URL}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center justify-between rounded-[12px] border border-[color:var(--color-border)] px-4 py-3 text-sm font-semibold text-[color:var(--color-ink)] transition hover:border-[color:var(--color-brand-400)] hover:bg-[#f7fafb]"
-                  >
-                    <span>🧩 Instalar extensión de Chrome</span>
-                    <span aria-hidden className="text-[color:var(--color-ink-muted)]">↗</span>
-                  </a>
+                <div className="mt-3.5 grid gap-2.5">
+                  {[
+                    { href: "/account/cv", external: false, icon: "📄", title: "Mi CV", sub: "Súbelo o créalo con IA", accent: "#137e7a", bg: "#ecfaf7", arrow: "→" },
+                    { href: "/account/preferences", external: false, icon: "🎯", title: "Preferencias y salario", sub: "Ciudad, salario esperado, respuestas", accent: "#ea580c", bg: "#fff1e6", arrow: "→" },
+                    { href: "/account/historial", external: false, icon: "📋", title: "Historial de postulaciones", sub: "Todo lo que has aplicado", accent: "#2563eb", bg: "#eaf1ff", arrow: "→" },
+                    { href: CHROME_STORE_URL, external: true, icon: "🧩", title: "Instalar extensión", sub: "En Chrome — usa esta cuenta", accent: "#16a34a", bg: "#eafaef", arrow: "↗" },
+                  ].map((item, i) => {
+                    const inner = (
+                      <>
+                        <span
+                          aria-hidden
+                          className="eamx-ql-icon flex h-11 w-11 shrink-0 items-center justify-center rounded-[14px] text-lg"
+                          style={{ background: item.bg, color: item.accent }}
+                        >
+                          {item.icon}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-sm font-bold leading-tight text-[color:var(--color-ink)]">
+                            {item.title}
+                          </span>
+                          <span className="mt-0.5 block text-[11.5px] leading-snug text-[color:var(--color-ink-muted)]">
+                            {item.sub}
+                          </span>
+                        </span>
+                        <span aria-hidden className="eamx-ql-arrow text-base font-bold text-[color:var(--color-ink-muted)]">
+                          {item.arrow}
+                        </span>
+                      </>
+                    );
+                    const cls =
+                      "eamx-quicklink eamx-fadeup flex items-center gap-3.5 rounded-[16px] border border-[color:var(--color-border)] bg-white px-3.5 py-3";
+                    const style = { "--ql-accent": item.accent, animationDelay: `${i * 70}ms` } as CSSProperties;
+                    return item.external ? (
+                      <a key={item.href} href={item.href} target="_blank" rel="noopener noreferrer" className={cls} style={style}>
+                        {inner}
+                      </a>
+                    ) : (
+                      <Link key={item.href} href={item.href} className={cls} style={style}>
+                        {inner}
+                      </Link>
+                    );
+                  })}
                 </div>
                 <p className="mt-3 text-[11.5px] text-[color:var(--color-ink-muted)]">
                   La extensión usa esta misma cuenta. El listado en Chrome Web
