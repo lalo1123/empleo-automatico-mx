@@ -883,6 +883,13 @@ export default async function AccountPage({ searchParams }: PageProps) {
                 </p>
                 <div className="mt-3 grid gap-2">
                   <Link
+                    href="/account/cv"
+                    className="flex items-center justify-between rounded-[12px] border border-[color:var(--color-border)] px-4 py-3 text-sm font-semibold text-[color:var(--color-ink)] transition hover:border-[color:var(--color-brand-400)] hover:bg-[#f7fafb]"
+                  >
+                    <span>📄 Mi CV (créalo con IA)</span>
+                    <span aria-hidden className="text-[color:var(--color-ink-muted)]">→</span>
+                  </Link>
+                  <Link
                     href="/account/preferences"
                     className="flex items-center justify-between rounded-[12px] border border-[color:var(--color-border)] px-4 py-3 text-sm font-semibold text-[color:var(--color-ink)] transition hover:border-[color:var(--color-brand-400)] hover:bg-[#f7fafb]"
                   >

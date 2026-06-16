@@ -342,3 +342,68 @@ export function putPreferences(
     body
   });
 }
+
+// CV / Profile — the account is the canonical CV store.
+export interface ProfileExperience {
+  company: string;
+  role: string;
+  startDate?: string;
+  endDate?: string | null;
+  description?: string;
+  achievements?: string[];
+  location?: string;
+}
+export interface ProfileEducation {
+  institution: string;
+  degree: string;
+  field?: string;
+  startDate?: string;
+  endDate?: string | null;
+}
+export interface ProfileLanguage {
+  language: string;
+  level: string;
+}
+export interface UserProfile {
+  version?: number;
+  updatedAt?: string;
+  personal: {
+    fullName: string;
+    email?: string;
+    phone?: string;
+    location?: string;
+    linkedin?: string;
+    website?: string;
+  };
+  summary: string;
+  experience: ProfileExperience[];
+  education: ProfileEducation[];
+  skills: string[];
+  languages: ProfileLanguage[];
+  rawText?: string;
+}
+
+export function getProfile(token: string) {
+  return apiRequest<{ profile: UserProfile | null }>("/account/profile", { token });
+}
+export function putProfile(token: string, profile: UserProfile) {
+  return apiRequest<{ profile: UserProfile }>("/account/profile", {
+    method: "PUT",
+    token,
+    body: { profile }
+  });
+}
+export function parseCv(token: string, text: string) {
+  return apiRequest<{ profile: UserProfile }>("/applications/parse-cv", {
+    method: "POST",
+    token,
+    body: { text }
+  });
+}
+export function buildProfileFromQa(token: string, qa: Array<{ question: string; answer: string }>) {
+  return apiRequest<{ profile: UserProfile }>("/applications/build-profile", {
+    method: "POST",
+    token,
+    body: { qa }
+  });
+}
