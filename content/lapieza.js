@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-15-card-ya-postulaste";
+  const EAMX_LAPIEZA_VERSION = "2026-06-15-match-credito-visible";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -11076,9 +11076,15 @@
 
   // Accurate AI result — designed to feel premium: animated score ring,
   // staggered-reveal rows, gradient "cómo subir" panel, shimmer "IA" badge.
-  function aiMatchInner(res) {
+  function aiMatchInner(res, usage) {
     const v = vacancyMatchVisual(res.level);
     const score = Math.max(0, Math.min(100, Number(res.score) || 0));
+    // Usage indicator — only on a FRESH analysis (usage passed) and only for a
+    // capped plan (limit > 0; premium = -1 = unlimited, hidden). Lets free users
+    // see how many AI analyses they have left today + nudges the upgrade.
+    const usageLine = (usage && Number(usage.limit) > 0)
+      ? `<div style="margin-top:8px;text-align:center;font-size:10.5px;color:#9ca3af;">Análisis con IA: <strong style="color:#6b7280;">${Number(usage.current) || 0}/${Number(usage.limit)}</strong> hoy</div>`
+      : "";
     const R = 30, C = +(2 * Math.PI * R).toFixed(1);
     const target = +(C * (1 - score / 100)).toFixed(1);
     const rid = "eamxvmr" + Math.floor(Math.random() * 1e9);
@@ -11130,6 +11136,7 @@
       ${tipsBlock}
       <button type="button" data-eamx-vmatch-optcv class="eamx-vm-optcv" style="margin-top:14px;width:100%;border:0;border-radius:13px;padding:12px;background:linear-gradient(135deg,#1e293b,#0f172a);color:#fff;font-weight:800;font-size:13px;cursor:pointer;opacity:0;animation:eamx-vm-in .5s ${180 + d * 70}ms forwards;">📄 Generar mi CV optimizado para esta vacante</button>
       <div style="margin-top:10px;font-size:11px;color:#6b7280;line-height:1.4;text-align:center;">Aplica los tips y sube tu match — luego dale <strong style="color:#0d9488;">Postular con IA</strong> 👇</div>
+      ${usageLine}
     `;
   }
 
@@ -11201,7 +11208,9 @@
       improveTips: Array.isArray(res.improveTips) ? res.improveTips : []
     };
     if (vacId) { vacancyMatchAICache.set(vacId, clean); saveAIMatchToStorage(vacId, clean); }
-    paintVacancyMatchCard(aiMatchInner(clean), ctx);
+    // Pass usage so the "X/10 hoy" indicator shows right after a FRESH analysis
+    // (cached re-views below call aiMatchInner WITHOUT usage → no stale count).
+    paintVacancyMatchCard(aiMatchInner(clean, res.usage), ctx);
   }
 
   async function runVacancyOptimizedCv(ctx) {
