@@ -950,3 +950,92 @@ export async function analyzeMatch(args: AnalyzeMatchArgs): Promise<AnalyzeMatch
     improveTips: cleanList(out.improveTips, 4)
   };
 }
+
+// ---------------------------------------------------------------------------
+// Build a profile from a short chat-style interview (for users with NO CV)
+// ---------------------------------------------------------------------------
+
+const BUILD_PROFILE_SYSTEM =
+  "Eres un experto en redacción de CVs en México. Recibes una entrevista breve " +
+  "(preguntas y respuestas informales) de una persona que NO tiene un CV y quiere " +
+  "crear uno. Con SUS respuestas construye un perfil profesional estructurado y " +
+  "bien redactado. Responde SOLO con el JSON solicitado.\n\n" +
+  "REGLAS:\n" +
+  "1. NUNCA inventes empresas, puestos, fechas, números o estudios que la persona " +
+  "NO mencionó. Si no dio un dato, déjalo vacío (\"\" o []) y las fechas que no " +
+  "dio en null o \"\".\n" +
+  "2. SÍ redacta profesionalmente lo que SÍ dijo: convierte frases informales " +
+  "(\"vendía en una tienda\") en bullets con verbos de acción, sin inventar " +
+  "métricas ni tecnologías.\n" +
+  "3. summary (3-4 frases): resumen profesional basado SOLO en lo que dijo, " +
+  "enfocado en su perfil real.\n" +
+  "4. experience: una entrada por cada trabajo que mencionó (company, role, " +
+  "description, achievements[]); startDate/endDate en YYYY-MM si los dio, si no " +
+  "\"\" y null. Convierte las tareas que contó en achievements concretos.\n" +
+  "5. skills: solo las que mencionó (no inventes).\n" +
+  "6. education: lo que estudió (institution, degree, field; fechas si las dio).\n" +
+  "7. languages: si mencionó idiomas con su nivel (básico/intermedio/avanzado/" +
+  "nativo); si no, [].\n" +
+  "8. personal: fullName, email, phone, location según lo que dio; \"\" si no.\n" +
+  "9. Español MX; términos técnicos en su forma original.\n" +
+  "Objetivo: un CV honesto, completo y bien presentado a partir de respuestas " +
+  "informales — sin mentir.";
+
+export interface BuildProfileArgs {
+  apiKey: string;
+  model: string;
+  /** The chat interview: each item a {question, answer} pair. */
+  qa: Array<{ question: string; answer: string }>;
+}
+
+/**
+ * Builds a structured UserProfile from a short chat-style interview. Same
+ * output shape + validation as parseCvText (reuses PARSE_CV_SCHEMA), so the
+ * rest of the app treats an AI-built profile identically to an uploaded one.
+ */
+export async function buildProfileFromQA(args: BuildProfileArgs): Promise<ParseCvResult> {
+  const { apiKey, model, qa } = args;
+  if (!apiKey) throw new HttpError(500, "INTERNAL_ERROR", "Configuración del servicio incompleta.");
+  if (!Array.isArray(qa) || qa.length === 0) {
+    throw new HttpError(400, "VALIDATION_ERROR", "Faltan tus respuestas para crear el CV.");
+  }
+
+  const transcript = qa
+    .map((x, i) => `P${i + 1}: ${x.question}\nR${i + 1}: ${x.answer}`)
+    .join("\n\n");
+  const userText =
+    `Entrevista (preguntas P / respuestas R de la persona):\n\n${transcript}\n\n` +
+    `Construye el perfil JSON SOLO con lo que dijo, redactado profesionalmente.`;
+
+  const body = {
+    systemInstruction: { parts: [{ text: BUILD_PROFILE_SYSTEM }] },
+    contents: [{ role: "user", parts: [{ text: userText }] }],
+    generationConfig: {
+      temperature: 0.4,
+      maxOutputTokens: 4000,
+      thinkingConfig: { thinkingBudget: 1024 },
+      responseMimeType: "application/json",
+      responseJsonSchema: PARSE_CV_SCHEMA
+    }
+  };
+
+  const res = await callGenerate(apiKey, model, body);
+  const out = extractJson<Partial<ParseCvResult>>(res);
+  const personal = out.personal ?? { fullName: "", email: "", phone: "", location: "" };
+
+  return {
+    personal: {
+      fullName: personal.fullName ?? "",
+      email: personal.email ?? "",
+      phone: personal.phone ?? "",
+      location: personal.location ?? "",
+      ...(personal.linkedin ? { linkedin: personal.linkedin } : {}),
+      ...(personal.website ? { website: personal.website } : {})
+    },
+    summary: out.summary ?? "",
+    experience: Array.isArray(out.experience) ? out.experience : [],
+    education: Array.isArray(out.education) ? out.education : [],
+    skills: Array.isArray(out.skills) ? out.skills : [],
+    languages: Array.isArray(out.languages) ? out.languages : []
+  };
+}

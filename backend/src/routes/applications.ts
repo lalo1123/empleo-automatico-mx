@@ -14,6 +14,7 @@ import { emailVerifiedRequired } from "../middleware/email-verified.js";
 import {
   answerQuestions,
   answerQuiz,
+  buildProfileFromQA,
   generateCoverLetter,
   generateTailoredCv,
   parseCvText
@@ -730,6 +731,46 @@ applicationsRoutes.get("/stats", authRequired(), emailVerifiedRequired(), async 
         bySource
       }
     });
+  } catch (err) {
+    return sendError(c, err);
+  }
+});
+
+// build-profile: create a structured profile from a short chat interview, for
+// users who have NO CV document. FREE (onboarding, same as parse-cv) — auth
+// only, so a brand-new user can build their profile before anything else.
+const buildProfileSchema = z.object({
+  qa: z
+    .array(
+      z.object({
+        question: z.string().max(300),
+        answer: z.string().min(1, "Respuesta vacía.").max(4000)
+      })
+    )
+    .min(1, "Envía al menos una respuesta.")
+    .max(12, "Demasiadas respuestas.")
+});
+
+applicationsRoutes.post("/build-profile", authRequired(), async (c) => {
+  try {
+    const body = await c.req.json().catch(() => null);
+    const parsed = buildProfileSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new HttpError(
+        400,
+        "VALIDATION_ERROR",
+        parsed.error.issues[0]?.message ?? "Respuestas inválidas"
+      );
+    }
+    const env = loadEnv();
+    const user = c.get("user");
+    const profile = await buildProfileFromQA({
+      apiKey: env.GEMINI_API_KEY,
+      model: env.GEMINI_MODEL,
+      qa: parsed.data.qa
+    });
+    console.log(`[build-profile] ok user=${user.id} qa=${parsed.data.qa.length}`);
+    return c.json({ ok: true, profile });
   } catch (err) {
     return sendError(c, err);
   }
