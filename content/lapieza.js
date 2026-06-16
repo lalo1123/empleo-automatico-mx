@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-15-match-bonito-salario-finaliza";
+  const EAMX_LAPIEZA_VERSION = "2026-06-15-sin-falso-error-finaliza";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -2117,6 +2117,20 @@
         stuckTicks++;
         console.log("[EmpleoAutomatico] chain: stuck tick", stuckTicks, "of", MAX_STUCK_TICKS);
         if (stuckTicks >= MAX_STUCK_TICKS) {
+          // FALSE-ALARM GUARD: if we're "stuck" only because a manual-entry
+          // field (the standalone salary step) is blocking, the STANDING
+          // watcher fills + advances + finalizes it independently. Showing the
+          // generic "no pude avanzar" error here RACES the actual submit — the
+          // user saw it next to LaPieza's own "¡Listo, ya quedó!" confirmation
+          // ("sí finalizó pero salió esto"). Bail SILENTLY and hand off to the
+          // watcher (which auto-advances in Automático total, or shows its own
+          // specific "esta la respondes tú" prompt in review mode).
+          let hasManualBlocker = false;
+          try { hasManualBlocker = !!detectManualEntryBlocker(); } catch (_) {}
+          if (hasManualBlocker) {
+            console.log("[EmpleoAutomatico] chain: stuck on a manual-entry step (salary) — handing to the watcher, no error toast");
+            break;
+          }
           console.log("[EmpleoAutomatico] chain: stuck — bailing");
           toast(
             "No pude avanzar este paso. Continúa manual desde aquí.",
@@ -2171,6 +2185,7 @@
           // recordSubmission dedupes per id, so this is a no-op when the
           // Finalizar click tracker already recorded it.
           try { await recordSubmission("Postulada desde la extensión (quiz final)"); } catch (_) {}
+          try { toast("✓ ¡Postulación enviada! La empresa ya la recibió.", "success", { durationMs: 6000 }); } catch (_) {}
         } else if (isBulkMode && !loopEndedInBlockerError) {
           const looksSubmitted =
             !isApplyPage() ||
