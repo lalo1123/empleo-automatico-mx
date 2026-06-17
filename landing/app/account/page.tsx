@@ -99,6 +99,56 @@ function formatDate(seconds: number | undefined): string {
   }
 }
 
+function QlIcon({ name }: { name: string }) {
+  switch (name) {
+    case "cv":
+      return (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" width={22} height={22} aria-hidden>
+          <path d="M14 3v4a1 1 0 0 0 1 1h4" />
+          <path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z" />
+          <path d="M9 13h6M9 17h6" />
+        </svg>
+      );
+    case "pref":
+      return (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" width={22} height={22} aria-hidden>
+          <circle cx="8" cy="6" r="2" />
+          <path d="M4 6h2M10 6h10" />
+          <circle cx="16" cy="12" r="2" />
+          <path d="M4 12h10M18 12h2" />
+          <circle cx="10" cy="18" r="2" />
+          <path d="M4 18h4M12 18h8" />
+        </svg>
+      );
+    case "hist":
+      return (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" width={22} height={22} aria-hidden>
+          <path d="M3.05 11a9 9 0 1 1 .5 4" />
+          <path d="M3 4v5h5" />
+          <path d="M12 8v4l3 2" />
+        </svg>
+      );
+    case "puzzle":
+      return (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" width={22} height={22} aria-hidden>
+          <path d="M4 7h3a1 1 0 0 0 1-1V5a2 2 0 0 1 4 0v1a1 1 0 0 0 1 1h3a1 1 0 0 1 1 1v3a1 1 0 0 0 1 1h1a2 2 0 0 1 0 4h-1a1 1 0 0 0-1 1v3a1 1 0 0 1-1 1h-3a1 1 0 0 1-1-1v-1a2 2 0 0 0-4 0v1a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a2 2 0 0 0 0-4H5a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1z" />
+        </svg>
+      );
+    case "ext":
+      return (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" width={18} height={18} aria-hidden>
+          <path d="M12 6H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6M11 13l9-9M15 4h5v5" />
+        </svg>
+      );
+    default:
+      return (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" width={18} height={18} aria-hidden>
+          <path d="M5 12h14M13 6l6 6-6 6" />
+        </svg>
+      );
+  }
+}
+
 export default async function AccountPage({ searchParams }: PageProps) {
   const token = await getSessionToken();
   if (!token) redirect("/login?next=/account");
@@ -883,47 +933,61 @@ export default async function AccountPage({ searchParams }: PageProps) {
                   Accesos rápidos
                 </p>
                 <div className="mt-3.5 grid gap-2.5">
-                  {[
-                    { href: "/account/cv", external: false, icon: "📄", title: "Mi CV", sub: "Súbelo o créalo con IA", accent: "#137e7a", bg: "#ecfaf7", arrow: "→" },
-                    { href: "/account/preferences", external: false, icon: "🎯", title: "Preferencias y salario", sub: "Ciudad, salario esperado, respuestas", accent: "#ea580c", bg: "#fff1e6", arrow: "→" },
-                    { href: "/account/historial", external: false, icon: "📋", title: "Historial de postulaciones", sub: "Todo lo que has aplicado", accent: "#2563eb", bg: "#eaf1ff", arrow: "→" },
-                    { href: CHROME_STORE_URL, external: true, icon: "🧩", title: "Instalar extensión", sub: "En Chrome — usa esta cuenta", accent: "#16a34a", bg: "#eafaef", arrow: "↗" },
-                  ].map((item, i) => {
-                    const inner = (
-                      <>
-                        <span
-                          aria-hidden
-                          className="eamx-ql-icon flex h-11 w-11 shrink-0 items-center justify-center rounded-[14px] text-lg"
-                          style={{ background: item.bg, color: item.accent }}
-                        >
-                          {item.icon}
+                  <Link
+                    href="/account/cv"
+                    className="eamx-qlh eamx-fadeup flex items-center gap-4 rounded-[18px] px-[18px] py-[17px] text-white"
+                    style={{ background: "linear-gradient(135deg,#15857f 0%,#0f3d54 100%)", boxShadow: "0 16px 34px -16px rgba(16,89,113,0.7)", animationDelay: "0ms" } as CSSProperties}
+                  >
+                    <span aria-hidden className="eamx-ql-ic flex h-12 w-12 shrink-0 items-center justify-center rounded-[14px] bg-white/[0.16] text-white">
+                      <QlIcon name="cv" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-base font-extrabold leading-tight">Mi CV</span>
+                      <span className="mt-0.5 block text-xs text-white/85">Súbelo o créalo con IA</span>
+                    </span>
+                    <span aria-hidden className="eamx-ql-ar text-white/90">
+                      <QlIcon name="arrow" />
+                    </span>
+                  </Link>
+
+                  <div className="grid grid-cols-2 gap-2.5">
+                    {[
+                      { href: "/account/preferences", icon: "pref", title: "Preferencias", sub: "Ciudad, salario, respuestas", accent: "#ea580c", bg: "#fff1e6", delay: 70 },
+                      { href: "/account/historial", icon: "hist", title: "Historial", sub: "Lo que has aplicado", accent: "#2563eb", bg: "#eaf1ff", delay: 140 },
+                    ].map((it) => (
+                      <Link
+                        key={it.href}
+                        href={it.href}
+                        className="eamx-qlc eamx-fadeup flex flex-col gap-2.5 rounded-[16px] border border-[#e7edf2] bg-white p-[15px]"
+                        style={{ "--ql-accent": it.accent, animationDelay: `${it.delay}ms` } as CSSProperties}
+                      >
+                        <span aria-hidden className="eamx-ql-ic flex h-10 w-10 items-center justify-center rounded-[12px]" style={{ background: it.bg, color: it.accent }}>
+                          <QlIcon name={it.icon} />
                         </span>
-                        <span className="min-w-0 flex-1">
-                          <span className="block text-sm font-bold leading-tight text-[color:var(--color-ink)]">
-                            {item.title}
-                          </span>
-                          <span className="mt-0.5 block text-[11.5px] leading-snug text-[color:var(--color-ink-muted)]">
-                            {item.sub}
-                          </span>
-                        </span>
-                        <span aria-hidden className="eamx-ql-arrow text-base font-bold text-[color:var(--color-ink-muted)]">
-                          {item.arrow}
-                        </span>
-                      </>
-                    );
-                    const cls =
-                      "eamx-quicklink eamx-fadeup flex items-center gap-3.5 rounded-[16px] border border-[color:var(--color-border)] bg-white px-3.5 py-3";
-                    const style = { "--ql-accent": item.accent, animationDelay: `${i * 70}ms` } as CSSProperties;
-                    return item.external ? (
-                      <a key={item.href} href={item.href} target="_blank" rel="noopener noreferrer" className={cls} style={style}>
-                        {inner}
-                      </a>
-                    ) : (
-                      <Link key={item.href} href={item.href} className={cls} style={style}>
-                        {inner}
+                        <span className="text-sm font-extrabold leading-tight text-[color:var(--color-ink)]">{it.title}</span>
+                        <span className="text-[11.5px] leading-snug text-[color:var(--color-ink-muted)]">{it.sub}</span>
                       </Link>
-                    );
-                  })}
+                    ))}
+                  </div>
+
+                  <a
+                    href={CHROME_STORE_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="eamx-qlc eamx-fadeup flex items-center gap-3.5 rounded-[16px] border border-[#e7edf2] bg-white px-3.5 py-3"
+                    style={{ "--ql-accent": "#16a34a", animationDelay: "210ms" } as CSSProperties}
+                  >
+                    <span aria-hidden className="eamx-ql-ic flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px]" style={{ background: "#eafaef", color: "#16a34a" }}>
+                      <QlIcon name="puzzle" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-extrabold leading-tight text-[color:var(--color-ink)]">Instalar extensión</span>
+                      <span className="mt-0.5 block text-[11.5px] leading-snug text-[color:var(--color-ink-muted)]">En Chrome — usa esta cuenta</span>
+                    </span>
+                    <span aria-hidden className="eamx-ql-ar text-[color:var(--color-ink-muted)]">
+                      <QlIcon name="ext" />
+                    </span>
+                  </a>
                 </div>
                 <p className="mt-3 text-[11.5px] text-[color:var(--color-ink-muted)]">
                   La extensión usa esta misma cuenta. El listado en Chrome Web

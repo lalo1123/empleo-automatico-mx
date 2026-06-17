@@ -96,26 +96,37 @@ html {
   animation: eamx-fadeup 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-/* Quick-link tiles — accent driven by the inline --ql-accent var so hover
-   border/arrow/shadow pick up each item's color (Tailwind can't take a
-   runtime-dynamic color). */
-.eamx-quicklink {
-  transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.2s ease,
-    border-color 0.2s ease;
+/* Bento quick-links. The hero is a gradient card; the small cards use the
+   inline --ql-accent var for a colored hover shadow + border (Tailwind can't
+   take a runtime-dynamic color). The arrow/icon micro-interactions are scoped
+   to each tile via :hover. */
+.eamx-qlh,
+.eamx-qlc {
+  transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.22s ease,
+    border-color 0.22s ease;
 }
-.eamx-quicklink:hover {
-  transform: translateY(-2px);
-  border-color: var(--ql-accent, var(--color-brand-400));
-  box-shadow: 0 16px 34px -14px color-mix(in srgb, var(--ql-accent, #105971) 55%, transparent);
+.eamx-qlh:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 22px 44px -16px rgba(16, 89, 113, 0.85);
 }
-.eamx-ql-icon,
-.eamx-ql-arrow {
-  transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1), color 0.2s ease;
+.eamx-qlc:hover {
+  transform: translateY(-3px);
+  border-color: color-mix(in srgb, var(--ql-accent, #137e7a) 45%, transparent);
+  box-shadow: 0 16px 30px -14px color-mix(in srgb, var(--ql-accent, #137e7a) 55%, transparent);
 }
-.eamx-quicklink:hover .eamx-ql-icon {
-  transform: scale(1.09) rotate(-3deg);
+.eamx-ql-ic {
+  transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
 }
-.eamx-quicklink:hover .eamx-ql-arrow {
-  color: var(--ql-accent, var(--color-brand-600));
+.eamx-qlh:hover .eamx-ql-ic {
+  transform: scale(1.08) rotate(-4deg);
+}
+.eamx-qlc:hover .eamx-ql-ic {
+  transform: scale(1.1);
+}
+.eamx-ql-ar {
+  transition: transform 0.22s ease;
+}
+.eamx-qlh:hover .eamx-ql-ar,
+.eamx-qlc:hover .eamx-ql-ar {
   transform: translateX(4px);
 }
