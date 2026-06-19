@@ -264,7 +264,8 @@ export default async function AccountPage({ searchParams }: PageProps) {
     return out;
   })();
   const todayCount = last7Days[6];
-  const weekHasData = last7Days.some((n) => n > 0);
+  const weekTotal = last7Days.reduce((a, b) => a + b, 0);
+  const weekHasData = weekTotal > 0;
   const trendHasData = last8Weeks.reduce((a, b) => a + b, 0) >= 3;
 
   const sourceLabels: Record<ApplicationSource, string> = {
@@ -609,38 +610,51 @@ export default async function AccountPage({ searchParams }: PageProps) {
                 />
               </svg>
               <div className="absolute inset-0 grid place-content-center text-center">
-                <div className="text-[40px] font-extrabold leading-none tracking-tight tabular-nums">
+                <div className="text-[42px] font-extrabold leading-none tracking-tight tabular-nums">
                   {stats.totalMonth}
                   {unlimited && (
-                    <span className="ml-1 align-middle text-2xl text-[#70d1c6]">∞</span>
+                    <span className="ml-0.5 align-super text-lg font-semibold text-[#70d1c6]">∞</span>
                   )}
                 </div>
-                <div className="mt-1 text-xs text-[#9fc0c8]">
-                  {unlimited ? "este mes · sin límite" : "este mes"}
-                </div>
+                <div className="mt-1.5 text-xs text-[#9fc0c8]">este mes</div>
               </div>
             </div>
 
-            {weekHasData && (
-              <div className="mb-3 flex h-[30px] items-end justify-center gap-[5px]" aria-hidden>
-                {last7Days.map((v, i) => {
-                  const weekMax = Math.max(1, ...last7Days);
-                  const isToday = i === last7Days.length - 1;
-                  const pct = Math.max(8, Math.round((v / weekMax) * 100));
-                  return (
-                    <span
-                      key={i}
-                      className="ead-bar w-[9px] rounded-[2px]"
-                      style={{
-                        height: `${pct}%`,
-                        animationDelay: `${0.5 + i * 0.06}s`,
-                        background: isToday ? "#70d1c6" : "#34525e",
-                      }}
-                    />
-                  );
-                })}
+            <div className="mb-3.5 mt-1 border-t border-white/10 pt-3.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[10.5px] font-bold uppercase tracking-[0.12em] text-[#8fb0ba]">
+                  Esta semana
+                </span>
+                <span className="text-xs font-bold tabular-nums text-[#cfe6ea]">
+                  {weekTotal}{" "}
+                  {weekTotal === 1 ? "postulación" : "postulaciones"}
+                </span>
               </div>
-            )}
+              {weekHasData ? (
+                <div className="mt-2.5 flex h-[34px] items-end gap-1.5 border-b border-white/[0.12]" aria-hidden>
+                  {last7Days.map((v, i) => {
+                    const weekMax = Math.max(1, ...last7Days);
+                    const isToday = i === last7Days.length - 1;
+                    const pct = v === 0 ? 8 : Math.max(28, Math.round((v / weekMax) * 100));
+                    return (
+                      <span
+                        key={i}
+                        className="ead-bar flex-1 rounded-t-[3px]"
+                        style={{
+                          height: `${pct}%`,
+                          animationDelay: `${0.5 + i * 0.06}s`,
+                          background: isToday ? "#70d1c6" : v > 0 ? "#4a7f86" : "#2f4a55",
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="mt-2 text-[11.5px] text-[#7f9aa3]">
+                  Aún sin actividad esta semana.
+                </p>
+              )}
+            </div>
 
             <p className="text-center text-[12.5px] leading-snug text-[#cfe6ea]">
               {unlimited ? (
