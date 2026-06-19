@@ -164,7 +164,12 @@ export default async function AccountPage({ searchParams }: PageProps) {
     const [account, stats, recent] = await Promise.all([
       getAccount(token!),
       getApplicationsStats(token!).catch(() => null),
-      getApplicationsHistory(token!, { pageSize: 5 }).catch(() => null),
+      // Pull ~9 weeks of history (capped) so we can bucket real activity into
+      // the metric sparklines. The list panel still only shows the first 5.
+      getApplicationsHistory(token!, {
+        pageSize: 100,
+        fromTs: Math.floor(Date.now() / 1000) - 63 * 86400,
+      }).catch(() => null),
     ]);
     data = account;
     statsData = stats;
@@ -225,7 +230,42 @@ export default async function AccountPage({ searchParams }: PageProps) {
       bumeran: 0, indeed: 0, linkedin: 0
     } as Record<ApplicationSource, number>,
   };
-  const recentApplications = recentData?.applications ?? [];
+  const historyApps = recentData?.applications ?? [];
+  const recentApplications = historyApps.slice(0, 5);
+
+  // Real activity buckets for the metric micro-viz. Derived from the user's own
+  // history (best-effort) — never fabricated, so a quiet week reads as a quiet
+  // week, not a fake trend. All pure date math; can't throw.
+  const DAY_MS = 86400000;
+  const startOfTodayMs = (() => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+  })();
+  const dayIndex = (unixSec: number) => {
+    const d = new Date(unixSec * 1000);
+    d.setHours(0, 0, 0, 0);
+    return Math.round((startOfTodayMs - d.getTime()) / DAY_MS);
+  };
+  const last7Days = (() => {
+    const out = new Array(7).fill(0) as number[];
+    for (const a of historyApps) {
+      const slot = 6 - dayIndex(a.appliedAt);
+      if (slot >= 0 && slot < 7) out[slot] += 1;
+    }
+    return out;
+  })();
+  const last8Weeks = (() => {
+    const out = new Array(8).fill(0) as number[];
+    for (const a of historyApps) {
+      const slot = 7 - Math.floor(dayIndex(a.appliedAt) / 7);
+      if (slot >= 0 && slot < 8) out[slot] += 1;
+    }
+    return out;
+  })();
+  const todayCount = last7Days[6];
+  const weekHasData = last7Days.some((n) => n > 0);
+  const trendHasData = last8Weeks.reduce((a, b) => a + b, 0) >= 3;
 
   const sourceLabels: Record<ApplicationSource, string> = {
     lapieza: "LaPieza",
@@ -613,54 +653,64 @@ export default async function AccountPage({ searchParams }: PageProps) {
       <div className="bg-[#f4f7f8]">
         <main id="main" className="mx-auto max-w-6xl px-4 pb-16 sm:px-6">
 
-          {/* metric tiles, overlapping the hero edge */}
-          <section className="relative z-10 -mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <MetricTile
+          {/* metric cards, overlapping the hero edge — minimal Linear/Vercel
+              cards whose micro-viz is built from REAL history buckets */}
+          <section className="relative z-10 -mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <MetricCard
               label="Total enviadas"
-              hint="histórico"
               value={stats.totalAll}
+              delay={0}
               icon={
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M4 19V5m0 14h16M8 16l4-5 3 3 5-7" />
                 </svg>
               }
-              tone="teal"
+              footLeft="histórico"
+              footRight={trendHasData ? <Sparkline series={last8Weeks} /> : null}
             />
-            <MetricTile
+            <MetricCard
               label="Este mes"
-              hint={monthLabel}
               value={stats.totalMonth}
+              delay={70}
               icon={
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <rect x="3" y="5" width="18" height="16" rx="2.5" />
                   <path d="M3 10h18M8 3v4M16 3v4" />
                 </svg>
               }
-              tone="flame"
+              footLeft={monthLabel}
+              footRight={null}
             />
-            <MetricTile
+            <MetricCard
               label="Esta semana"
-              hint="últimos 7 días"
               value={stats.total7d}
+              delay={140}
+              accent
               icon={
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z" />
                 </svg>
               }
-              tone="violet"
+              footLeft="últimos 7 días"
+              footRight={weekHasData ? <DailyBars series={last7Days} /> : null}
             />
-            <MetricTile
+            <MetricCard
               label="Top portal"
-              hint={topSourceCount > 0 ? `${topSourceCount} aplicadas` : "aún sin datos"}
               value={topSourceLabel}
               isText
+              delay={210}
               icon={
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M8 21h8m-4-4v4M5 4h14v4a7 7 0 0 1-14 0V4Z" />
                   <path d="M5 6H3a3 3 0 0 0 3 5m13-5h2a3 3 0 0 1-3 5" />
                 </svg>
               }
-              tone="amber"
+              footLeft={topSourceCount > 0 ? `${topSourceCount} aplicadas` : "aún sin datos"}
+              footRight={
+                topSourceCount > 0 && stats.totalAll > 0 ? (
+                  <ShareBar pct={Math.round((topSourceCount / stats.totalAll) * 100)} />
+                ) : null
+              }
             />
           </section>
 
@@ -832,99 +882,137 @@ export default async function AccountPage({ searchParams }: PageProps) {
 
             {/* ---- right column ---- */}
             <div className="space-y-5">
-              {/* plan + quota card */}
-              <article className="rounded-[20px] border border-[color:var(--color-border)] bg-white p-6 shadow-[0_18px_40px_-28px_rgba(15,29,44,0.45)]">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[color:var(--color-ink-muted)]">
-                      Tu plan
-                    </p>
-                    <p className="mt-1.5 text-3xl font-extrabold tracking-tight text-[color:var(--color-ink)]">
-                      {plan.name}{" "}
-                      <span className="text-[13px] font-semibold text-[color:var(--color-ink-muted)]">
-                        ·{" "}
-                        {isFree
-                          ? "sin tarjeta"
-                          : `${formatMxn(plan.priceMonthlyMxn)} / mes`}
-                      </span>
-                    </p>
-                  </div>
-                  <span className="rounded-full bg-[#ecfaf7] px-3 py-1 text-[11px] font-bold text-[color:var(--color-brand-700)]">
-                    Activo
-                  </span>
-                </div>
-
-                <div className="mt-4 rounded-[14px] border border-[color:var(--color-border)] bg-[#f7fafb] p-4">
-                  <p className="text-xs text-[color:var(--color-ink-muted)]">
-                    Postulaciones este mes
-                  </p>
-                  <p className="mt-1 text-xl font-bold tabular-nums text-[color:var(--color-ink)]">
-                    {usage.current}{" "}
-                    <span className="text-[13px] font-semibold text-[color:var(--color-ink-muted)]">
-                      / {limitLabel(plan)}
+              {/* plan + quota card — dark navy with a teal halo (the focal
+                  "premium" anchor). For unlimited plans the bar tracks today's
+                  activity toward the 30/day cap, so it never reads as
+                  "60% of infinity". */}
+              <article className="relative overflow-hidden rounded-[20px] bg-[#0f1d2c] p-6 text-white shadow-[0_24px_54px_-30px_rgba(15,29,44,0.85)]">
+                <div
+                  aria-hidden
+                  className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_90%_at_100%_0%,rgba(19,126,122,0.38),transparent_56%)]"
+                />
+                <div className="relative">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/55">
+                        Tu plan
+                      </p>
+                      <p className="mt-1.5 text-[28px] font-bold leading-none tracking-tight">
+                        {plan.name}{" "}
+                        <span className="text-[13px] font-medium text-white/55">
+                          ·{" "}
+                          {isFree
+                            ? "sin tarjeta"
+                            : `${formatMxn(plan.priceMonthlyMxn)} / mes`}
+                        </span>
+                      </p>
+                    </div>
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-[#4fb9ad]/30 bg-[#4fb9ad]/[0.14] px-3 py-1 text-[11.5px] font-bold text-[#7fd8cd]">
+                      <span aria-hidden className="ead-pulse h-1.5 w-1.5 rounded-full bg-[#4fb9ad]" />
+                      Activo
                     </span>
-                  </p>
-                  <div className="mt-2.5 h-2 overflow-hidden rounded-full bg-[#e9eef1]">
-                    <div
-                      role="progressbar"
-                      aria-valuemin={0}
-                      aria-valuemax={100}
-                      aria-valuenow={usagePct}
-                      className={`h-full rounded-full transition-all ${
-                        quotaExhausted
-                          ? "bg-gradient-to-r from-[#ef6f6f] to-[#dc2626]"
-                          : "bg-gradient-to-r from-[#4fb9ad] to-[#105971]"
-                      }`}
-                      style={{ width: `${Math.max(usagePct, unlimited ? 100 : 2)}%` }}
-                    />
                   </div>
-                  {!unlimited && (
-                    <p className="mt-2 text-[12px] text-[color:var(--color-ink-muted)]">
-                      {quotaExhausted
-                        ? "Se acabaron — se reinician el próximo período."
-                        : `${remaining} ${remaining === 1 ? "restante" : "restantes"} · se reinician cada mes`}
-                    </p>
-                  )}
-                  {unlimited && (
-                    <p className="mt-2 text-[12px] text-[color:var(--color-ink-muted)]">
-                      Cap responsable: hasta 30 postulaciones al día para
-                      proteger tus cuentas en los portales.
-                    </p>
-                  )}
-                </div>
 
-                {isFree ? (
-                  <Link
-                    href="/account/billing"
-                    className="mt-4 flex w-full items-center justify-center rounded-[12px] bg-[#0f1d2c] px-5 py-3 text-sm font-bold text-white transition hover:bg-[#1f3447]"
-                  >
-                    Subir a Pro — 100 postulaciones/mes →
-                  </Link>
-                ) : (
-                  <div className="mt-4 space-y-2.5">
+                  <div className="mt-5">
+                    {unlimited ? (
+                      <>
+                        <div className="flex items-baseline justify-between gap-2">
+                          <span className="text-[13px] text-white/65">
+                            Hoy llevas
+                          </span>
+                          <span className="text-[15px] font-semibold tabular-nums">
+                            {todayCount}{" "}
+                            <span className="font-medium text-white/55">de 30</span>
+                          </span>
+                        </div>
+                        <div className="ead-shimmer mt-2.5 h-2 overflow-hidden rounded-full bg-white/[0.1]">
+                          <div
+                            role="progressbar"
+                            aria-valuemin={0}
+                            aria-valuemax={30}
+                            aria-valuenow={todayCount}
+                            className="ead-fill h-full rounded-full bg-gradient-to-r from-[#4fb9ad] to-[#137e7a]"
+                            style={{ ["--w" as string]: `${Math.max(4, Math.min(100, Math.round((todayCount / 30) * 100)))}%` } as CSSProperties}
+                          />
+                        </div>
+                        <p className="mt-2.5 flex items-start gap-1.5 text-[12px] text-white/55">
+                          <svg aria-hidden width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#7fd8cd" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mt-px flex-none">
+                            <path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3z" />
+                            <path d="M9.5 12l1.8 1.8L15 10" />
+                          </svg>
+                          Ilimitadas al mes · cap responsable de 30/día para
+                          proteger tus cuentas en los portales.
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <div className="flex items-baseline justify-between gap-2">
+                          <span className="text-[13px] text-white/65">
+                            Postulaciones este mes
+                          </span>
+                          <span className="text-[15px] font-semibold tabular-nums">
+                            {usage.current}{" "}
+                            <span className="font-medium text-white/55">
+                              / {limitLabel(plan)}
+                            </span>
+                          </span>
+                        </div>
+                        <div className="mt-2.5 h-2 overflow-hidden rounded-full bg-white/[0.1]">
+                          <div
+                            role="progressbar"
+                            aria-valuemin={0}
+                            aria-valuemax={100}
+                            aria-valuenow={usagePct}
+                            className={`ead-fill h-full rounded-full ${
+                              quotaExhausted
+                                ? "bg-gradient-to-r from-[#ef6f6f] to-[#dc2626]"
+                                : "bg-gradient-to-r from-[#4fb9ad] to-[#137e7a]"
+                            }`}
+                            style={{ ["--w" as string]: `${Math.max(usagePct, 2)}%` } as CSSProperties}
+                          />
+                        </div>
+                        <p className="mt-2.5 text-[12px] text-white/55">
+                          {quotaExhausted
+                            ? "Se acabaron — se reinician el próximo período."
+                            : `${remaining} ${remaining === 1 ? "restante" : "restantes"} · se reinician cada mes`}
+                        </p>
+                      </>
+                    )}
+                  </div>
+
+                  {isFree ? (
                     <Link
                       href="/account/billing"
-                      className="flex w-full items-center justify-center rounded-[12px] border border-[color:var(--color-border)] bg-white px-5 py-2.5 text-sm font-bold text-[color:var(--color-ink)] hover:border-[color:var(--color-brand-400)]"
+                      className="mt-5 flex w-full items-center justify-center gap-1.5 rounded-[12px] bg-white px-5 py-3 text-sm font-bold text-[#0f1d2c] transition hover:-translate-y-0.5 hover:shadow-[0_10px_24px_-10px_rgba(0,0,0,0.5)]"
                     >
-                      Gestionar suscripción
+                      Subir a Pro — 100 postulaciones/mes →
                     </Link>
-                    <CancelSubscriptionForm action={cancelAction}>
-                      <button
-                        type="submit"
-                        className="w-full rounded-[12px] border border-red-200 bg-white px-5 py-2.5 text-sm font-semibold text-red-700 hover:border-red-300 hover:bg-red-50"
+                  ) : (
+                    <div className="mt-5 space-y-2.5">
+                      <Link
+                        href="/account/billing"
+                        className="flex w-full items-center justify-center rounded-[12px] bg-white px-5 py-2.5 text-sm font-bold text-[#0f1d2c] transition hover:-translate-y-0.5 hover:shadow-[0_10px_24px_-10px_rgba(0,0,0,0.5)]"
                       >
-                        Cancelar suscripción
-                      </button>
-                    </CancelSubscriptionForm>
-                  </div>
-                )}
-
-                <p className="mt-3.5 text-[11.5px] text-[color:var(--color-ink-muted)]">
-                  {formatDate(usage.periodStart)} — {formatDate(usage.periodEnd)}
-                  {user.planExpiresAt && !isFree && (
-                    <> · Renovación: {formatDate(user.planExpiresAt)}</>
+                        Gestionar suscripción
+                      </Link>
+                      <CancelSubscriptionForm action={cancelAction}>
+                        <button
+                          type="submit"
+                          className="w-full rounded-[12px] border border-white/15 bg-white/[0.04] px-5 py-2.5 text-sm font-semibold text-white/65 transition hover:bg-white/[0.09] hover:text-white"
+                        >
+                          Cancelar suscripción
+                        </button>
+                      </CancelSubscriptionForm>
+                    </div>
                   )}
-                </p>
+
+                  <p className="mt-4 text-[11.5px] text-white/45">
+                    {formatDate(usage.periodStart)} — {formatDate(usage.periodEnd)}
+                    {user.planExpiresAt && !isFree && (
+                      <> · Renovación: {formatDate(user.planExpiresAt)}</>
+                    )}
+                  </p>
+                </div>
               </article>
 
               {/* quick links */}
@@ -1041,55 +1129,144 @@ function StatusBanner({
 }
 
 /**
- * Metric tile with a color-coded icon chip. Numbers use Inter +
- * tabular-nums for a clean instrument-panel look (no slashed zeros).
+ * Minimal metric card (Linear/Vercel language): hairline border, big tight
+ * tabular number, a small monochrome icon, and an optional micro-viz in the
+ * footer. One metric can carry an accent (teal) number to give a single pop.
  */
-function MetricTile({
+function MetricCard({
   label,
-  hint,
   value,
   icon,
-  tone,
+  footLeft,
+  footRight,
+  delay = 0,
+  accent = false,
   isText = false,
 }: {
   label: string;
-  hint?: string;
   value: number | string;
   icon: React.ReactNode;
-  tone: "teal" | "flame" | "violet" | "amber";
+  footLeft: React.ReactNode;
+  footRight: React.ReactNode;
+  delay?: number;
+  accent?: boolean;
   isText?: boolean;
 }) {
-  const chip: Record<string, string> = {
-    teal: "bg-[#ecfaf7] text-[#105971]",
-    flame: "bg-[#fff1e6] text-[#ff6600]",
-    violet: "bg-[#f1ecfe] text-[#7c3aed]",
-    amber: "bg-[#fef3c7] text-[#b45309]",
-  };
   return (
-    <div className="rounded-[18px] border border-[color:var(--color-border)] bg-white p-5 shadow-[0_18px_40px_-28px_rgba(15,29,44,0.45)] transition hover:-translate-y-0.5 hover:shadow-[0_22px_44px_-26px_rgba(15,29,44,0.5)]">
-      <div className="flex items-center justify-between">
-        <span
-          aria-hidden
-          className={`grid h-9 w-9 place-items-center rounded-[10px] ${chip[tone]}`}
-        >
+    <div
+      className="ead-card eamx-fadeup rounded-[16px] border border-[color:var(--color-border)] bg-white px-[18px] py-4"
+      style={{ animationDelay: `${delay}ms` } as CSSProperties}
+    >
+      <div className="flex items-center gap-2 text-[12.5px] font-medium text-[color:var(--color-ink-soft)]">
+        <span aria-hidden className="ead-ic text-[color:var(--color-ink-muted)]">
           {icon}
         </span>
-        {hint && (
-          <span className="text-[11px] font-semibold lowercase tracking-wide text-[color:var(--color-ink-muted)]">
-            {hint}
-          </span>
-        )}
+        {label}
       </div>
       <div
-        className={`mt-3 font-extrabold tracking-tight tabular-nums text-[color:var(--color-ink)] ${
-          isText ? "text-xl" : "text-[32px] leading-none"
-        }`}
+        className={`mt-3 font-semibold tracking-tight tabular-nums ${
+          isText ? "text-[22px]" : "text-[32px] leading-none"
+        } ${accent ? "text-[color:var(--color-brand-600)]" : "text-[color:var(--color-ink)]"}`}
       >
         {typeof value === "number" ? value.toLocaleString("es-MX") : value}
       </div>
-      <div className="mt-1.5 text-[12.5px] text-[color:var(--color-ink-muted)]">
-        {label}
+      <div className="mt-2.5 flex min-h-[28px] items-end justify-between gap-2">
+        <span className="text-[11.5px] text-[color:var(--color-ink-muted)]">
+          {footLeft}
+        </span>
+        {footRight}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Sparkline drawn from a real numeric series (e.g. weekly application counts).
+ * The line draws left→right on mount and a dot pops at the latest point.
+ */
+function Sparkline({
+  series,
+  w = 80,
+  h = 26,
+}: {
+  series: number[];
+  w?: number;
+  h?: number;
+}) {
+  const max = Math.max(1, ...series);
+  const stepX = series.length > 1 ? w / (series.length - 1) : w;
+  const pts = series.map(
+    (v, i) =>
+      [
+        Number((i * stepX).toFixed(1)),
+        Number((h - 3 - (v / max) * (h - 6)).toFixed(1)),
+      ] as [number, number],
+  );
+  const line = pts
+    .map(([x, y], i) => `${i ? "L" : "M"}${x},${y}`)
+    .join(" ");
+  const area = `${line} L${w},${h} L0,${h} Z`;
+  let len = 4;
+  for (let i = 1; i < pts.length; i++) {
+    len += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+  }
+  const [lx, ly] = pts[pts.length - 1];
+  return (
+    <svg
+      className="ead-spark"
+      width={w}
+      height={h}
+      viewBox={`0 0 ${w} ${h}`}
+      fill="none"
+      aria-hidden
+    >
+      <path d={area} fill="var(--color-brand-600)" opacity="0.07" />
+      <path
+        className="line"
+        d={line}
+        stroke="var(--color-brand-600)"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        style={{ ["--len" as string]: Math.ceil(len), strokeDasharray: Math.ceil(len), strokeDashoffset: Math.ceil(len) } as CSSProperties}
+      />
+      <circle className="dot" cx={lx} cy={ly} r="2.4" fill="var(--color-brand-600)" />
+    </svg>
+  );
+}
+
+/** Seven daily bars (real counts); today is highlighted in teal. */
+function DailyBars({ series }: { series: number[] }) {
+  const max = Math.max(1, ...series);
+  return (
+    <div className="flex h-[26px] items-end gap-[3px]" aria-hidden>
+      {series.map((v, i) => {
+        const isToday = i === series.length - 1;
+        const pct = Math.max(8, Math.round((v / max) * 100));
+        return (
+          <span
+            key={i}
+            className="ead-bar w-[6px] rounded-[2px]"
+            style={{
+              height: `${pct}%`,
+              animationDelay: `${0.45 + i * 0.06}s`,
+              background: isToday ? "var(--color-brand-600)" : "#dfe5e9",
+            }}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+/** Thin share bar (top portal's % of all applications) that fills on mount. */
+function ShareBar({ pct }: { pct: number }) {
+  return (
+    <div className="h-1.5 w-[80px] overflow-hidden rounded-full bg-[#eef2f4]" aria-hidden>
+      <div
+        className="ead-fill h-full rounded-full bg-gradient-to-r from-[#4fb9ad] to-[#105971]"
+        style={{ ["--w" as string]: `${Math.max(8, pct)}%` } as CSSProperties}
+      />
     </div>
   );
 }
