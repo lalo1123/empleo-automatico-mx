@@ -1021,39 +1021,44 @@ export default async function AccountPage({ searchParams }: PageProps) {
                   Accesos rápidos
                 </p>
                 <div className="mt-3.5 grid gap-2.5">
+                  {/* Mi CV — dark hero with a teal halo (the focal anchor) */}
                   <Link
                     href="/account/cv"
-                    className="eamx-qlh eamx-fadeup flex items-center gap-4 rounded-[18px] px-[18px] py-[17px] text-white"
-                    style={{ background: "linear-gradient(135deg,#15857f 0%,#0f3d54 100%)", boxShadow: "0 16px 34px -16px rgba(16,89,113,0.7)", animationDelay: "0ms" } as CSSProperties}
+                    className="eaq-hero eamx-fadeup relative flex items-center gap-3.5 overflow-hidden rounded-[16px] bg-[#0f1d2c] px-[18px] py-[17px] text-white shadow-[0_16px_34px_-20px_rgba(15,29,44,0.7)]"
+                    style={{ animationDelay: "0ms" } as CSSProperties}
                   >
-                    <span aria-hidden className="eamx-ql-ic flex h-12 w-12 shrink-0 items-center justify-center rounded-[14px] bg-white/[0.16] text-white">
+                    <span
+                      aria-hidden
+                      className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_95%_at_100%_0%,rgba(19,126,122,0.42),transparent_58%)]"
+                    />
+                    <span aria-hidden className="eaq-hic relative flex h-[46px] w-[46px] flex-none items-center justify-center rounded-[13px] bg-[#4fb9ad]/[0.16] text-[#7fd8cd]">
                       <QlIcon name="cv" />
                     </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-base font-extrabold leading-tight">Mi CV</span>
-                      <span className="mt-0.5 block text-xs text-white/85">Súbelo o créalo con IA</span>
+                    <span className="relative min-w-0 flex-1">
+                      <span className="block text-base font-bold leading-tight">Mi CV</span>
+                      <span className="mt-0.5 block text-xs text-white/[0.62]">Súbelo o créalo con IA</span>
                     </span>
-                    <span aria-hidden className="eamx-ql-ar text-white/90">
+                    <span aria-hidden className="eaq-har relative flex-none text-[#7fd8cd]">
                       <QlIcon name="arrow" />
                     </span>
                   </Link>
 
                   <div className="grid grid-cols-2 gap-2.5">
                     {[
-                      { href: "/account/preferences", icon: "pref", title: "Preferencias", sub: "Ciudad, salario, respuestas", accent: "#ea580c", bg: "#fff1e6", delay: 70 },
-                      { href: "/account/historial", icon: "hist", title: "Historial", sub: "Lo que has aplicado", accent: "#2563eb", bg: "#eaf1ff", delay: 140 },
+                      { href: "/account/preferences", icon: "pref", title: "Preferencias", sub: "Ciudad, salario, respuestas", delay: 70 },
+                      { href: "/account/historial", icon: "hist", title: "Historial", sub: "Lo que has aplicado", delay: 140 },
                     ].map((it) => (
                       <Link
                         key={it.href}
                         href={it.href}
-                        className="eamx-qlc eamx-fadeup flex flex-col gap-2.5 rounded-[16px] border border-[#e7edf2] bg-white p-[15px]"
-                        style={{ "--ql-accent": it.accent, animationDelay: `${it.delay}ms` } as CSSProperties}
+                        className="eaq-card eamx-fadeup flex flex-col items-start rounded-[14px] border border-[color:var(--color-border)] bg-white p-[15px]"
+                        style={{ animationDelay: `${it.delay}ms` } as CSSProperties}
                       >
-                        <span aria-hidden className="eamx-ql-ic flex h-10 w-10 items-center justify-center rounded-[12px]" style={{ background: it.bg, color: it.accent }}>
+                        <span aria-hidden className="eaq-ic mb-[11px] flex h-10 w-10 items-center justify-center rounded-[12px] bg-[#eaf4f2] text-[color:var(--color-brand-600)]">
                           <QlIcon name={it.icon} />
                         </span>
-                        <span className="text-sm font-extrabold leading-tight text-[color:var(--color-ink)]">{it.title}</span>
-                        <span className="text-[11.5px] leading-snug text-[color:var(--color-ink-muted)]">{it.sub}</span>
+                        <span className="text-sm font-bold leading-tight text-[color:var(--color-ink)]">{it.title}</span>
+                        <span className="mt-0.5 text-[11.5px] leading-snug text-[color:var(--color-ink-muted)]">{it.sub}</span>
                       </Link>
                     ))}
                   </div>
@@ -1062,17 +1067,17 @@ export default async function AccountPage({ searchParams }: PageProps) {
                     href={CHROME_STORE_URL}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="eamx-qlc eamx-fadeup flex items-center gap-3.5 rounded-[16px] border border-[#e7edf2] bg-white px-3.5 py-3"
-                    style={{ "--ql-accent": "#16a34a", animationDelay: "210ms" } as CSSProperties}
+                    className="eaq-flat eamx-fadeup flex items-center gap-3.5 rounded-[14px] border border-[color:var(--color-border)] bg-white px-[15px] py-3"
+                    style={{ animationDelay: "210ms" } as CSSProperties}
                   >
-                    <span aria-hidden className="eamx-ql-ic flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px]" style={{ background: "#eafaef", color: "#16a34a" }}>
+                    <span aria-hidden className="eaq-ic flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] bg-[#eaf4f2] text-[color:var(--color-brand-600)]">
                       <QlIcon name="puzzle" />
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="block text-sm font-extrabold leading-tight text-[color:var(--color-ink)]">Instalar extensión</span>
+                      <span className="block text-sm font-bold leading-tight text-[color:var(--color-ink)]">Instalar extensión</span>
                       <span className="mt-0.5 block text-[11.5px] leading-snug text-[color:var(--color-ink-muted)]">En Chrome — usa esta cuenta</span>
                     </span>
-                    <span aria-hidden className="eamx-ql-ar text-[color:var(--color-ink-muted)]">
+                    <span aria-hidden className="eaq-go flex-none text-[#c2c8cc]">
                       <QlIcon name="ext" />
                     </span>
                   </a>

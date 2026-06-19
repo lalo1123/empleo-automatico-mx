@@ -96,39 +96,55 @@ html {
   animation: eamx-fadeup 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-/* Bento quick-links. The hero is a gradient card; the small cards use the
-   inline --ql-accent var for a colored hover shadow + border (Tailwind can't
-   take a runtime-dynamic color). The arrow/icon micro-interactions are scoped
-   to each tile via :hover. */
-.eamx-qlh,
-.eamx-qlc {
-  transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.22s ease,
-    border-color 0.22s ease;
+/* Account quick-links — minimal + alive: a dark "Mi CV" hero with a teal halo
+   (the focal anchor, matching the plan card), light cards that lift with a
+   teal-tinted glow, icons that scale/intensify, arrows that nudge. One teal
+   accent, no rainbow chips. Entrance via .eamx-fadeup (stagger set inline).
+   All motion is neutralized by the prefers-reduced-motion rule above. */
+.eaq-hero,
+.eaq-card,
+.eaq-flat {
+  transition: transform 0.2s cubic-bezier(0.2, 0.7, 0.3, 1),
+    box-shadow 0.2s ease, border-color 0.2s ease;
 }
-.eamx-qlh:hover {
+.eaq-hero:hover {
   transform: translateY(-3px);
-  box-shadow: 0 22px 44px -16px rgba(16, 89, 113, 0.85);
+  box-shadow: 0 22px 40px -18px rgba(16, 89, 113, 0.85);
 }
-.eamx-qlc:hover {
+.eaq-card:hover {
   transform: translateY(-3px);
-  border-color: color-mix(in srgb, var(--ql-accent, #137e7a) 45%, transparent);
-  box-shadow: 0 16px 30px -14px color-mix(in srgb, var(--ql-accent, #137e7a) 55%, transparent);
+  border-color: rgba(19, 126, 122, 0.4);
+  box-shadow: 0 16px 30px -14px rgba(19, 126, 122, 0.5);
 }
-.eamx-ql-ic {
-  transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+.eaq-flat:hover {
+  transform: translateY(-2px);
+  border-color: rgba(19, 126, 122, 0.4);
+  box-shadow: 0 14px 26px -14px rgba(19, 126, 122, 0.5);
 }
-.eamx-qlh:hover .eamx-ql-ic {
+.eaq-hic,
+.eaq-ic {
+  transition: transform 0.22s cubic-bezier(0.2, 0.7, 0.3, 1),
+    background-color 0.2s ease, color 0.2s ease;
+}
+.eaq-hero:hover .eaq-hic {
   transform: scale(1.08) rotate(-4deg);
 }
-.eamx-qlc:hover .eamx-ql-ic {
+.eaq-card:hover .eaq-ic,
+.eaq-flat:hover .eaq-ic {
   transform: scale(1.1);
+  background-color: #d8ece9;
+  color: #0f5e59;
 }
-.eamx-ql-ar {
-  transition: transform 0.22s ease;
+.eaq-har,
+.eaq-go {
+  transition: transform 0.2s ease, color 0.2s ease;
 }
-.eamx-qlh:hover .eamx-ql-ar,
-.eamx-qlc:hover .eamx-ql-ar {
+.eaq-hero:hover .eaq-har {
   transform: translateX(4px);
+}
+.eaq-flat:hover .eaq-go {
+  transform: translateX(3px);
+  color: var(--color-brand-600);
 }
 
 /* ===== Account dashboard — "mezcla": minimal (Linear/Vercel) metric cards
