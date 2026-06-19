@@ -147,6 +147,35 @@ html {
   color: var(--color-brand-600);
 }
 
+/* ===== Landing — scroll-reveal entrance. The <Reveal> client component only
+   applies `.eamx-reveal` AFTER mount, so server-rendered / no-JS visitors see
+   content fully visible. Reduced-motion forces it visible too. =============== */
+.eamx-reveal {
+  opacity: 0;
+  transform: translateY(18px);
+  transition: opacity 0.65s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.65s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.eamx-reveal.is-in {
+  opacity: 1;
+  transform: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .eamx-reveal {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Landing hero: brand-dot pulse + CTA arrow nudge reuse the dashboard system.
+   The portal wordmarks dim/brighten on hover of the proof row. */
+.lp-arrow {
+  transition: transform 0.18s ease;
+}
+.lp-cta:hover .lp-arrow {
+  transform: translateX(3px);
+}
+
 /* ===== Account dashboard — "mezcla": minimal (Linear/Vercel) metric cards
    with REAL micro-viz + a dark plan card. Life comes from motion that maps to
    real data (history buckets), not decoration. All loops/fills are neutralized

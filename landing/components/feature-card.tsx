@@ -6,16 +6,19 @@ interface FeatureCardProps {
   description: string;
 }
 
+// Hairline card in the minimal+alive language: lifts with a teal-tinted glow on
+// hover, the teal icon chip scales/intensifies, no heavy shadow. (.eaq-card /
+// .eaq-ic hover behaviour lives in globals.css.)
 export function FeatureCard({ icon, title, description }: FeatureCardProps) {
   return (
-    <article className="group relative flex flex-col gap-3 rounded-[16px] border border-[color:var(--color-border)] bg-white p-6 shadow-[var(--shadow-soft)] transition hover:-translate-y-0.5 hover:border-[color:var(--color-brand-300)] hover:shadow-[var(--shadow-md)]">
-      <div
+    <article className="eaq-card flex h-full flex-col gap-3 rounded-[16px] border border-[color:var(--color-border)] bg-white p-6">
+      <span
         aria-hidden
-        className="flex h-11 w-11 items-center justify-center rounded-[12px] bg-[color:var(--color-brand-50)] text-[color:var(--color-brand-700)]"
+        className="eaq-ic flex h-11 w-11 items-center justify-center rounded-[12px] bg-[#eaf4f2] text-[color:var(--color-brand-600)]"
       >
         {icon}
-      </div>
-      <h3 className="text-lg font-semibold text-[color:var(--color-ink)]">
+      </span>
+      <h3 className="text-[17px] font-bold tracking-tight text-[color:var(--color-ink)]">
         {title}
       </h3>
       <p className="text-sm leading-relaxed text-[color:var(--color-ink-soft)]">

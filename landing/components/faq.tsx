@@ -7,21 +7,23 @@ interface FaqProps {
   items: FaqItem[];
 }
 
+// Minimal accordion: hairline dividers (no heavy card), the chevron rotates and
+// turns teal when open, the open row gets a subtle teal wash.
 export function Faq({ items }: FaqProps) {
   return (
-    <div className="divide-y divide-[color:var(--color-border)] rounded-[16px] border border-[color:var(--color-border)] bg-white shadow-[var(--shadow-soft)]">
+    <div className="divide-y divide-[color:var(--color-border)] border-y border-[color:var(--color-border)]">
       {items.map((item, i) => (
         <details
           key={item.q}
-          className="group px-5 py-4 open:bg-[color:var(--color-surface-soft)]"
+          className="group"
           // Open first item by default so users see the pattern immediately.
           {...(i === 0 ? { open: true } : {})}
         >
-          <summary className="flex cursor-pointer list-none items-center justify-between gap-4 text-left text-sm font-semibold text-[color:var(--color-ink)] [&::-webkit-details-marker]:hidden">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-4 rounded-[10px] px-2 py-5 text-left text-[15px] font-semibold text-[color:var(--color-ink)] transition-colors hover:text-[color:var(--color-brand-700)] [&::-webkit-details-marker]:hidden">
             <span>{item.q}</span>
             <span
               aria-hidden
-              className="flex h-7 w-7 flex-none items-center justify-center rounded-full bg-[color:var(--color-brand-50)] text-[color:var(--color-brand-700)] transition group-open:rotate-180"
+              className="flex h-7 w-7 flex-none items-center justify-center rounded-full border border-[color:var(--color-border)] text-[color:var(--color-ink-muted)] transition duration-200 group-open:rotate-45 group-open:border-[color:var(--color-brand-300)] group-open:bg-[color:var(--color-brand-50)] group-open:text-[color:var(--color-brand-700)]"
             >
               <svg
                 viewBox="0 0 24 24"
@@ -32,11 +34,11 @@ export function Faq({ items }: FaqProps) {
                 strokeLinecap="round"
                 strokeLinejoin="round"
               >
-                <path d="M6 9l6 6 6-6" />
+                <path d="M12 5v14M5 12h14" />
               </svg>
             </span>
           </summary>
-          <p className="mt-3 text-sm leading-relaxed text-[color:var(--color-ink-soft)]">
+          <p className="px-2 pb-5 text-sm leading-relaxed text-[color:var(--color-ink-soft)]">
             {item.a}
           </p>
         </details>
