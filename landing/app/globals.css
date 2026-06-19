@@ -201,6 +201,15 @@ html {
   to { width: var(--w, 0%); }
 }
 
+/* hero telemetry ring — draws in on load to a branded near-full arc
+   (--off = target stroke-dashoffset, set inline) */
+.ead-ring {
+  animation: ead-ring-draw 1.3s 0.3s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+}
+@keyframes ead-ring-draw {
+  to { stroke-dashoffset: var(--off, 0); }
+}
+
 /* "Activo" status dot — a calm breathing pulse */
 .ead-pulse {
   box-shadow: 0 0 0 0 rgba(79, 185, 173, 0.7);

@@ -293,12 +293,12 @@ export default async function AccountPage({ searchParams }: PageProps) {
       : 0;
   const quotaExhausted = !unlimited && remaining === 0;
 
-  // Telemetry ring geometry (r=64 → circumference ≈ 402). Keep a tiny spark
-  // visible at 0% so the ring reads as "ready", not "broken".
+  // Telemetry ring geometry (r=64 → circumference ≈ 402). The ring is now a
+  // branded near-full arc (decorative) that draws in on load — the headline
+  // number inside it is the real activity (postulaciones este mes), not a
+  // quota gauge, so it shouldn't read as a fraction. ~92% reads "premium".
   const RING_C = 2 * Math.PI * 64;
-  const ringOffset = unlimited
-    ? 0
-    : RING_C * (1 - Math.max(usagePct, 2.5) / 100);
+  const RING_DRAW = RING_C * 0.08;
 
   const monthLabel = (() => {
     try {
@@ -582,7 +582,11 @@ export default async function AccountPage({ searchParams }: PageProps) {
             </div>
           </div>
 
-          {/* Telemetry: remaining auto-applications, impossible to miss. */}
+          {/* Telemetry: REAL applications this month (stats.totalMonth) —
+              consistent with the subtitle + metric cards. The plan's AI
+              credits/quota (usage.current) live in the dark plan card and the
+              footer line below, clearly labelled as "créditos del plan" so the
+              big number is never mistaken for postulaciones. */}
           <div className="rounded-[20px] border border-white/[0.14] bg-white/[0.06] p-6 backdrop-blur-sm">
             <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#9fc0c8]">
               Postulaciones · {monthLabel}
@@ -594,30 +598,51 @@ export default async function AccountPage({ searchParams }: PageProps) {
                   stroke="rgba(255,255,255,0.12)" strokeWidth="12"
                 />
                 <circle
+                  className="ead-ring"
                   cx="80" cy="80" r="64" fill="none"
-                  stroke={unlimited ? "#70d1c6" : quotaExhausted ? "#ef6f6f" : "#ff6600"}
+                  stroke="#70d1c6"
                   strokeWidth="12" strokeLinecap="round"
                   strokeDasharray={RING_C}
-                  strokeDashoffset={ringOffset}
+                  strokeDashoffset={RING_C}
                   transform="rotate(-90 80 80)"
+                  style={{ ["--off" as string]: RING_DRAW } as CSSProperties}
                 />
               </svg>
               <div className="absolute inset-0 grid place-content-center text-center">
-                <div className="text-[34px] font-extrabold tracking-tight tabular-nums">
-                  {usage.current}
-                  <span className="text-[#6f939c]">
-                    {unlimited ? "" : `/${usage.limit}`}
-                  </span>
+                <div className="text-[40px] font-extrabold leading-none tracking-tight tabular-nums">
+                  {stats.totalMonth}
                   {unlimited && (
                     <span className="ml-1 align-middle text-2xl text-[#70d1c6]">∞</span>
                   )}
                 </div>
-                <div className="mt-0.5 text-xs text-[#9fc0c8]">
-                  {unlimited ? "sin límite mensual" : "usadas este mes"}
+                <div className="mt-1 text-xs text-[#9fc0c8]">
+                  {unlimited ? "este mes · sin límite" : "este mes"}
                 </div>
               </div>
             </div>
-            <p className="text-center text-[13px] leading-snug text-[#cfe6ea]">
+
+            {weekHasData && (
+              <div className="mb-3 flex h-[30px] items-end justify-center gap-[5px]" aria-hidden>
+                {last7Days.map((v, i) => {
+                  const weekMax = Math.max(1, ...last7Days);
+                  const isToday = i === last7Days.length - 1;
+                  const pct = Math.max(8, Math.round((v / weekMax) * 100));
+                  return (
+                    <span
+                      key={i}
+                      className="ead-bar w-[9px] rounded-[2px]"
+                      style={{
+                        height: `${pct}%`,
+                        animationDelay: `${0.5 + i * 0.06}s`,
+                        background: isToday ? "#70d1c6" : "#34525e",
+                      }}
+                    />
+                  );
+                })}
+              </div>
+            )}
+
+            <p className="text-center text-[12.5px] leading-snug text-[#cfe6ea]">
               {unlimited ? (
                 <>
                   Plan {plan.name}: postulaciones ilimitadas, con cap responsable
@@ -625,26 +650,19 @@ export default async function AccountPage({ searchParams }: PageProps) {
                 </>
               ) : quotaExhausted ? (
                 <>
-                  Límite del mes alcanzado.{" "}
+                  <b>{usage.current}/{usage.limit}</b> créditos del plan usados.{" "}
                   <Link href="/account/billing" className="font-bold text-[#ffb066] underline">
                     Sube de plan
                   </Link>{" "}
-                  para seguir postulando.
+                  para seguir.
                 </>
               ) : (
                 <>
-                  Te quedan <b>{remaining}</b>{" "}
-                  {remaining === 1 ? "postulación" : "postulaciones"} este mes.
-                  {stats.totalAll === 0 && " Despega hoy 🚀"}
+                  <b>{usage.current}/{usage.limit}</b> créditos del plan usados ·
+                  te quedan <b>{remaining}</b>.
                 </>
               )}
             </p>
-            <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/[0.12]">
-              <div
-                className="h-full rounded-full bg-gradient-to-r from-[#70d1c6] to-[#ff6600]"
-                style={{ width: `${Math.max(usagePct, 4)}%` }}
-              />
-            </div>
           </div>
         </div>
       </section>
