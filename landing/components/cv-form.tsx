@@ -5,8 +5,61 @@
 // "Pegar mi CV" (paste text → /applications/parse-cv). Both persist server-side
 // and sync down to the extension. All calls go through the /api/cv proxy.
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { UserProfile } from "@/lib/api";
+
+// pdf.js is self-hosted under /public/vendor (copied from the extension's
+// vendored build) and loaded ON DEMAND only when the user uploads a PDF — so
+// it never bloats the main bundle and needs no npm dependency. The UMD build
+// sets window.pdfjsLib; we extract text fully in the browser (the PDF never
+// leaves the user's machine — only the parsed TEXT goes to our backend, the
+// same path as "Pegar mi CV").
+const MAX_PDF_BYTES = 10 * 1024 * 1024; // 10 MB
+
+type PdfDocLike = {
+  numPages: number;
+  getPage: (n: number) => Promise<{ getTextContent: () => Promise<{ items: Array<{ str?: string }> }> }>;
+};
+type PdfLib = {
+  getDocument: (opts: { data: ArrayBuffer }) => { promise: Promise<PdfDocLike> };
+  GlobalWorkerOptions?: { workerSrc: string };
+};
+
+async function loadPdfLib(): Promise<PdfLib> {
+  const w = window as unknown as { pdfjsLib?: PdfLib };
+  if (w.pdfjsLib) return w.pdfjsLib;
+  await new Promise<void>((resolve, reject) => {
+    const id = "eamx-pdfjs";
+    const existing = document.getElementById(id) as HTMLScriptElement | null;
+    if (existing) {
+      if (w.pdfjsLib) return resolve();
+      existing.addEventListener("load", () => resolve());
+      existing.addEventListener("error", () => reject(new Error("No se pudo cargar el lector de PDF.")));
+      return;
+    }
+    const s = document.createElement("script");
+    s.id = id;
+    s.src = "/vendor/pdf.min.js";
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error("No se pudo cargar el lector de PDF."));
+    document.head.appendChild(s);
+  });
+  if (!w.pdfjsLib) throw new Error("No se pudo cargar el lector de PDF.");
+  return w.pdfjsLib;
+}
+
+async function extractPdfText(buf: ArrayBuffer): Promise<string> {
+  const lib = await loadPdfLib();
+  if (lib.GlobalWorkerOptions) lib.GlobalWorkerOptions.workerSrc = "/vendor/pdf.worker.min.js";
+  const pdf = await lib.getDocument({ data: buf }).promise;
+  let text = "";
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    text += content.items.map((it) => it.str || "").join(" ") + "\n\n";
+  }
+  return text;
+}
 
 const QUESTIONS = [
   "¡Hola! 👋 Vamos a armar tu CV. Para empezar, ¿cuál es tu nombre completo?",
@@ -82,6 +135,7 @@ export function CvForm({ initial }: { initial: UserProfile | null }) {
   const [pasteText, setPasteText] = useState("");
   const [pending, setPending] = useState(false);
   const [status, setStatus] = useState<{ tone: "ok" | "err"; text: string } | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   function startChat() {
     setStatus(null);
@@ -162,6 +216,43 @@ export function CvForm({ initial }: { initial: UserProfile | null }) {
     }
   }
 
+  // Upload a PDF → extract its text in the browser → drop it into the paste
+  // flow so the user can review before analyzing. Reuses the exact same
+  // parse pipeline as "Pegar mi CV"; the PDF itself never leaves the browser.
+  async function onPdfSelected(file: File | undefined) {
+    if (fileRef.current) fileRef.current.value = ""; // allow re-picking same file
+    if (!file || pending) return;
+    setStatus(null);
+    const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+    if (!isPdf) {
+      setStatus({ tone: "err", text: "Solo se acepta PDF." });
+      return;
+    }
+    if (file.size > MAX_PDF_BYTES) {
+      setStatus({ tone: "err", text: "El PDF pesa más de 10 MB." });
+      return;
+    }
+    setPending(true);
+    setStatus({ tone: "ok", text: "Leyendo tu PDF…" });
+    try {
+      const buf = await file.arrayBuffer();
+      const text = (await extractPdfText(buf)).trim();
+      if (text.length < 30) {
+        setMode("paste");
+        setStatus({ tone: "err", text: "No pude extraer texto (¿es un PDF escaneado o de imagen?). Copia y pega el texto de tu CV." });
+        return;
+      }
+      setPasteText(text);
+      setMode("paste");
+      setStatus({ tone: "ok", text: "✅ Extraje el texto de tu PDF — revísalo y dale “Analizar mi CV”." });
+    } catch (e) {
+      setMode("paste");
+      setStatus({ tone: "err", text: (e instanceof Error ? e.message : "No pude leer el PDF.") + " Copia y pega el texto." });
+    } finally {
+      setPending(false);
+    }
+  }
+
   const btnPrimary =
     "inline-flex items-center justify-center gap-2 rounded-xl bg-[linear-gradient(135deg,#137e7a,#105971)] px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:brightness-110 disabled:opacity-60";
   const btnGhost =
@@ -173,16 +264,27 @@ export function CvForm({ initial }: { initial: UserProfile | null }) {
         <h2 className="text-lg font-bold text-[color:var(--color-ink)]">Mi CV</h2>
         <p className="mt-1 text-sm text-[color:var(--color-ink-muted)]">
           Tu CV vive aquí, en tu cuenta — la extensión lo usa para postular por ti.
-          {profile ? " Ya tienes uno; puedes rehacerlo cuando quieras." : " ¿No tienes CV? Créalo con IA en 2 minutos."}
+          {profile ? " Ya tienes uno; puedes rehacerlo cuando quieras." : " Sube tu PDF, pégalo, o créalo con IA en 2 minutos."}
         </p>
       </div>
 
       {profile && mode === "menu" ? <CvPreview p={profile} /> : null}
 
+      <input
+        ref={fileRef}
+        type="file"
+        accept="application/pdf,.pdf"
+        className="hidden"
+        onChange={(e) => onPdfSelected(e.target.files?.[0])}
+      />
+
       {mode === "menu" ? (
         <div className="mt-5 flex flex-wrap gap-3">
           <button type="button" className={btnPrimary} onClick={startChat} disabled={pending}>
             ✨ {profile ? "Rehacer con IA" : "Crear mi CV con IA"}
+          </button>
+          <button type="button" className={btnGhost} onClick={() => fileRef.current?.click()} disabled={pending}>
+            📄 Subir mi CV (PDF)
           </button>
           <button type="button" className={btnGhost} onClick={() => { setMode("paste"); setStatus(null); }} disabled={pending}>
             📋 Pegar mi CV (texto)
@@ -253,6 +355,9 @@ export function CvForm({ initial }: { initial: UserProfile | null }) {
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <button type="button" className={btnPrimary} onClick={importPaste} disabled={pending || pasteText.trim().length < 20}>
               {pending ? "Analizando…" : "Analizar mi CV"}
+            </button>
+            <button type="button" className={btnGhost} onClick={() => fileRef.current?.click()} disabled={pending}>
+              📄 Subir un PDF
             </button>
             <button type="button" className={btnGhost} onClick={() => setMode("menu")} disabled={pending}>
               ← Volver

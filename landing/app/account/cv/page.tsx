@@ -60,7 +60,7 @@ export default async function CvPage() {
             <div>
               <h1 className="text-3xl font-extrabold tracking-tight">Tu CV, en tu cuenta</h1>
               <p className="mt-2 max-w-lg text-sm leading-relaxed text-[#bcd3da]">
-                Créalo con IA o pega tu CV — se guarda aquí y la{" "}
+                Sube tu PDF, pégalo o créalo con IA — se guarda aquí y la{" "}
                 <strong className="text-white">extensión lo usa</strong> para postular por ti.
               </p>
             </div>
