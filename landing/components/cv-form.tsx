@@ -16,9 +16,10 @@ import type { UserProfile } from "@/lib/api";
 // same path as "Pegar mi CV").
 const MAX_PDF_BYTES = 10 * 1024 * 1024; // 10 MB
 
+type PdfTextItem = { str?: string; transform?: number[]; width?: number; hasEOL?: boolean };
 type PdfDocLike = {
   numPages: number;
-  getPage: (n: number) => Promise<{ getTextContent: () => Promise<{ items: Array<{ str?: string }> }> }>;
+  getPage: (n: number) => Promise<{ getTextContent: () => Promise<{ items: PdfTextItem[] }> }>;
 };
 type PdfLib = {
   getDocument: (opts: { data: ArrayBuffer }) => { promise: Promise<PdfDocLike> };
@@ -48,17 +49,57 @@ async function loadPdfLib(): Promise<PdfLib> {
   return w.pdfjsLib;
 }
 
+// Reconstruct readable text from a pdf.js page. A naive items.join(" ") inserts
+// a space between EVERY text run, which shatters words ("serrat os",
+// "po sicionamiento") and runs sections together. Instead we use each run's
+// geometry (transform x/y + width): a big vertical change → newline; a real
+// horizontal gap → single space; adjacent runs → glued (same word).
+function pageItemsToText(items: PdfTextItem[]): string {
+  let out = "";
+  let prev: PdfTextItem | null = null;
+  for (const item of items) {
+    const str = item.str || "";
+    if (!str) {
+      if (item.hasEOL && !out.endsWith("\n")) out += "\n";
+      continue;
+    }
+    const tr = item.transform || [1, 0, 0, 1, 0, 0];
+    const x = tr[4] || 0;
+    const y = tr[5] || 0;
+    if (prev) {
+      const ptr = prev.transform || [1, 0, 0, 1, 0, 0];
+      const prevEndX = (ptr[4] || 0) + (prev.width || 0);
+      const dy = Math.abs(y - (ptr[5] || 0));
+      if (prev.hasEOL || dy > 4) {
+        if (!out.endsWith("\n")) out += "\n";
+      } else if (x - prevEndX > 0.8) {
+        if (!out.endsWith(" ") && !out.endsWith("\n")) out += " ";
+      }
+    }
+    out += str;
+    prev = item;
+  }
+  return out;
+}
+
 async function extractPdfText(buf: ArrayBuffer): Promise<string> {
   const lib = await loadPdfLib();
   if (lib.GlobalWorkerOptions) lib.GlobalWorkerOptions.workerSrc = "/vendor/pdf.worker.min.js";
   const pdf = await lib.getDocument({ data: buf }).promise;
-  let text = "";
+  const pages: string[] = [];
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
-    text += content.items.map((it) => it.str || "").join(" ") + "\n\n";
+    pages.push(pageItemsToText(content.items));
   }
-  return text;
+  // Tidy up: trim each line, collapse runs of blank lines, drop leading/trailing space.
+  return pages
+    .join("\n\n")
+    .split("\n")
+    .map((ln) => ln.replace(/[ \t]+/g, " ").trim())
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 const QUESTIONS = [
