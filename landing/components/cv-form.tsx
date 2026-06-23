@@ -176,7 +176,10 @@ export function CvForm({ initial }: { initial: UserProfile | null }) {
   const [pasteText, setPasteText] = useState("");
   const [pending, setPending] = useState(false);
   const [status, setStatus] = useState<{ tone: "ok" | "err"; text: string } | null>(null);
+  const [pasteSource, setPasteSource] = useState<{ from: "pdf"; fileName: string } | { from: "manual" } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  const pasteWords = pasteText.trim() ? pasteText.trim().split(/\s+/).length : 0;
 
   function startChat() {
     setStatus(null);
@@ -250,6 +253,7 @@ export function CvForm({ initial }: { initial: UserProfile | null }) {
       setStatus({ tone: "ok", text: "CV analizado y guardado." });
       setMode("menu");
       setPasteText("");
+      setPasteSource(null);
     } catch (e) {
       setStatus({ tone: "err", text: e instanceof Error ? e.message : "Error" });
     } finally {
@@ -280,12 +284,14 @@ export function CvForm({ initial }: { initial: UserProfile | null }) {
       const text = (await extractPdfText(buf)).trim();
       if (text.length < 30) {
         setMode("paste");
+        setPasteSource({ from: "manual" });
         setStatus({ tone: "err", text: "No pude extraer texto (¿es un PDF escaneado o de imagen?). Copia y pega el texto de tu CV." });
         return;
       }
       setPasteText(text);
+      setPasteSource({ from: "pdf", fileName: file.name });
       setMode("paste");
-      setStatus({ tone: "ok", text: "✅ Extraje el texto de tu PDF — revísalo y dale “Analizar mi CV”." });
+      setStatus(null); // the source chip + header convey success cleanly
     } catch (e) {
       setMode("paste");
       setStatus({ tone: "err", text: (e instanceof Error ? e.message : "No pude leer el PDF.") + " Copia y pega el texto." });
@@ -300,13 +306,21 @@ export function CvForm({ initial }: { initial: UserProfile | null }) {
     "inline-flex items-center justify-center gap-2 rounded-xl border border-[color:var(--color-border)] bg-white px-5 py-3 text-sm font-semibold text-[color:var(--color-ink)] transition hover:border-[color:var(--color-brand-400)]";
 
   return (
-    <div className="rounded-2xl border border-[color:var(--color-border)] bg-white p-6 shadow-sm sm:p-7">
-      <div className="mb-5">
-        <h2 className="text-lg font-bold text-[color:var(--color-ink)]">Mi CV</h2>
-        <p className="mt-1 text-sm text-[color:var(--color-ink-muted)]">
-          Tu CV vive aquí, en tu cuenta — la extensión lo usa para postular por ti.
-          {profile ? " Ya tienes uno; puedes rehacerlo cuando quieras." : " Sube tu PDF, pégalo, o créalo con IA en 2 minutos."}
-        </p>
+    <div className="eamx-fadeup rounded-3xl border border-[color:var(--color-border)] bg-white p-6 shadow-[var(--shadow-md)] sm:p-7">
+      <div className="mb-5 flex items-start gap-3">
+        <span
+          aria-hidden
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[linear-gradient(135deg,#137e7a,#105971)] text-lg text-white shadow-[var(--shadow-brand)]"
+        >
+          📄
+        </span>
+        <div className="min-w-0">
+          <h2 className="text-lg font-bold text-[color:var(--color-ink)]">Mi CV</h2>
+          <p className="mt-0.5 text-sm leading-relaxed text-[color:var(--color-ink-muted)]">
+            Tu CV vive aquí, en tu cuenta — la extensión lo usa para postular por ti.
+            {profile ? " Ya tienes uno; puedes rehacerlo cuando quieras." : " Súbelo en PDF, pégalo, o créalo con IA en 2 minutos."}
+          </p>
+        </div>
       </div>
 
       {profile && mode === "menu" ? <CvPreview p={profile} /> : null}
@@ -320,15 +334,56 @@ export function CvForm({ initial }: { initial: UserProfile | null }) {
       />
 
       {mode === "menu" ? (
-        <div className="mt-5 flex flex-wrap gap-3">
-          <button type="button" className={btnPrimary} onClick={startChat} disabled={pending}>
-            ✨ {profile ? "Rehacer con IA" : "Crear mi CV con IA"}
+        <div className="mt-5 grid gap-3 sm:grid-cols-3">
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            disabled={pending}
+            className="eaq-flat group relative flex flex-col items-start gap-2.5 rounded-2xl border border-[color:var(--color-border)] bg-white p-4 text-left shadow-[var(--shadow-soft)] disabled:opacity-60"
+          >
+            <span className="absolute right-3 top-3 rounded-full bg-[#eafaf7] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#0f766e]">
+              Rápido
+            </span>
+            <span className="eaq-ic flex h-11 w-11 items-center justify-center rounded-xl bg-[#eafaf7] text-xl text-[#0f5e59]" aria-hidden>
+              📄
+            </span>
+            <span className="text-sm font-bold text-[color:var(--color-ink)]">Subir tu CV (PDF)</span>
+            <span className="text-xs leading-relaxed text-[color:var(--color-ink-muted)]">Lo subes y extraigo el texto al instante.</span>
+            <span className="eaq-go mt-auto inline-flex items-center gap-1 pt-1 text-xs font-bold text-[color:var(--color-brand-600)]">
+              Subir PDF <span aria-hidden>→</span>
+            </span>
           </button>
-          <button type="button" className={btnGhost} onClick={() => fileRef.current?.click()} disabled={pending}>
-            📄 Subir mi CV (PDF)
+
+          <button
+            type="button"
+            onClick={startChat}
+            disabled={pending}
+            className="eaq-flat group flex flex-col items-start gap-2.5 rounded-2xl border border-[color:var(--color-border)] bg-white p-4 text-left shadow-[var(--shadow-soft)] disabled:opacity-60"
+          >
+            <span className="eaq-ic flex h-11 w-11 items-center justify-center rounded-xl bg-[#eafaf7] text-xl text-[#0f5e59]" aria-hidden>
+              ✨
+            </span>
+            <span className="text-sm font-bold text-[color:var(--color-ink)]">{profile ? "Rehacer con IA" : "Crear con IA"}</span>
+            <span className="text-xs leading-relaxed text-[color:var(--color-ink-muted)]">Te hago 5 preguntas y lo armo por ti.</span>
+            <span className="eaq-go mt-auto inline-flex items-center gap-1 pt-1 text-xs font-bold text-[color:var(--color-brand-600)]">
+              Empezar <span aria-hidden>→</span>
+            </span>
           </button>
-          <button type="button" className={btnGhost} onClick={() => { setMode("paste"); setStatus(null); }} disabled={pending}>
-            📋 Pegar mi CV (texto)
+
+          <button
+            type="button"
+            onClick={() => { setMode("paste"); setPasteSource({ from: "manual" }); setStatus(null); }}
+            disabled={pending}
+            className="eaq-flat group flex flex-col items-start gap-2.5 rounded-2xl border border-[color:var(--color-border)] bg-white p-4 text-left shadow-[var(--shadow-soft)] disabled:opacity-60"
+          >
+            <span className="eaq-ic flex h-11 w-11 items-center justify-center rounded-xl bg-[#eafaf7] text-xl text-[#0f5e59]" aria-hidden>
+              📋
+            </span>
+            <span className="text-sm font-bold text-[color:var(--color-ink)]">Pegar texto</span>
+            <span className="text-xs leading-relaxed text-[color:var(--color-ink-muted)]">De LinkedIn, Word, donde sea.</span>
+            <span className="eaq-go mt-auto inline-flex items-center gap-1 pt-1 text-xs font-bold text-[color:var(--color-brand-600)]">
+              Pegar <span aria-hidden>→</span>
+            </span>
           </button>
         </div>
       ) : null}
@@ -380,27 +435,50 @@ export function CvForm({ initial }: { initial: UserProfile | null }) {
       ) : null}
 
       {mode === "paste" ? (
-        <div className="mt-4">
-          <label htmlFor="cvPaste" className="text-sm font-semibold text-[color:var(--color-ink)]">
-            Pega el texto de tu CV
-          </label>
+        <div className="mt-5 eamx-fadeup">
+          {pasteSource?.from === "pdf" ? (
+            <div className="mb-3 inline-flex max-w-full items-center gap-2 rounded-full border border-[#99f6e4] bg-[#f0fdfa] px-3 py-1.5 text-xs font-bold text-[#0f766e]">
+              <span aria-hidden>📄</span>
+              <span className="truncate">{pasteSource.fileName}</span>
+              <span className="text-[#0f766e]/50" aria-hidden>·</span>
+              <span className="whitespace-nowrap">{pasteWords.toLocaleString("es-MX")} palabras</span>
+            </div>
+          ) : null}
+          <div className="flex items-baseline justify-between gap-3">
+            <label htmlFor="cvPaste" className="text-sm font-bold text-[color:var(--color-ink)]">
+              {pasteSource?.from === "pdf" ? "Revisa el texto de tu CV" : "Pega el texto de tu CV"}
+            </label>
+            {pasteText.trim() && pasteSource?.from !== "pdf" ? (
+              <span className="text-[11px] font-medium text-[color:var(--color-ink-muted)]">{pasteWords.toLocaleString("es-MX")} palabras</span>
+            ) : null}
+          </div>
           <textarea
             id="cvPaste"
             value={pasteText}
             onChange={(e) => setPasteText(e.target.value)}
-            rows={10}
+            rows={12}
             placeholder="Copia y pega aquí todo el texto de tu CV (de tu PDF, LinkedIn, etc.). La IA lo estructura."
-            className="mt-1.5 w-full resize-y rounded-xl border border-[color:var(--color-border)] bg-white px-3.5 py-2.5 text-sm text-[color:var(--color-ink)] outline-none focus:border-[color:var(--color-brand-500)]"
+            className="mt-2 w-full resize-y rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-soft)] px-4 py-3.5 text-sm leading-relaxed text-[color:var(--color-ink)] shadow-[inset_0_1px_2px_rgba(15,23,42,0.05)] outline-none transition focus:border-[color:var(--color-brand-400)] focus:bg-white focus:ring-4 focus:ring-[rgba(112,209,198,0.18)] disabled:opacity-60"
             disabled={pending}
           />
-          <div className="mt-3 flex flex-wrap items-center gap-3">
+          <p className="mt-2 text-xs leading-relaxed text-[color:var(--color-ink-muted)]">
+            {pasteSource?.from === "pdf"
+              ? "¿Algo quedó raro? Edítalo aquí — la IA lo estructura igual (nombre, experiencia, skills)."
+              : "Pega todo el texto de tu CV. La IA lo estructura en segundos."}
+          </p>
+          <div className="mt-4 flex flex-wrap items-center gap-2.5">
             <button type="button" className={btnPrimary} onClick={importPaste} disabled={pending || pasteText.trim().length < 20}>
-              {pending ? "Analizando…" : "Analizar mi CV"}
+              {pending ? "Analizando…" : "✨ Analizar mi CV con IA"}
             </button>
             <button type="button" className={btnGhost} onClick={() => fileRef.current?.click()} disabled={pending}>
-              📄 Subir un PDF
+              📄 Subir otro PDF
             </button>
-            <button type="button" className={btnGhost} onClick={() => setMode("menu")} disabled={pending}>
+            <button
+              type="button"
+              className="ml-auto text-sm font-semibold text-[color:var(--color-ink-muted)] transition hover:text-[color:var(--color-ink)] disabled:opacity-60"
+              onClick={() => { setMode("menu"); setStatus(null); }}
+              disabled={pending}
+            >
               ← Volver
             </button>
           </div>
@@ -408,7 +486,14 @@ export function CvForm({ initial }: { initial: UserProfile | null }) {
       ) : null}
 
       {status ? (
-        <p className={`mt-4 text-sm font-medium ${status.tone === "ok" ? "text-[#0f766e]" : "text-[#c2410c]"}`}>{status.text}</p>
+        <p
+          className={`mt-4 inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium ${
+            status.tone === "ok" ? "bg-[#f0fdfa] text-[#0f766e]" : "bg-[#fff1ed] text-[#c2410c]"
+          }`}
+        >
+          <span aria-hidden>{status.tone === "ok" ? "✓" : "⚠️"}</span>
+          {status.text}
+        </p>
       ) : null}
     </div>
   );
