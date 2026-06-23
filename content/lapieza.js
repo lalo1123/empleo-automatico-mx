@@ -24,10 +24,19 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-15-match-credito-visible";
+  const EAMX_LAPIEZA_VERSION = "2026-06-23-flow-review-fixes";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
+
+  // Pre-existing applications we DETECT (the "ya postulaste" banner on a
+  // vacancy, the applied badge in the listing) are backdated 7 days so they
+  // NEVER inflate TODAY's anti-ban daily cap — countAppliedTodayForSource()
+  // counts items with appliedAt >= midnight, so without this, just BROWSING
+  // old already-applied vacancies would silently eat the 20/day budget and
+  // trim real new applications. Genuine just-now submissions (recordSubmission)
+  // keep stamping Date.now(). Mirrors importLaPiezaApplicationsOnce's OLD_TS.
+  function passiveAppliedAt() { return Date.now() - 7 * 24 * 60 * 60 * 1000; }
 
   // Proactive health check — Chrome can auto-update the extension or
   // the user can reload it via chrome://extensions WHILE this content
@@ -1684,6 +1693,7 @@
             company: (lastJob && lastJob.company) || "",
             location: (lastJob && lastJob.location) || "",
             savedAt: Date.now(),
+            appliedAt: passiveAppliedAt(),
             matchScore: 0,
             reasons: ["Detectada como ya postulada al abrir la vacante"]
           });
@@ -1736,6 +1746,7 @@
                 company: (lastJob && lastJob.company) || "",
                 location: (lastJob && lastJob.location) || "",
                 savedAt: Date.now(),
+                appliedAt: passiveAppliedAt(),
                 matchScore: 0,
                 reasons: ["Detectada como ya postulada (banner tardío)"]
               });
@@ -1821,6 +1832,17 @@
     // left to fill is almost certainly the submit — in HITL we must STOP
     // there instead of clicking it (auto-submit = broken HITL contract).
     let didProductiveWork = false;
+    // Ask the "¿Qué CV usar?" modal only ONCE per apply flow. The CV step
+    // lingers across loop iterations — MUI swaps the step a beat after the
+    // Continuar click, so until it advances isOnLaPiezaCvStep() keeps
+    // returning true and the CV branch would re-pop the modal every tick.
+    // User report: "volvió a preguntar lo del CV". After the first
+    // resolution we remember the choice and only re-click Continuar on the
+    // lingering CV-step ticks (never re-ask, never re-upload the tailored CV).
+    let cvChoiceResolved = false;
+    // Told-the-user-once guard for the CV-step hand-off (a vacancy that
+    // demands a required field we can't auto-provide, e.g. "Portafolio/book").
+    let cvHandoffToldUser = false;
     function computeDomSignature() {
       try {
         const url = location.href.split("?")[0];
@@ -1874,30 +1896,71 @@
       if (onCvStepEarly) {
         console.log("[EmpleoAutomatico] chain iter:", i, "→ CV step branch (bulk=", isBulkMode, ")");
         reportBulkStatus("cv");
-        let choice = "principal";
-        // Bulk mode: SKIP the CV-choice modal entirely. The user already
-        // committed to "Auto-postular top N" — popping a modal on every
-        // background tab they can't even see (and that times out after
-        // 8s, blocking the chain) is exactly the "stuck en cv y ya no
-        // avanzo ni naa" bug they reported. Default to PRINCIPAL so we
-        // don't surprise them with a personalized-CV charge per slot.
-        if (!isBulkMode) {
-          try { choice = await askCvChoice({ timeoutMs: 8000 }); } catch (_) {}
-        }
-        if (quickApplyAborted) break;
-        if (!isApplyPage()) break;
-        if (choice === "personalize") {
-          try { await tryUploadTailoredCv(); } catch (e) {
-            console.warn("[EmpleoAutomatico] tryUploadTailoredCv threw", e);
+        // Resolve the CV choice ONCE per flow (see cvChoiceResolved above).
+        // On later CV-step ticks we skip straight to re-clicking Continuar.
+        if (!cvChoiceResolved) {
+          let choice = "principal";
+          // Bulk mode: SKIP the CV-choice modal entirely. The user already
+          // committed to "Auto-postular top N" — popping a modal on every
+          // background tab they can't even see (and that times out after
+          // 8s, blocking the chain) is exactly the "stuck en cv y ya no
+          // avanzo ni naa" bug they reported. Default to PRINCIPAL so we
+          // don't surprise them with a personalized-CV charge per slot.
+          if (!isBulkMode) {
+            try { choice = await askCvChoice({ timeoutMs: 8000 }); } catch (_) {}
           }
           if (quickApplyAborted) break;
           if (!isApplyPage()) break;
-        } else if (!isBulkMode) {
-          // Silent in bulk mode (would be confusing in a background tab).
-          toast("Listo, sigo con tu CV PRINCIPAL.", "info", { durationMs: 2500 });
+          cvChoiceResolved = true;
+          if (choice === "personalize") {
+            try { await tryUploadTailoredCv(); } catch (e) {
+              console.warn("[EmpleoAutomatico] tryUploadTailoredCv threw", e);
+            }
+            if (quickApplyAborted) break;
+            if (!isApplyPage()) break;
+          } else if (!isBulkMode) {
+            // Silent in bulk mode (would be confusing in a background tab).
+            toast("Listo, sigo con tu CV PRINCIPAL.", "info", { durationMs: 2500 });
+          }
         }
-        const continueBtnCv = findApplyFlowContinueBtn();
-        if (continueBtnCv) { try { continueBtnCv.click(); } catch (_) {} }
+        // Advance the step. findApplyFlowContinueBtn() returns ONLY an
+        // ENABLED "Continuar", so a null here means the step is blocked —
+        // NOT something to keep re-clicking. (The old code set
+        // didProductiveWork=true and looped, which defeated the stuck
+        // detector and span forever — the "ahí se queda no avanza" bug.)
+        let continueBtnCv = findApplyFlowContinueBtn();
+        if (!continueBtnCv) {
+          // Most common cause: NO CV is selected. On MUI the CV is chosen by
+          // clicking a list-item button (not a radio), and a personalized
+          // upload can leave nothing selected. Select the right CV, re-check.
+          try {
+            await ensureCvSelected(lastTailoredCvName || "");
+          } catch (_) {}
+          if (quickApplyAborted) break;
+          if (!isApplyPage()) break;
+          continueBtnCv = findApplyFlowContinueBtn();
+        }
+        if (!continueBtnCv) {
+          // STILL blocked → either a required text field (e.g. "Portafolio/book")
+          // or the CV selection didn't take. Flag it, tell them ONCE, then WAIT
+          // (don't spin) — the chain resumes by itself when "Continuar" enables.
+          // promptManualEntryIfBlocked returns true AND shows its own field-
+          // specific sticky badge when it finds a text field; only then we must
+          // NOT pile a second generic toast on top (was a double message). When
+          // it returns false the blocker is the CV pick itself — say exactly that.
+          let hadFieldBlocker = false;
+          try { hadFieldBlocker = promptManualEntryIfBlocked(); } catch (_) {}
+          if (!cvHandoffToldUser && !hadFieldBlocker) {
+            cvHandoffToldUser = true;
+            toast("Elige tu CV en la lista (y completa lo que pida la vacante). Sigo solo en cuanto se active “Continuar”.", "info", { durationMs: 9000 });
+          }
+          const enabled = await waitForEnabledContinue(120000);
+          if (quickApplyAborted) break;
+          if (!isApplyPage()) break;
+          if (!enabled) break; // gave the user their window; stop cleanly
+          continueBtnCv = enabled;
+        }
+        try { continueBtnCv.click(); } catch (_) {}
         didProductiveWork = true;
         continue;
       }
@@ -2170,7 +2233,13 @@
         let bodyTxt = "";
         try {
           const clone = document.body.cloneNode(true);
-          clone.querySelectorAll('[class*="eamx"]').forEach((n) => { try { n.remove(); } catch (_) {} });
+          // Strip BOTH our class-based UI AND our attribute-based cards. The
+          // vacancy match-card / applied badge use [data-eamx] (NOT an eamx
+          // class), so a class-only strip left their copy ("…ya quedó. 👍",
+          // "Postulación enviada") in the text → the submit-detector recorded
+          // a PHANTOM submission, marking a vacancy the user never sent (and
+          // it self-reinforced: once marked, the badge re-confirmed it).
+          clone.querySelectorAll('[class*="eamx"], [data-eamx]').forEach((n) => { try { n.remove(); } catch (_) {} });
           bodyTxt = (clone.textContent || "").toLowerCase();
         } catch (_) {
           bodyTxt = (document.body.innerText || "").toLowerCase();
@@ -2267,6 +2336,14 @@
       for (const el of candidates) {
         try {
           if (el.closest(".eamx-fab, .eamx-panel, .eamx-overlay, .eamx-matches-panel, .eamx-toast, .eamx-bulk-progress, [data-eamx]")) continue;
+          // Skip the embedded CV PDF preview (react-pdf-viewer). Its text
+          // layer renders the resume's own characters as selectable spans,
+          // and a CV that happens to contain "1/3", "2/3", "3/3" (page
+          // numbers, ratios, dates) was being misread as a quiz "N/M"
+          // counter — turning the MUI Documentos step into a phantom quiz
+          // step and stalling the apply chain (it never took the CV
+          // branch). The PDF text layer is document CONTENT, never quiz UI.
+          if (el.closest(".rpv-core__text-layer, .rpv-core__inner-page, [class*='rpv-core']")) continue;
           if (!isVisible(el)) continue;
           const t = (el.textContent || "").trim();
           if (!t || t.length > 60) continue;
@@ -2297,6 +2374,9 @@
         try {
           if (!isVisible(b)) continue;
           if (b.closest(".eamx-fab, .eamx-panel, .eamx-overlay, .eamx-matches-panel, .eamx-toast, [data-eamx]")) continue;
+          // Same CV-PDF-preview exclusion as PATH 2 — a resume bullet that
+          // starts "A) ..." must not register as a quiz option card.
+          if (b.closest(".rpv-core__text-layer, .rpv-core__inner-page, [class*='rpv-core']")) continue;
           const t = (b.textContent || "").trim();
           if (!t || t.length > 200) continue;
           const m = t.match(QUIZ_OPTION_LEADING_RX);
@@ -2575,8 +2655,13 @@
       });
 
       const onKey = (ev) => {
-        if (ev.key === "Enter") { ev.preventDefault(); settle("personalize"); }
-        else if (ev.key === "Escape" || ev.key === "Esc") { ev.preventDefault(); settle("principal"); }
+        // stopImmediatePropagation: the chain installs its OWN capture-phase
+        // keydown handler (quickApplyEscHandler) that aborts the whole apply on
+        // Esc. Both fire for one Esc. Without this, Esc here would resolve
+        // "principal" (correct) AND kill the chain ("Cadena cancelada") — the
+        // user meant "just use my PRINCIPAL and keep going", not "cancel".
+        if (ev.key === "Enter") { ev.preventDefault(); ev.stopImmediatePropagation(); settle("personalize"); }
+        else if (ev.key === "Escape" || ev.key === "Esc") { ev.preventDefault(); ev.stopImmediatePropagation(); settle("principal"); }
       };
       document.addEventListener("keydown", onKey, true);
 
@@ -2717,6 +2802,10 @@
     }
   }
 
+  // Filename of the most recent personalized CV we uploaded — used by the
+  // chain to re-select it on MUI's click-to-select CV list when the upload
+  // didn't auto-select it (see ensureCvSelected).
+  let lastTailoredCvName = "";
   async function tryUploadTailoredCv() {
     // Restore lastJob from chrome.storage.session if it's not in-memory.
     // The /apply/ tab can land here without lastJob populated when the
@@ -2763,7 +2852,11 @@
     }
     console.log("[EmpleoAutomatico] CV upload starting — fileInput found:", fileInput);
 
-    toast("⚡ Generando CV personalizado para esta vacante…", "info", { durationMs: 12000 });
+    // Persistent "loading" cue — generation (backend puppeteer render) can
+    // take ~30-45s. A 12s toast vanished mid-wait and the user thought it
+    // froze ("debería salir cargando"). Sticky + long duration keeps the
+    // indicator up for the whole wait; the "✓ subido" toast below replaces it.
+    toast("⏳ Generando tu CV personalizado para esta vacante… (puede tardar ~30s)", "info", { durationMs: 60000 });
 
     let pdfBase64;
     try {
@@ -2810,6 +2903,7 @@
     try {
       bytes = base64ToBytes(pdfBase64);
       const filename = buildCvFilename(lastJob, cachedProfile);
+      lastTailoredCvName = filename;
       file = new File([bytes], filename, { type: "application/pdf" });
       // Build a blob URL for the preview iframe. Revoked after the
       // modal resolves (success path) or on bail.
@@ -2953,6 +3047,60 @@
     return false;
   }
 
+  // Ensure a CV is selected on the MUI Documentos step. LaPieza's new UI
+  // selects a CV by CLICKING a `div.MuiListItemButton-root` (role=button) —
+  // NOT a radio — so selectNewlyUploadedCv (radio-only) couldn't select the
+  // freshly-uploaded personalized CV, leaving the list with nothing checked
+  // and "Continuar" permanently disabled (user report: "ahí se queda no
+  // avanza"). We click the matching CV: for a personalized upload, the card
+  // whose text matches the filename, falling back to the FIRST card (LaPieza
+  // renders the most-recent upload first); for PRINCIPAL, the user's main
+  // "CV - … .pdf" card. Returns true if we clicked a plausible target.
+  async function ensureCvSelected(preferName) {
+    try {
+      if (document.querySelector(".MuiListItemButton-root.Mui-selected, .MuiListItemButton-root[aria-selected='true']")) {
+        return true;
+      }
+    } catch (_) { /* fall through */ }
+    let buttons = [];
+    try {
+      buttons = Array.from(document.querySelectorAll(".MuiListItemButton-root"))
+        .filter((b) => { try { return isVisible(b) && /\.pdf\b/i.test(b.textContent || ""); } catch (_) { return false; } });
+    } catch (_) { return false; }
+    if (!buttons.length) return false;
+    const norm = (s) => (s || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+    let target = null;
+    if (preferName) {
+      const full = norm(preferName.replace(/\.pdf$/i, ""));
+      if (full) target = buttons.find((b) => norm(b.textContent).includes(full)) || null;
+      if (!target) target = buttons[0]; // most-recent upload = top card
+    } else {
+      target = buttons.find((b) => /cv\s*-|principal/i.test(b.textContent || "")) || buttons[0];
+    }
+    if (!target) return false;
+    try {
+      target.click();
+      await new Promise((r) => setTimeout(r, 400));
+    } catch (_) { return false; }
+    return true;
+  }
+
+  // Poll for an ENABLED apply-flow "Continuar" up to maxMs so the chain can
+  // WAIT for the user to fill a required field (a portfolio link, etc.) and
+  // resume on its own — instead of spinning on a disabled button. Bails early
+  // on Esc-abort or on leaving /apply/.
+  async function waitForEnabledContinue(maxMs) {
+    const start = Date.now();
+    while (Date.now() - start < maxMs) {
+      if (quickApplyAborted) return null;
+      if (!isApplyPage()) return null;
+      const btn = findApplyFlowContinueBtn();
+      if (btn) return btn;
+      await new Promise((r) => setTimeout(r, 800));
+    }
+    return null;
+  }
+
   // Preview modal — shown after the backend returns the personalized
   // PDF, BEFORE we inject it into LaPieza's file input. Resolves true
   // when the user explicitly confirms "Sí, subir este CV" and false
@@ -3041,7 +3189,10 @@
       if (!t || t.length > 80) return false;
       if (!continueRx.test(t)) return false;
       if (blockRx.test(t)) return false;
-      if (el.disabled) return false;
+      // Reject native AND MUI visually-disabled states (aria-disabled /
+      // Mui-disabled), so the chain never "clicks" a greyed-out Continuar
+      // and then loops thinking it advanced.
+      if (el.disabled || el.getAttribute("aria-disabled") === "true" || /\bdisabled\b/i.test(String(el.className || ""))) return false;
       // Explicit rect check — must be at least 10×10 to be a real button.
       // This skips the hidden 0×0 mobile-menu Continuar that lives in
       // .action-postulation alongside the real side-panel button.
@@ -3068,7 +3219,11 @@
       } catch (_) { /* ignore */ }
       const t = ((el.textContent || el.value || "")).trim();
       if (!rx.test(t)) return false;
-      try { return isVisible(el) && !el.disabled; } catch (_) { return false; }
+      // Reject MUI's visually-disabled states too (aria-disabled / Mui-disabled),
+      // not just the native .disabled — else we'd click a greyed-out Finalizar
+      // and the tracker would record a phantom submission.
+      if (el.disabled || el.getAttribute("aria-disabled") === "true" || /\bdisabled\b/i.test(String(el.className || ""))) return false;
+      try { return isVisible(el); } catch (_) { return false; }
     }) || null;
   }
 
@@ -3109,6 +3264,28 @@
       }
     } catch (_) {}
     return false;
+  }
+
+  // POSITIVE signal that LaPieza considers this vacancy NOT yet applied: a
+  // visible, ENABLED apply button ("Postularme" / "Postular" / "Aplicar").
+  // LaPieza removes/replaces that button the instant you apply, so its
+  // presence is authoritative ground truth — it OVERRIDES a stale/phantom
+  // "applied" mark in our own queue (user: "debería saber en automático si
+  // apliqué o no"). Exact-text match so our own "✨ Postular con IA" FAB and
+  // free-text mentions don't count; our UI is excluded for good measure.
+  function detectLaPiezaNotApplied() {
+    try {
+      const APPLY_RX = /^\s*(?:postularme|postular|aplicar|apply)\s*$/i;
+      const btns = Array.from(document.querySelectorAll("button, a[role=button]"));
+      return btns.some((b) => {
+        try {
+          if (!isVisible(b)) return false;
+          if (b.disabled || b.getAttribute("aria-disabled") === "true") return false;
+          if (b.closest(".eamx-fab, .eamx-panel, .eamx-overlay, .eamx-matches-panel, .eamx-toast, [data-eamx]")) return false;
+          return APPLY_RX.test((b.textContent || "").trim());
+        } catch (_) { return false; }
+      });
+    } catch (_) { return false; }
   }
 
   // Detect the "this vacancy is closed / no longer available" state.
@@ -3220,19 +3397,34 @@
   // con postulación" / variants. We look for a red-styled / primary
   // button inside a visible modal.
   function findLaPiezaLocationContinueCTA() {
-    // Confirm button on LaPieza's "esta vacante es lejana a tu ubicación"
-    // modal. Tolerant match (the label has shipped as "Sí, continuar",
-    // "Si, continuar con postulación", "Continuar con la postulación") but
-    // NEVER the cancel button. Not anchored ^…$ so a stray icon/whitespace
-    // in textContent can't break it.
-    const confirmRx = /continuar\s+con\s+(?:la\s+)?postulaci[oó]n|^s[ií][,.\s]+continuar\b/i;
     const cancelRx = /\b(?:no|cancelar|cerrar|volver|atr[aá]s)\b/i;
-    const candidates = Array.from(document.querySelectorAll("button, a[role='button'], [role='button']"));
-    return candidates.find((el) => {
+    // New LaPieza (MUI) shows a "Ubicación no compatible … ¿continuar de todos
+    // modos?" dialog whose confirm is a BARE "Continuar" — the old text match
+    // ("continuar con la postulación" / "sí, continuar") missed it, so the
+    // chain sat on the modal ("ahí se quedó"). Scope to the location dialog by
+    // its text, then click the one visible NON-cancel button inside it (so a
+    // bare "Continuar" can't grab the wizard's step button elsewhere).
+    const modalRx = /ubicaci[oó]n\s+no\s+compatible|no\s+coincide\s+con\s+la\s+vacante|continuar\s+de\s+todos\s+modos|lejana\s+a\s+tu\s+ubicaci[oó]n/i;
+    const dialogs = Array.from(document.querySelectorAll(
+      '[role="dialog"], .MuiDialog-paper, .MuiDialog-container, [class*="MuiPaper"]'
+    ));
+    for (const dlg of dialogs) {
+      let txt = "";
+      try { txt = (dlg.innerText || "").trim(); } catch (_) {}
+      if (!modalRx.test(txt)) continue;
+      const btn = Array.from(dlg.querySelectorAll("button, a[role='button'], [role='button']")).find((el) => {
+        const t = (el.textContent || "").trim();
+        if (!t || cancelRx.test(t)) return false;
+        try { return isVisible(el) && !el.disabled; } catch (_) { return false; }
+      });
+      if (btn) return btn;
+    }
+    // Legacy fallback (old LaPieza had no clean dialog container — match the
+    // explicit confirm label anywhere, never the cancel button).
+    const confirmRx = /continuar\s+con\s+(?:la\s+)?postulaci[oó]n|^s[ií][,.\s]+continuar\b/i;
+    return Array.from(document.querySelectorAll("button, a[role='button'], [role='button']")).find((el) => {
       const t = (el.textContent || "").trim();
-      if (!t) return false;
-      if (cancelRx.test(t)) return false;     // never click "No, cancelar"
-      if (!confirmRx.test(t)) return false;
+      if (!t || cancelRx.test(t) || !confirmRx.test(t)) return false;
       try { return isVisible(el) && !el.disabled; } catch (_) { return false; }
     }) || null;
   }
@@ -3491,6 +3683,7 @@
         company: comp,
         location: loc,
         savedAt: Date.now(),
+        appliedAt: passiveAppliedAt(),
         matchScore: 0,
         reasons: ["Detectada como ya postulada al visitar la vacante"]
       });
@@ -3610,6 +3803,7 @@
             company: comp,
             location: loc,
             savedAt: Date.now(),
+            appliedAt: passiveAppliedAt(),
             matchScore: 0,
             reasons: ["Detectada como ya postulada desde /vacante/"]
           });
@@ -5362,6 +5556,17 @@
       onMatchesManualMarkApplied(action, id);
       return;
     }
+    if (what === "view-vacancy") {
+      // 👁 Ver — navigate to the vacancy WITHOUT applying. On the new MUI SPA
+      // there's no URL, so navigateToVacancyByJob clicks the card (or searches
+      // for it). Old-site jobs (with a real .url) still open in a new tab.
+      ev.preventDefault();
+      ev.stopPropagation();
+      const vid = action.getAttribute("data-job-id") || action.getAttribute("data-id");
+      const vmatch = matchesCurrentTopN.find((x) => x.jobLite && x.jobLite.id === vid);
+      navigateToVacancyByJob(vmatch ? vmatch.jobLite : null);
+      return;
+    }
     if (what === "quick-apply") {
       // QUOTA GATE AT THE CLICK — when the panel's cached quota says zero
       // remaining, don't even open the tab: show the plan-limit modal right
@@ -5375,6 +5580,20 @@
           showPlanLimitModal({ feature: "postulaciones IA", planName: lastBulkPlan });
         } catch (_) {}
         return;
+      }
+      // New LaPieza (MUI SPA): no URL → the new-tab model doesn't apply. Navigate
+      // same-tab to the vacancy (card click / search). The full auto-apply chain
+      // on arrival is Milestone 3; for now this lands the user on the right
+      // vacancy so they can apply.
+      {
+        const qaId = action.getAttribute("data-job-id") || "";
+        const qaMatch = matchesCurrentTopN.find((x) => x.jobLite && x.jobLite.id === qaId);
+        if (qaMatch && !qaMatch.jobLite.url) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          navigateToVacancyByJob(qaMatch.jobLite);
+          return;
+        }
       }
       // "⚡ Postular" — open the vacancy in a new tab AND set a session
       // flag so our content script chains the FULL apply flow on arrival:
@@ -5499,6 +5718,33 @@
     return !!el.closest(".eamx-matches-panel, .eamx-panel, .eamx-toast, .eamx-card-overlay");
   }
 
+  // LaPieza migrated to a Material-UI rebuild (profile.lapieza.io, 2026-06)
+  // where vacancy cards are .MuiCard-root with a .MuiCardActionArea-root
+  // <button> and NO <a href>. When the anchor-based scan finds nothing, fall
+  // back to these MUI cards: the action-area button stands in for the "anchor"
+  // (navigation is a click, not an href); title/company come from the card via
+  // extractJobLiteFromCard's generic selectors + text fallback.
+  function findMuiVacancyCards() {
+    const out = [];
+    let cards;
+    try { cards = document.querySelectorAll(".MuiCard-root"); } catch (_) { return out; }
+    cards.forEach((card) => {
+      if (isInsideOurUI(card)) return;
+      // Skip LaPieza skeleton/placeholder cards rendered WHILE data loads. They
+      // carry a MuiSkeleton and/or the literal placeholder strings
+      // "Vacante"/"Empresa" — capturing them collapses every card into one
+      // synthetic id (title+company), so the panel showed "1 analizada".
+      if (card.querySelector(".MuiSkeleton-root")) return;
+      const titleEl = card.querySelector(".MuiTypography-h6, .MuiTypography-h5, h2, h3, h4");
+      if (!titleEl) return; // a vacancy card carries a title heading
+      const titleTxt = (titleEl.textContent || "").trim();
+      if (!titleTxt || titleTxt === "Vacante" || titleTxt === "Vacancy") return;
+      const clickTarget = card.querySelector(".MuiCardActionArea-root, a[href], button") || card;
+      out.push({ anchor: clickTarget, card });
+    });
+    return out;
+  }
+
   function findAllVacancyCards() {
     const seenAnchor = new WeakSet();
     const anchors = [];
@@ -5522,6 +5768,16 @@
       seenCard.add(card);
       out.push({ anchor: a, card });
     }
+    // MUI cards (new LaPieza). ALWAYS merge — the seenCard set dedups any card
+    // also reached via an anchor, and on legacy pages .MuiCard-root matches
+    // nothing so this is a no-op. We must NOT gate on out.length === 0: a
+    // single stray vacancy <a> elsewhere on the page would otherwise suppress
+    // all the real MUI cards (that bug analyzed only 1 of 20).
+    for (const m of findMuiVacancyCards()) {
+      if (seenCard.has(m.card)) continue;
+      seenCard.add(m.card);
+      out.push(m);
+    }
     return out;
   }
 
@@ -5541,6 +5797,9 @@
         n++;
       }
     });
+    // MUI cards (new LaPieza): take the larger of the anchor count and the MUI
+    // card count (the new listing is all MUI, anchors are ~0).
+    try { n = Math.max(n, findMuiVacancyCards().length); } catch (_) {}
     return n;
   }
 
@@ -5660,6 +5919,106 @@
     return out;
   }
 
+  // First-vacancy fingerprint for the wider-search page-change detector.
+  // Old LaPieza used the first card's <a> href; the new MUI site has no
+  // anchors, so fall back to the first card's title text. Returns "" if none.
+  function firstVacancyFingerprint() {
+    const a = document.querySelector("a.vacancy-card-link[href]");
+    if (a) return a.getAttribute("href") || "";
+    // First REAL (non-skeleton, non-placeholder) MUI card title. Returns ""
+    // while the page is mid-load (skeletons) so the page-change detector WAITS
+    // for real data before snapshotting — otherwise each page snapshots
+    // skeletons, the skeleton filter drops them, and the pool stays empty
+    // (symptom: pagination climbs to "Página 7/26 · 1 vacante").
+    const cards = document.querySelectorAll(".MuiCard-root");
+    for (const c of cards) {
+      if (c.querySelector(".MuiSkeleton-root")) continue;
+      const tEl = c.querySelector(".MuiTypography-h6, .MuiTypography-h5, h2, h3");
+      const txt = tEl ? (tEl.textContent || "").trim() : "";
+      if (txt && txt !== "Vacante" && txt !== "Vacancy") return txt;
+    }
+    return "";
+  }
+
+  // Wait for the page's MUI cards to finish painting before snapshotting. The
+  // page-change fingerprint only guarantees the FIRST card is real; the other
+  // ~19 paint a beat later. Without this, the per-page snapshot captures just
+  // 1-2 cards (symptom: "Página 16/26 · 1 vacante" while the DOM holds 20).
+  // Polls until the real-card count is stable across two reads, or times out.
+  async function waitForCardsSettled(maxMs = 2600) {
+    let last = -1;
+    let stable = 0;
+    const start = Date.now();
+    while (Date.now() - start < maxMs) {
+      let n = 0;
+      try { n = findMuiVacancyCards().length; } catch (_) { n = 0; }
+      if (n > 0 && n === last) {
+        stable++;
+        if (stable >= 2) return;
+      } else {
+        stable = 0;
+      }
+      last = n;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+  }
+
+  // Find a MUI card currently in the DOM matching a pooled job's title+company.
+  function findCardInDomByJob(title, company) {
+    const wantT = (title || "").trim().toLowerCase();
+    const wantC = (company || "").trim().toLowerCase();
+    if (!wantT) return null;
+    for (const m of findMuiVacancyCards()) {
+      let j;
+      try { j = extractJobLiteFromCard(m.card, m.anchor); } catch (_) { continue; }
+      if ((j.title || "").trim().toLowerCase() === wantT &&
+          (!wantC || (j.company || "").trim().toLowerCase() === wantC)) {
+        return m;
+      }
+    }
+    return null;
+  }
+
+  // Navigate to a pooled vacancy on the NEW LaPieza (MUI SPA). There's no URL,
+  // so: (1) if the card is on the current page, click it; (2) otherwise type
+  // the title into LaPieza's search box (React-controlled) to surface it, then
+  // click. Old-site jobs (with a real .url) still open in a new tab as before.
+  async function navigateToVacancyByJob(job) {
+    if (!job) return false;
+    if (job.url) {
+      try { window.open(job.url, "_blank", "noopener"); return true; } catch (_) {}
+    }
+    let hit = findCardInDomByJob(job.title, job.company);
+    if (!hit) {
+      try {
+        const input =
+          document.querySelector('input[placeholder*="Buscar" i]') ||
+          document.querySelector('input[type="text"]');
+        if (input) {
+          toast("Buscando la vacante…", "info", { durationMs: 2000 });
+          const setter = Object.getOwnPropertyDescriptor(
+            window.HTMLInputElement.prototype, "value"
+          ).set;
+          setter.call(input, job.title || "");
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+          input.dispatchEvent(new Event("change", { bubbles: true }));
+          await new Promise((r) => setTimeout(r, 1800));
+          await waitForCardsSettled();
+          hit = findCardInDomByJob(job.title, job.company);
+        }
+      } catch (_) {}
+    }
+    if (hit) {
+      const target =
+        hit.anchor ||
+        hit.card.querySelector(".MuiCardActionArea-root") ||
+        hit.card;
+      try { target.click(); return true; } catch (_) {}
+    }
+    toast("No pude abrir esa vacante automáticamente — búscala en la lista.", "info");
+    return false;
+  }
+
   // Auto-trigger flag: set to true while a widening loop is in flight so
   // re-entrancy (e.g. user closes + reopens panel mid-flight) doesn't
   // start a second loop. Cleared in the finally block.
@@ -5748,8 +6107,15 @@
     // Time budget at 40 pages: ~40 × (4s poll + 0.4s pause) ≈ 3 min
     // worst case. Acceptable for a one-time wider search.
     const HARD_CAP = 40;
+    // New LaPieza (MUI SPA) loads each page async + we wait for cards to settle,
+    // so paginating 26+ pages is slow AND off-page cards can't be clicked for
+    // Ver/Postular (they're not in the DOM). Cap to a few pages: the Top 25
+    // fills within ~2-3 pages, the scan stays fast, and matches stay reachable.
+    let muiSite = false;
+    try { muiSite = findMuiVacancyCards().length > 0; } catch (_) {}
+    const HARD_CAP_EFF = muiSite ? 4 : HARD_CAP;
     const detected = detectTotalPaginationPages();
-    const MAX_PAGES = detected ? Math.min(detected, HARD_CAP) : HARD_CAP;
+    const MAX_PAGES = detected ? Math.min(detected, HARD_CAP_EFF) : HARD_CAP_EFF;
     console.log("[EmpleoAutomatico] wider-search MAX_PAGES =", MAX_PAGES, "(detected:", detected, ")");
     const PER_PAGE_TIMEOUT_MS = 4000;
     const POLL_INTERVAL_MS = 300;
@@ -5760,6 +6126,8 @@
     // unmounting because we extract jobLites BEFORE clicking next.
     const pool = new Map();
     // Seed the pool with whatever's on screen right now (page 1 worth).
+    // Wait for the cards to finish painting first so we capture the full page.
+    await waitForCardsSettled();
     for (const entry of snapshotCurrentCardsAsPoolEntries()) {
       pool.set(entry.jobLite.id, entry);
     }
@@ -5777,8 +6145,7 @@
         // LaPieza actually changed the cards (not just re-rendered the
         // same set). On the last page this stays the same → we bail.
         try {
-          const firstAnchor = document.querySelector("a.vacancy-card-link[href]");
-          lastFirstAnchorHref = firstAnchor?.getAttribute("href") || "";
+          lastFirstAnchorHref = firstVacancyFingerprint();
         } catch (_) { lastFirstAnchorHref = ""; }
         // Fire React's onClick.
         try { nextBtn.click(); } catch (_) { /* should never throw */ }
@@ -5789,10 +6156,7 @@
         for (let p = 0; p < polls; p++) {
           await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
           let firstNow = "";
-          try {
-            const a = document.querySelector("a.vacancy-card-link[href]");
-            firstNow = a?.getAttribute("href") || "";
-          } catch (_) {}
+          try { firstNow = firstVacancyFingerprint(); } catch (_) {}
           if (firstNow && firstNow !== lastFirstAnchorHref) {
             pageChanged = true;
             break;
@@ -5804,6 +6168,9 @@
           continue;
         }
         stallStreak = 0;
+        // Let the rest of this page's cards finish painting before snapshotting
+        // (the fingerprint only guarantees the first card is real).
+        await waitForCardsSettled();
         // Snapshot this page's cards into the cumulative pool.
         const before = pool.size;
         for (const entry of snapshotCurrentCardsAsPoolEntries()) {
@@ -5840,6 +6207,16 @@
         bestScore: peekBestScore(pool),
         doneLabel: "✓ Listo — preparando ranking…"
       });
+      // Final re-snapshot of whatever's on screen now. Covers two new-LaPieza
+      // cases: the seed running before the MUI cards painted, and pages where
+      // the change-detector couldn't advance — so the CURRENT page's cards are
+      // always captured even if multi-page pagination stalls.
+      try {
+        await waitForCardsSettled();
+        for (const entry of snapshotCurrentCardsAsPoolEntries()) {
+          pool.set(entry.jobLite.id, entry);
+        }
+      } catch (_) {}
       // Activate the pool for the panel render. renderMatchesPanelContent
       // checks widerSearchPool first and uses it instead of live cards.
       widerSearchPool = pool;
@@ -6272,6 +6649,7 @@
           company: m.jobLite.company || "",
           location: m.jobLite.location || "",
           savedAt: Date.now(),
+          appliedAt: passiveAppliedAt(),
           matchScore: Number(m.score) || 0,
           reasons: ["Detectada como ya postulada desde el listado"]
         }).catch(() => {})
@@ -6948,7 +7326,7 @@
     // — they couldn't reach the vacancy page without applying.
     const viewAction = isApplied
       ? ""
-      : `<a href="${safeUrl}" target="_blank" rel="noopener" class="eamx-match-item__view" title="Abrir la vacante para verla y revisar tu match — NO postula" style="display:inline-flex;align-items:center;gap:5px;padding:6px 12px;border-radius:8px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.06);color:#f1f5f9;font:600 12.5px/1 inherit;text-decoration:none;white-space:nowrap;">👁 Ver</a>`;
+      : `<a href="${safeUrl}" target="_blank" rel="noopener" data-action="view-vacancy" data-job-id="${safeId}" class="eamx-match-item__view" title="Abrir la vacante para verla y revisar tu match — NO postula" style="display:inline-flex;align-items:center;gap:5px;padding:6px 12px;border-radius:8px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.06);color:#f1f5f9;font:600 12.5px/1 inherit;text-decoration:none;white-space:nowrap;">👁 Ver</a>`;
     // Manual "ya apliqué" link — for vacancies the user applied to OUTSIDE
     // our chain (manually, before the tracker existed, or from another
     // device). Hidden once the item is already marked as applied.
@@ -8500,10 +8878,12 @@
   // When no third arg: 4s info / 4s success / 4s error.
   function toast(message, variant = "info", action) {
     // Single-toast policy: clear any previously-shown toasts so we don't
-    // stack on top. All toasts share `position:fixed; left:24px; bottom:24px`,
-    // so multiple visible toasts overlap and become unreadable. Sticky
-    // toasts (the auto-quiz progress ticker) opt out of cleanup via the
-    // .eamx-toast--sticky class so they survive concurrent toast() calls.
+    // stack on top. All toasts share `position:fixed; right:24px; bottom:96px`
+    // (bottom-right, above the FAB — see occ.css for why we left the host's
+    // bottom-left corner), so multiple visible toasts would overlap and
+    // become unreadable. Sticky toasts (the auto-quiz progress ticker) opt
+    // out of cleanup via the .eamx-toast--sticky class so they survive
+    // concurrent toast() calls.
     try {
       document.querySelectorAll(".eamx-toast:not(.eamx-toast--sticky)").forEach((t) => {
         try {
@@ -9328,6 +9708,81 @@
     return document.body;
   }
 
+  // ── MUI quiz fallback (LaPieza's Material-UI rebuild) ──────────────────
+  // The legacy collectors target old-site markup (button.multi-select-button,
+  // div.details__form__preguntas). On the MUI Test step the options can be
+  // rendered as a radio-group (.MuiRadioGroup-root → .MuiFormControlLabel-root
+  // labels wrapping real <input type=radio>) or a toggle-button group
+  // (.MuiToggleButtonGroup-root → .MuiToggleButton-root). We collect those as
+  // a LAST-RESORT fallback so the auto-quiz can answer them too.
+  //
+  // SAFE BY CONSTRUCTION: answer SELECTION is unchanged — the backend AI is
+  // given each option's TEXT (+ a key we assign here by DOM order) and returns
+  // the key to click, exactly as for the legacy quizzes. So this introduces no
+  // new wrong-answer mechanism; it only extends the same answerer to a new DOM
+  // shape. It fires ONLY when the legacy + Y/N collectors found < 2 options,
+  // requires ≥ 2 real options, skips our own UI and CV-selection look-alikes,
+  // and degrades to null (today's graceful behavior) if the DOM doesn't match.
+  function muiQuizOptionGroups() {
+    const groups = [];
+    try {
+      const sel = ".MuiRadioGroup-root, [role='radiogroup'], .MuiToggleButtonGroup-root";
+      for (const g of document.querySelectorAll(sel)) {
+        try {
+          if (!isVisible(g)) continue;
+          if (g.closest(".eamx-fab, .eamx-panel, .eamx-overlay, .eamx-matches-panel, .eamx-toast, [data-eamx]")) continue;
+          groups.push(g);
+        } catch (_) { /* skip */ }
+      }
+    } catch (_) { /* ignore */ }
+    return groups;
+  }
+  function collectMuiQuizOptions(scope) {
+    const root = (scope && scope.querySelectorAll) ? scope : document;
+    const KEYS = "ABCDEFGHIJ";
+    const out = [];
+    const seen = new Set();
+    let nodes = [];
+    try {
+      nodes = Array.from(root.querySelectorAll(".MuiFormControlLabel-root, .MuiToggleButton-root"));
+    } catch (_) { return []; }
+    for (const node of nodes) {
+      try {
+        if (!isVisible(node)) continue;
+        if (node.closest(".eamx-fab, .eamx-panel, .eamx-overlay, .eamx-matches-panel, .eamx-toast, [data-eamx]")) continue;
+        const text = (node.textContent || "").trim();
+        if (!text || text.length > 160) continue;
+        // Skip CV-selection look-alikes (they live on the Documentos step,
+        // but be defensive in case both render at once).
+        if (/principal|hoja\s*de\s*vida|cv\s*-|\.pdf\b/i.test(text)) continue;
+        const norm = text.toLowerCase();
+        if (seen.has(norm)) continue;
+        seen.add(norm);
+        // The node itself is the click target: clicking a FormControlLabel
+        // toggles its radio; a ToggleButton selects on click. programmaticClick
+        // (used for the legacy buttons) works on both.
+        out.push({ text, button: node });
+        if (out.length >= KEYS.length) break;
+      } catch (_) { /* skip */ }
+    }
+    if (out.length < 2) return [];
+    return out.map((o, i) => ({ key: KEYS[i], text: o.text, button: o.button }));
+  }
+  // Find a container that wraps a MUI option group AND its question text.
+  function findMuiQuizContainer() {
+    for (const g of muiQuizOptionGroups()) {
+      if (collectMuiQuizOptions(g).length < 2) continue;
+      let node = g;
+      for (let i = 0; i < 6 && node && node.parentElement; i++) {
+        const txt = (node.textContent || "").trim();
+        if (txt.includes("?") && txt.length <= QUIZ_QUESTION_MAX_LEN * 4) return node;
+        node = node.parentElement;
+      }
+      return g.parentElement || g;
+    }
+    return null;
+  }
+
   function detectQuizQuestion() {
     let container = document.querySelector("div.details__form__preguntas");
     if (!container || !isVisible(container)) {
@@ -9344,8 +9799,14 @@
         // We detect them here so the chain doesn't get stuck on
         // looksLikeQuizStep returning false.
         const ynContainer = findYesNoQuizContainer();
-        if (!ynContainer) return null;
-        container = ynContainer;
+        if (ynContainer) {
+          container = ynContainer;
+        } else {
+          // Fallback C: MUI radio-group / toggle-button-group quiz.
+          const muiContainer = findMuiQuizContainer();
+          if (!muiContainer) return null;
+          container = muiContainer;
+        }
       }
     }
 
@@ -9371,7 +9832,16 @@
       if (ynOpts.length >= 2) {
         options = ynOpts;
       } else {
-        return null;
+        // MUI radio/toggle fallback (LaPieza MUI rebuild). Scan the
+        // container first, then the whole document (the option group may
+        // sit just outside the container we locked onto).
+        let muiOpts = collectMuiQuizOptions(container);
+        if (muiOpts.length < 2) muiOpts = collectMuiQuizOptions(document);
+        if (muiOpts.length >= 2) {
+          options = muiOpts;
+        } else {
+          return null;
+        }
       }
     }
 
@@ -9608,7 +10078,13 @@
       if (!quizLoopActive) return;
       const target = ev.target;
       if (!target || !(target.closest)) return;
-      const btn = target.closest("button.multi-select-button");
+      // Match the legacy multi-select-button AND the MUI option nodes
+      // (radio FormControlLabel / ToggleButton) we now answer — otherwise a
+      // user manually answering a MUI quiz wouldn't be detected and our loop
+      // would keep auto-clicking over them. programmaticClick stamps the
+      // eamx-quiz-clicking flag on whichever node it clicks (choice.button),
+      // which is exactly the node matched here, so our own clicks are excluded.
+      const btn = target.closest("button.multi-select-button, .MuiFormControlLabel-root, .MuiToggleButton-root");
       if (!btn) return;
       // If this click came from us (we set the flag before clicking) it's
       // not a user takeover.
@@ -9858,16 +10334,42 @@
   // filled or the step changes. Applied idempotently from the watcher tick, so
   // it self-heals and never depends on toast timing or dedup.
   const manualMarkerFocused = new Set();
+  // Field-aware copy for the manual-entry badge/toast. The generic "Esta la
+  // respondes tú" left users asking "¿cuál? ¿no era automático?" (esp. on the
+  // new LaPieza Portafolio/Behance fields). Name what the field is, say it's
+  // optional where it is, and tell them how to make it auto-fill next time.
+  function manualEntryBadgeText(el) {
+    let q = "";
+    try { q = (questionTextFor(el) || "").trim(); } catch (_) {}
+    if (/portafolio|portfolio|behance|dribbble|github|sitio\s*web|website|url|enlace|link/i.test(q)) {
+      return "📎 Portafolio/links: pega tu enlace aquí. Si esta vacante lo exige, “Continuar” se activa al llenarlo. Tip: guárdalo en Preferencias para que se llene solo la próxima.";
+    }
+    if (/salario|sueldo|expectativa|pretensi[oó]n|salary|compensaci/i.test(q)) {
+      return "💰 Tu sueldo esperado va aquí. Escríbelo y dale Continuar. Tip: guárdalo en Preferencias y la próxima se llena solo.";
+    }
+    const label = q ? `“${q.slice(0, 38)}”` : "Esta";
+    return `✍️ ${label} la respondes tú — escríbela y dale Continuar. Lo demás ya quedó listo.`;
+  }
   function applyManualEntryMarker(el) {
     if (!el) return;
     try {
       el.classList.add("eamx-manual-field");
-      const parent = el.parentElement;
-      if (parent && !parent.querySelector(":scope > .eamx-manual-badge")) {
+      // Insert the advisory badge ABOVE the field. On MUI (LaPieza's new
+      // UI) a textarea/input's immediate parent is .MuiInputBase-root — a
+      // flex container that also holds the notched-outline fieldset, so a
+      // block-level badge dropped inside it renders cramped/misplaced.
+      // Anchor on the OUTER MUI wrapper (.MuiFormControl-root /
+      // .MuiTextField-root) and insert the badge BEFORE it. On non-MUI
+      // portals el.closest(...) is null → anchor falls back to el and the
+      // behavior is exactly as before (badge before the field, same parent).
+      const wrapper = (el.closest && (el.closest(".MuiFormControl-root, .MuiTextField-root") || el.closest(".MuiInputBase-root"))) || el;
+      const anchor = (wrapper && wrapper.parentElement) ? wrapper : el;
+      const host = anchor.parentElement;
+      if (host && !host.querySelector(":scope > .eamx-manual-badge")) {
         const badge = document.createElement("div");
         badge.className = "eamx-manual-badge";
-        badge.textContent = "✍️ Esta la respondes tú — escríbela y dale Continuar. Lo demás ya quedó listo.";
-        try { parent.insertBefore(badge, el); } catch (_) {}
+        badge.textContent = manualEntryBadgeText(el);
+        try { host.insertBefore(badge, anchor); } catch (_) {}
       }
       // Focus + scroll ONCE per field — re-focusing every tick would fight the
       // user while they type.
@@ -9904,7 +10406,7 @@
     if (ref) manualEntryPrompted.add(ref);
     try { clearQuizStickyToast(); } catch (_) {}
     toast(
-      "✍️ Esta pregunta la respondes tú (ej. tu sueldo esperado). Escríbela y dale Continuar — lo demás ya quedó listo.",
+      manualEntryBadgeText(blocker.el),
       "info",
       { durationMs: 60000, sticky: true }
     );
@@ -10541,8 +11043,24 @@
         .filter((t) => t && t !== title && t.length > 1 && t.length < 80);
       if (texts.length) company = texts[0];
     }
-    const url = anchor.href;
-    const id = idFromUrl(url);
+    const url = anchor.href || "";
+    // Only derive an id from the URL when there IS one. idFromUrl("") falls
+    // through to a hash of the empty string and returns the CONSTANT "url-0",
+    // which would give every MUI card (no href) the same id → the whole page
+    // collapses to 1 in the pool. Skipping it lets the title+company fallback
+    // below produce a unique id per card.
+    let id = url ? idFromUrl(url) : "";
+    if (!id) {
+      // New LaPieza (MUI) cards have no URL → no id-from-url. The panel SKIPS
+      // entries without an id (snapshotCurrentCardsAsPoolEntries: `if
+      // (!jobLite.id) continue`) and would key them all to the same empty
+      // string, collapsing 20 cards into 1. Derive a STABLE id from
+      // title+company (same normalization shape as queueModule.postingKey, so
+      // applied-tracking stays consistent).
+      const basis = (title + " " + company).toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+      if (basis) id = "lp-" + basis.slice(0, 88);
+    }
     const locationEl = card.querySelector("[class*='location' i], [class*='ubicacion' i], [class*='ciudad' i], address");
     const loc = locationEl ? cleanText(locationEl.textContent) : "";
     return {
@@ -10597,6 +11115,14 @@
       // Skip if already overlaid (idempotency).
       if (card.hasAttribute("data-eamx-card-overlay")) continue;
       out.push({ anchor: a, card });
+    }
+    // MUI cards (new LaPieza): ALWAYS merge for the per-card overlay badges
+    // (seenCard dedups; no-op on legacy non-MUI pages).
+    for (const m of findMuiVacancyCards()) {
+      if (seenCard.has(m.card)) continue;
+      if (m.card.hasAttribute("data-eamx-card-overlay")) continue;
+      seenCard.add(m.card);
+      out.push(m);
     }
     return out;
   }
@@ -10938,14 +11464,15 @@
   // before, or null → caller falls back to fixed-floating.
   function findMatchCardAnchor() {
     try {
-      const els = document.querySelectorAll("h1,h2,h3,h4,h5,strong,b,p,span,div,header");
+      const els = document.querySelectorAll("h1,h2,h3,h4,h5,h6,strong,b,p,span,div,header");
       for (const el of els) {
         if (el.closest(".eamx-fab, .eamx-panel, .eamx-overlay, .eamx-matches-panel, .eamx-toast, [data-eamx]")) continue;
         const t = (el.textContent || "").trim();
         if (!t || t.length > 70) continue;
         if (/^descripci[oó]n\s+del\s+(trabajo|puesto|empleo|cargo)/i.test(t)) {
           // Prefer a real heading ancestor if `el` is an inner span/emoji.
-          const head = el.closest("h1,h2,h3,h4,h5") || el;
+          // (New LaPieza uses an <h6> "Descripción del puesto".)
+          const head = el.closest("h1,h2,h3,h4,h5,h6") || el;
           if (head && head.parentElement && isVisible(head)) return head;
         }
       }
@@ -10973,6 +11500,27 @@
   // Mount the card shell around `inner` and wire the delegated click handler.
   // ctx = { vacId, job }. Anchors ABOVE the "Descripción del trabajo" heading
   // when found (so it reads as part of the page, not a sticker over the apply
+  // Undo a (possibly phantom) "ya postulaste" mark. Removes the vacancy from
+  // the applied queue so it gets analyzed + offered again, then re-runs the
+  // match so the normal card returns. For false marks — e.g. the user hit a
+  // stuck apply that never actually submitted.
+  async function reactivateVacancy(ctx) {
+    try {
+      const id = ctx && ctx.vacId;
+      if (id && queueModule && typeof queueModule.removeFromQueue === "function") {
+        await queueModule.removeFromQueue(id, SOURCE);
+      }
+      // Clear the per-session guard so a later visit re-evaluates cleanly.
+      try { alreadyAppliedPersistedFor = ""; } catch (_) {}
+      if (id) { try { vacancyMatchDismissedIds.delete(id); } catch (_) {} }
+      toast("Listo — reactivé esta vacante. La vuelvo a analizar.", "success", { durationMs: 4000 });
+      try { runVacancyMatchAI(ctx, { auto: true }); } catch (_) {}
+    } catch (e) {
+      console.warn("[EmpleoAutomatico] reactivateVacancy failed", e);
+      try { toast("No pude reactivarla. Intenta de nuevo.", "error"); } catch (_) {}
+    }
+  }
+
   // sidebar); otherwise floats fixed bottom-right.
   function paintVacancyMatchCard(inner, ctx) {
     removeVacancyMatchCard();
@@ -11000,19 +11548,45 @@
         runVacancyOptimizedCv(ctx);
         return;
       }
+      if (ev.target.closest("[data-eamx-vmatch-reactivar]")) {
+        reactivateVacancy(ctx);
+        return;
+      }
     });
 
-    // Try to anchor inline above the job description; fall back to floating.
-    const anchor = findMatchCardAnchor();
-    if (anchor && anchor.parentElement) {
-      card.style.cssText = VMATCH_STYLE_INLINE;
-      try { anchor.parentElement.insertBefore(card, anchor); } catch (_) {}
-    }
-    if (!card.isConnected) {
+    // Mount: prefer INLINE above the job description; fall back to a FIXED
+    // floating card. React (LaPieza's new MUI app) re-renders and removes
+    // foreign nodes inserted into its managed DOM, so the inline insert often
+    // doesn't stick on the new site. Self-heal: keep re-anchoring inline as the
+    // page settles; the fixed fallback guarantees the card is always visible.
+    const mountInline = () => {
+      const anchor = findMatchCardAnchor();
+      if (anchor && anchor.parentElement && anchor.isConnected) {
+        try {
+          card.style.cssText = VMATCH_STYLE_INLINE;
+          anchor.parentElement.insertBefore(card, anchor);
+        } catch (_) {}
+      }
+      return card.isConnected && card.parentElement &&
+        card.parentElement.tagName !== "HTML";
+    };
+    if (!mountInline()) {
       card.style.cssText = VMATCH_STYLE_FIXED;
       document.documentElement.appendChild(card);
     }
     vacancyMatchCardEl = card;
+    // Bounded self-heal: re-try inline while React keeps clobbering it; stop
+    // once it's stably inline, when this card is replaced/removed, or after the
+    // attempt budget (then the fixed fallback stays).
+    let healTries = 0;
+    const healIv = setInterval(() => {
+      healTries++;
+      if (vacancyMatchCardEl !== card || healTries > 8) { clearInterval(healIv); return; }
+      const stuckOrGone = !card.isConnected ||
+        (card.parentElement && card.parentElement.tagName === "HTML");
+      if (stuckOrGone) { mountInline(); }
+      else { clearInterval(healIv); }
+    }, 700);
     // Animate the "afinando…" copy while the AI is running (no-op otherwise).
     if (card.querySelector("[data-eamx-vmatch-spin-text]")) {
       try { startVacancyMatchSpinnerCycle(); } catch (_) {}
@@ -11158,6 +11732,7 @@
       </div>
       ${matchLine}
       <div style="margin-top:10px;font-size:11.5px;color:#6b7280;line-height:1.4;">No la vuelvo a analizar ni a auto-postular — ya quedó. 👍</div>
+      <button type="button" data-eamx-vmatch-reactivar style="margin-top:11px;width:100%;border:1px solid #e5e7eb;border-radius:11px;padding:9px 12px;background:#fff;color:#b45309;font-weight:700;font-size:12.5px;cursor:pointer;">↩︎ No apliqué — reactivar esta vacante</button>
     `;
   }
 
@@ -11282,10 +11857,27 @@
     // chain-tracked submits + re-posts. Makes the CARD consistent with the
     // panel/bulk, which already skip applied (user: "¿por qué salió en la
     // tarjeta? en autopostular dirá que ya se postuló?").
-    let alreadyApplied = false;
-    try { alreadyApplied = detectAlreadyAppliedState(); } catch (_) {}
-    if (!alreadyApplied && vacId && queueModule && typeof queueModule.isApplied === "function") {
-      try { alreadyApplied = await queueModule.isApplied(vacId, SOURCE); } catch (_) {}
+    let lapiezaApplied = false;
+    try { lapiezaApplied = detectAlreadyAppliedState(); } catch (_) {}
+    let cacheApplied = false;
+    if (vacId && queueModule && typeof queueModule.isApplied === "function") {
+      try { cacheApplied = await queueModule.isApplied(vacId, SOURCE); } catch (_) {}
+    }
+    let alreadyApplied = lapiezaApplied || cacheApplied;
+    // GROUND-TRUTH RECONCILE: LaPieza is authoritative on its own vacancy page.
+    // If our queue says "applied" but LaPieza still shows an enabled "Postularme"
+    // (and shows NO applied text), the mark is stale/phantom — auto-correct it
+    // and analyze normally, instead of falsely insisting "ya postulaste". This
+    // is the automatic version of the manual "No apliqué" button.
+    if (cacheApplied && !lapiezaApplied && detectLaPiezaNotApplied()) {
+      alreadyApplied = false;
+      try {
+        if (vacId && queueModule && typeof queueModule.removeFromQueue === "function") {
+          await queueModule.removeFromQueue(vacId, SOURCE);
+        }
+      } catch (_) {}
+      try { alreadyAppliedPersistedFor = ""; } catch (_) {}
+      console.log("[EmpleoAutomatico] reconcile: queue said applied but LaPieza shows Postularme — cleared stale mark for", vacId);
     }
     if (alreadyApplied) {
       if (fabMode() !== "vacancy" || (vacId && vacancyMatchDismissedIds.has(vacId))) return;

@@ -17,6 +17,7 @@
     "https://bumeran.com.mx/*",
     "https://lapieza.io/*",
     "https://www.lapieza.io/*",
+    "https://*.lapieza.io/*",
     "https://mx.indeed.com/*",
     "https://www.linkedin.com/*",
     "https://api.empleo.skybrandmx.com/*"
@@ -56,7 +57,8 @@
     {
       "matches": [
         "https://lapieza.io/*",
-        "https://www.lapieza.io/*"
+        "https://www.lapieza.io/*",
+        "https://*.lapieza.io/*"
       ],
       "js": ["content/lapieza.js"],
       "css": ["content/occ.css"],

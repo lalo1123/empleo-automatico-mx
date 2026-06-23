@@ -1410,8 +1410,16 @@
 
 .eamx-toast {
   position: fixed;
-  left: 24px;
-  bottom: 24px;
+  /* Bottom-RIGHT, lifted above the FAB. LaPieza anchors its OWN toasts
+     (e.g. "Mensaje para el reclutador…", the submit confirmation) at
+     bottom-LEFT, so our old left:24/bottom:24 made the two pile up and
+     become unreadable ("se ve encimado"). Bottom-right is our zone (the
+     FAB lives there); bottom:96 clears the ~56px FAB so a toast never
+     covers it. Our z-index already wins, so this is purely about not
+     sharing a corner with the host site's notifications. */
+  right: 24px;
+  left: auto;
+  bottom: 96px;
   z-index: 2147483800;
   max-width: 380px;
   padding: 12px 16px;
