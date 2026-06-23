@@ -24,10 +24,33 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-23-flow-review-fixes";
+  const EAMX_LAPIEZA_VERSION = "2026-06-23-hotreload-gated";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
+
+  // ── DEV hot-reload bridge ──────────────────────────────────────────────────
+  // Lets the unpacked extension be reloaded straight from the page via
+  //   window.postMessage({ type:"EAMX_DEV_RELOAD", token:"eamx-dev-reload" })
+  // instead of clicking ↻ in chrome://extensions on every content-script edit.
+  // The service worker performs the actual chrome.runtime.reload().
+  //
+  // Gated behind DEV_HOT_RELOAD so disabling it is a ONE-LINE switch: set it to
+  // false (here AND in background/service-worker.js) before a Chrome Web Store
+  // release — otherwise any lapieza.io page could spam reloads (a DoS on the
+  // extension). Fine to leave ON while loading unpacked for development.
+  const DEV_HOT_RELOAD = true;
+  if (DEV_HOT_RELOAD) {
+    try {
+      window.addEventListener("message", (e) => {
+        if (e.source !== window) return;
+        const d = e.data;
+        if (d && d.type === "EAMX_DEV_RELOAD" && d.token === "eamx-dev-reload") {
+          try { chrome.runtime.sendMessage({ type: "EAMX_DEV_RELOAD" }); } catch (_) {}
+        }
+      });
+    } catch (_) {}
+  }
 
   // Pre-existing applications we DETECT (the "ya postulaste" banner on a
   // vacancy, the applied badge in the listing) are backdated 7 days so they

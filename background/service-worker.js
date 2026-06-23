@@ -1001,9 +1001,20 @@ async function handleAdminSetUsage(msg) {
 // Router
 // ---------------------------------------------------------------------------
 
+// DEV hot-reload — paired with the gated content-script bridge (see
+// content/lapieza.js DEV_HOT_RELOAD). Reloads the unpacked extension on demand
+// so iterating on content scripts doesn't need a manual chrome://extensions
+// reload. Set BOTH this flag and the one in lapieza.js to false before a
+// Chrome Web Store release.
+const DEV_HOT_RELOAD = true;
+
 onMessage(async (msg) => {
   if (!msg || !msg.type) {
     return { ok: false, error: ERROR_CODES.INVALID_INPUT, message: "Mensaje sin tipo" };
+  }
+  if (DEV_HOT_RELOAD && msg.type === "EAMX_DEV_RELOAD") {
+    setTimeout(() => { try { chrome.runtime.reload(); } catch (_) {} }, 60);
+    return { ok: true };
   }
   switch (msg.type) {
     case MESSAGE_TYPES.GET_PROFILE:
