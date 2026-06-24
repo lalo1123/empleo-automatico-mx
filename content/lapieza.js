@@ -24,7 +24,7 @@
   // claim to have reloaded the extension, they're still on the old code.
   // BUMP this on every commit that touches chain behavior so we have a
   // ground truth.
-  const EAMX_LAPIEZA_VERSION = "2026-06-23-hotreload-gated";
+  const EAMX_LAPIEZA_VERSION = "2026-06-23-match-consistency-final";
   console.log(
     `[EmpleoAutomatico] content/lapieza.js loaded — version ${EAMX_LAPIEZA_VERSION}`
   );
@@ -776,12 +776,21 @@
 
     // TODO(dom): refine these selectors with real LaPieza DOM (English/Spanish
     // class fragments common in modern ATSes: vacancy/position/job-title).
+    // LaPieza's MUI detail renders the vacancy title as `h4.MuiTypography-h4`
+    // and the company as the body1 right after it. These MUST come first: the
+    // generic fallbacks below (`[class*='title']`, `h1`) otherwise grab the nav
+    // bar ("Comunidad Vacantes Mi perfil…") or a section label ("Detalles"),
+    // poisoning both the AI analysis and the match-bridge key. (`MuiTypography-h4`
+    // is a stable semantic variant class, not a per-build hash.)
     title = firstNonEmpty(title, textOf("[itemprop='title']"), textOf("[data-testid='job-title']"),
+      textOf("h4.MuiTypography-h4"),
       textOf("[class*='vacancy' i] h1"), textOf("[class*='vacante' i] h1"),
       textOf("[class*='job-title' i]"), textOf("[class*='position' i]"),
       textOf("[class*='title' i]"), textOf("h1"));
     company = firstNonEmpty(company, textOf("[itemprop='hiringOrganization']"),
-      textOf("[data-testid='company-name']"), textOf("[class*='company' i]"),
+      textOf("[data-testid='company-name']"),
+      textOf("h4.MuiTypography-h4 + p.MuiTypography-body1"),
+      textOf("[class*='company' i]"),
       textOf("[class*='empresa' i] a, [class*='empresa' i]"),
       textOf("[class*='employer' i]"), textOf("[class*='organization' i]"));
     loc = firstNonEmpty(loc, textOf("[itemprop='jobLocation']"), textOf("address"),
@@ -5287,6 +5296,14 @@
       return;
     }
 
+    // Pull persisted AI scores (from detail-page analyses, this tab or others)
+    // into the bridge BEFORE the first render so the panel shows the SAME number
+    // as the inline card for any vacancy already analyzed. Also start the live
+    // cross-tab listener so an analysis that lands WHILE the panel is open flips
+    // its number without a reload. The await is one storage read (~ms).
+    ensureAIByKeyLiveSync();
+    try { await loadAIByKeyFromStorage(); } catch (_) {}
+
     // Build skeleton synchronously so the user sees something instantly.
     matchesPanelEl = document.createElement("aside");
     matchesPanelEl.className = "eamx-matches-panel";
@@ -6568,6 +6585,33 @@
         };
       });
     }
+
+    // Override the quick heuristic with the REAL AI score for any vacancy the
+    // inline match-card already analyzed (cached in vacancyMatchAIByKey, bridged
+    // by title+company because the panel and the detail page derive ids
+    // differently). Without this the panel showed a DIFFERENT number than the
+    // card for the SAME vacancy (e.g. 44% vs 68%) — the user's "el match es
+    // diferente". The AI score wins; the quick estimate stays for not-yet-
+    // analyzed vacancies. Level is recomputed from the AI score via the panel's
+    // own levelForScore so the badge colour stays consistent with the number.
+    try {
+      if (vacancyMatchAIByKey.size && queueModule && typeof queueModule.postingKey === "function") {
+        for (const m of scored) {
+          const k = queueModule.postingKey(m.jobLite && m.jobLite.title, m.jobLite && m.jobLite.company);
+          if (!k || k === "|") continue;
+          // Try the full title+company key first, then the title-only fallback.
+          const tk = queueModule.postingKey(m.jobLite && m.jobLite.title, "");
+          const ai = vacancyMatchAIByKey.get(k) || (tk && tk !== "|" ? vacancyMatchAIByKey.get(tk) : null);
+          if (ai && typeof ai.score === "number") {
+            m.score = ai.score;
+            if (matchScoreModule && typeof matchScoreModule.levelForScore === "function") {
+              m.level = matchScoreModule.levelForScore(ai.score);
+            }
+            m.aiScored = true;
+          }
+        }
+      }
+    } catch (_) { /* keep quick scores on any error */ }
 
     // AUTO-DETECTED STATUS HANDLING
     // - Closed vacancies: dropped entirely (can never be applied to).
@@ -11412,10 +11456,56 @@
   // number is STABLE (never silently recomputes to a different value). The
   // local "match rápido" is recomputed each render (cheap, deterministic).
   const vacancyMatchAICache = new Map();   // vacId -> { score, level, matches, gaps, improveTips }
+  // Same AI scores keyed by title+company (postingKey) so the matches panel +
+  // listing — which score with the QUICK heuristic and derive vacancy ids
+  // differently — can show the SAME number as this inline AI card for a vacancy
+  // already analyzed (fixes the "68% on the card vs 44% in the panel" mismatch).
+  const vacancyMatchAIByKey = new Map();   // postingKey -> { score, level }
+  // Record a vacancy's AI score under its title+company key and refresh the
+  // panel so it shows the same number. Called from EVERY path that surfaces an
+  // AI score (fresh analysis, memory cache, persisted cache) so the bridge is
+  // populated even on cached re-views after a reload. Only re-renders when the
+  // value actually changed → no render loop with the panel.
+  function noteAIScoreForPanel(job, aiRes) {
+    try {
+      if (!job || !aiRes || typeof aiRes.score !== "number") return;
+      if (!(queueModule && typeof queueModule.postingKey === "function")) return;
+      const k = queueModule.postingKey(job.title, job.company);
+      // Title-only key too: the panel derives company from listing cards, which
+      // can render it slightly differently than the detail page (or not at all),
+      // so the full title+company key may not match. Title is the strong, stable
+      // signal — store under both and let the panel try full → title-only.
+      const tk = queueModule.postingKey(job.title, "");
+      if (!k || k === "|") return;
+      const prev = vacancyMatchAIByKey.get(k);
+      const val = { score: aiRes.score, level: aiRes.level };
+      vacancyMatchAIByKey.set(k, val);
+      if (tk && tk !== k && tk !== "|") vacancyMatchAIByKey.set(tk, val);
+      // Persist so a panel in ANOTHER tab (the feed) — or after a reload — shows
+      // the same number. storage.onChanged carries it live to an open panel.
+      try {
+        if (chrome?.storage?.local) {
+          const rec = { score: aiRes.score, level: aiRes.level, at: Date.now() };
+          const obj = { [VMATCH_KEY_PREFIX + k]: rec };
+          if (tk && tk !== k && tk !== "|") obj[VMATCH_KEY_PREFIX + tk] = rec;
+          chrome.storage.local.set(obj);
+        }
+      } catch (_) { /* best-effort */ }
+      if (!prev || prev.score !== aiRes.score) {
+        if (typeof renderMatchesPanelContent === "function") { try { renderMatchesPanelContent(); } catch (_) {} }
+      }
+    } catch (_) { /* best-effort */ }
+  }
   const vacancyMatchAILoading = new Set(); // vacIds whose AI call is in flight
   // Persisted cache (chrome.storage.local) so the REAL AI score survives page
   // reloads and re-views NEVER re-spend a daily analysis. 7-day TTL.
   const VMATCH_CACHE_PREFIX = "eamx:matchAI:lapieza:";
+  // Same AI score persisted under the title+company (postingKey) so the matches
+  // panel can show it CROSS-TAB and after reloads. The detail page (where the AI
+  // runs) and the feed (where the panel lives) are SEPARATE content-script
+  // instances — the detail opens in a new tab — so the in-memory bridge alone
+  // can't carry the score between them. This persistent key store can.
+  const VMATCH_KEY_PREFIX = "eamx:matchKey:lapieza:";
   const VMATCH_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
   function loadAIMatchFromStorage(vacId) {
     return new Promise((resolve) => {
@@ -11432,6 +11522,55 @@
   function saveAIMatchToStorage(vacId, result) {
     if (!vacId || !chrome?.storage?.local) return;
     try { chrome.storage.local.set({ [VMATCH_CACHE_PREFIX + vacId]: { result, at: Date.now() } }); } catch (_) {}
+  }
+
+  // Preload every persisted postingKey→AI score into the in-memory bridge so the
+  // matches panel can show AI numbers for vacancies analyzed in ANY tab/session
+  // (within the 7-day TTL). Resolves when done so the caller can render after.
+  function loadAIByKeyFromStorage() {
+    return new Promise((resolve) => {
+      if (!chrome?.storage?.local) { resolve(); return; }
+      try {
+        chrome.storage.local.get(null, (all) => {
+          try {
+            const now = Date.now();
+            for (const key in all) {
+              if (!key || key.indexOf(VMATCH_KEY_PREFIX) !== 0) continue;
+              const e = all[key];
+              if (!e || typeof e.score !== "number") continue;
+              if (now - (e.at || 0) > VMATCH_CACHE_TTL_MS) continue;
+              vacancyMatchAIByKey.set(key.slice(VMATCH_KEY_PREFIX.length), { score: e.score, level: e.level });
+            }
+          } catch (_) {}
+          resolve();
+        });
+      } catch (_) { resolve(); }
+    });
+  }
+
+  // Live cross-tab sync: when the detail tab writes a new AI score, update the
+  // bridge and refresh an open panel so its number flips without a reload.
+  let vmatchKeyListenerAdded = false;
+  function ensureAIByKeyLiveSync() {
+    if (vmatchKeyListenerAdded || !chrome?.storage?.onChanged) return;
+    vmatchKeyListenerAdded = true;
+    try {
+      chrome.storage.onChanged.addListener((changes, area) => {
+        if (area !== "local") return;
+        let touched = false;
+        for (const key in changes) {
+          if (!key || key.indexOf(VMATCH_KEY_PREFIX) !== 0) continue;
+          const e = changes[key] && changes[key].newValue;
+          if (e && typeof e.score === "number") {
+            vacancyMatchAIByKey.set(key.slice(VMATCH_KEY_PREFIX.length), { score: e.score, level: e.level });
+            touched = true;
+          }
+        }
+        if (touched && typeof renderMatchesPanelContent === "function") {
+          try { renderMatchesPanelContent(); } catch (_) {}
+        }
+      });
+    } catch (_) { /* best-effort */ }
   }
 
   function removeVacancyMatchCard() {
@@ -11806,6 +11945,9 @@
       improveTips: Array.isArray(res.improveTips) ? res.improveTips : []
     };
     if (vacId) { vacancyMatchAICache.set(vacId, clean); saveAIMatchToStorage(vacId, clean); }
+    // Bridge this AI score to the panel/listing (same number, not the quick
+    // estimate) and refresh the panel if it's open.
+    noteAIScoreForPanel(job, clean);
     // Pass usage so the "X/10 hoy" indicator shows right after a FRESH analysis
     // (cached re-views below call aiMatchInner WITHOUT usage → no stale count).
     paintVacancyMatchCard(aiMatchInner(clean, res.usage), ctx);
@@ -11852,10 +11994,21 @@
     // fields; the AI analysis uses the whole thing.
     let job = null;
     try { job = extractJob().job; } catch (_) {}
-    if (!job || !job.title || job.title === "(sin título)") {
+    const jobTitle = (job && job.title || "").trim();
+    // The title is "not ready" if it's empty, the placeholder, OR clearly the
+    // page CHROME — on a fresh tab / slow load the detail <h4> hasn't rendered,
+    // so extractJob grabs the nav bar + the user's name instead (live:
+    // "ComunidadVacantesMi perfilSoy empresa…Eduardo Serratos"). A real vacancy
+    // title is short and never contains the nav words. Without catching this we
+    // proceed with a GARBAGE job: it poisons the AI analysis (wrong title) AND
+    // the match-bridge key (company "(empresa desconocida)"), which is why the
+    // panel showed 44% next to the card's 68% for the same vacancy. Retry until
+    // the real title appears.
+    const looksLikeNav = /comunidad\s*vacantes|mi\s*perfil|soy\s*empresa/i.test(jobTitle) || jobTitle.length > 120;
+    if (!job || !jobTitle || jobTitle === "(sin título)" || looksLikeNav) {
       // The JD may not have rendered yet (fresh tab / slow load). Retry a few
       // times before giving up instead of silently never showing the card.
-      if (attempt < 6) {
+      if (attempt < 8) {
         setTimeout(() => { try { renderVacancyMatchCard(attempt + 1); } catch (_) {} }, 1200);
       }
       return;
@@ -11913,7 +12066,9 @@
 
     // 1) Memory cache → instant + stable (same number every reopen).
     if (vacId && vacancyMatchAICache.has(vacId)) {
-      paintVacancyMatchCard(aiMatchInner(vacancyMatchAICache.get(vacId)), ctx);
+      const memo = vacancyMatchAICache.get(vacId);
+      noteAIScoreForPanel(job, memo);
+      paintVacancyMatchCard(aiMatchInner(memo), ctx);
       return;
     }
     // 2) Already analyzing this vacancy → keep the quick score + spinner.
@@ -11928,9 +12083,11 @@
       if (fabMode() !== "vacancy" || vacancyMatchDismissedIds.has(vacId)) return;
       if (stored) {
         vacancyMatchAICache.set(vacId, stored);
+        noteAIScoreForPanel(job, stored);
         paintVacancyMatchCard(aiMatchInner(stored), ctx);
         return;
       }
+
     }
     // 4) Not analyzed yet → show the quick score immediately (so it's never
     //    blank) WHILE the REAL AI auto-runs. The result is what the user wants
